@@ -20,8 +20,8 @@ images = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(fold
 
 # perform sort on copied folder
 for image in images:
-    sub_f_list = dir_dict[image]
-    folder_name = sub_f_list[0]+'/'+sub_f_list[1]+'/'+sub_f_list[2]
+    folder_list = dir_dict[image]
+    folder_name = folder_list[0]+'/'+folder_list[1]+'/'+folder_list[2]
 
     new_path = os.path.join(new_folder, folder_name)
     if not os.path.exists(new_path):
