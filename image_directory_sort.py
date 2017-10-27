@@ -16,7 +16,7 @@ for i in range(len(meta)):
 folder_path = "images"
 new_folder = "sorted_images"
 
-images = [file for file in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, file))]
+images = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
 
 # perform sort on copied folder
 for image in images:
