@@ -11,14 +11,12 @@ for i in range(len(meta)):
     row = meta.loc[i,:]
     dir_dict[row['id']+'.png'] = [row['category'], row['obj'], row['var']]
 
-# make copy of images in new folder
-# original unsorted folder will not be deleted
 folder_path = "images"
 new_folder = "sorted_images"
 
 images = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
 
-# perform sort on copied folder
+# make copies of each image in new folders
 for image in images:
     folder_list = dir_dict[image]
     folder_name = folder_list[0]+'/'+folder_list[1]+'/'+folder_list[2]
