@@ -1,33 +1,31 @@
+import argparse
 import pandas as pd
 import os.path
 import shutil
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--source_dir', type=str, default='images',
+                        help='Directory that the unsorted images are stored in')
+    parser.add_argument('--target_dir', type=str, default='sorted_images',
+                        help='Directory to store the sorted images in')
+    args = parser.parse_args()
+    print("Running with args", args)
 
-# generate dictionary for filename: desired subdirectory
-meta = pd.read_pickle('meta.pkl')
-dir_dict = {}
+    images_metadata = pd.read_pickle('meta.pkl')
 
-for i in range(len(meta)):
-    row = meta.loc[i,:]
-    dir_dict[row['id']+'.png'] = [row['category'], row['obj'], row['var']]
-
-
-# make copies of each image in new folders
-folder_path = "images"
-new_folder = "sorted_images"
-
-images = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
-
-for image in images:
-    folder_list = dir_dict[image]
-    folder_name = folder_list[0]+'/'+folder_list[1]+'/'+folder_list[2]
-
-    new_path = os.path.join(new_folder, folder_name)
-    if not os.path.exists(new_path):
-        os.makedirs(new_path)
-
-    old_image_path = os.path.join(folder_path, image)
-    new_image_path = os.path.join(new_path, image)
-    shutil.copy2(old_image_path, new_image_path)
-
-
+    image_sourcepaths = [os.path.join(args.source_dir, f) for f in os.listdir(args.source_dir) if f.endswith('.png')]
+    for image_sourcepath in image_sourcepaths:
+        # image info
+        image_basename = os.path.basename(image_sourcepath)
+        image_metadata = images_metadata.loc[images_metadata.id == os.path.splitext(image_basename)[0]]
+        assert len(image_metadata) == 1
+        image_metadata = image_metadata.iloc[0]  # get the single cell wrapped in the DataFrame
+        # target directory
+        target_directory_name = os.path.join(image_metadata['category'], image_metadata['obj'], image_metadata['var'])
+        target_directory = os.path.join(args.target_dir, target_directory_name)
+        if not os.path.isdir(target_directory):
+            os.makedirs(target_directory)
+        # copy
+        target_image_path = os.path.join(target_directory, os.path.basename(image_sourcepath))
+        shutil.copy2(image_sourcepath, target_image_path)
