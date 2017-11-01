@@ -4,11 +4,10 @@ import pickle
 from glob import iglob
 
 import numpy as np
-from keras import backend as K
-from keras.preprocessing import image
 
 
 def load_image(image_filepath, image_size):
+    from keras.preprocessing import image
     img = image.load_img(image_filepath, target_size=(image_size, image_size))
     x = image.img_to_array(img)
     x = np.expand_dims(x, axis=0)
@@ -16,28 +15,19 @@ def load_image(image_filepath, image_size):
 
 
 def save(image_activations, target_filepath):
+    print("Saving to %s" % target_filepath)
     with open(target_filepath + '.pkl', 'wb') as file:
         pickle.dump(image_activations, file)
 
 
-def use_model_layer(model, layer_name):
-    if layer_name is None:
-        return model
-    last_layer_index = [layer.name for layer in model.layers].index(layer_name)
-    for _ in range(len(model.layers) - last_layer_index - 1):
-        model.layers.pop()
-    model.outputs = [model.layers[-1].output]
-    model.layers[-1].outbound_nodes = []
-    return model
-
-
-def get_model_outputs(model, x):
+def get_model_outputs(model, x, layer_names):
+    from keras import backend as K
     inp = model.input  # input placeholder
-    outputs = [layer.output for layer in model.layers]  # all layer outputs
+    selected_layers = [layer for layer in model.layers if layer.name in layer_names]
+    outputs = [layer.output for layer in selected_layers]
     functor = K.function([inp] + [K.learning_phase()], outputs)  # evaluation function
     layer_outs = functor([x, 0.])  # 1.: training, 0.: test
-    assert (model.predict(x) == layer_outs[-1]).all()
-    return list(zip([layer.name for layer in model.layers], layer_outs))
+    return list(zip([layer.name for layer in selected_layers], layer_outs))
 
 
 def densenet(image_size):
@@ -66,24 +56,27 @@ def main():
         'squeezenet': squeezenet
     }
     parser = argparse.ArgumentParser('model comparison')
-    parser.add_argument('--model', type=str, choices=[models.keys()], default='densenet')
-    parser.add_argument('--layer', type=str, default=None)
+    parser.add_argument('--model', type=str, choices=list(models.keys()), default='squeezenet')
+    parser.add_argument('--layers', nargs='+', default=None)
     parser.add_argument('--image_size', type=int, default=224)
     parser.add_argument('--images_directory', type=str,
                         default=os.path.join(os.path.dirname(__file__), 'images', 'sorted', 'Chairs'))
     args = parser.parse_args()
     print("Running with args", args)
+
     model, preprocess_input = models[args.model](args.image_size)
-    model = use_model_layer(model, args.layer)
     model.summary()
+    assert all([layer in [l.name for l in model.layers] for layer in args.layers])
+
     Y = {}
     image_filepaths = iglob(os.path.join(args.images_directory, '**', '*.png'), recursive=True)
     for image_filepath in image_filepaths:
+        print(image_filepath)
         x = load_image(image_filepath, args.image_size)
         x = preprocess_input(x)
-        outputs = get_model_outputs(model, x)
+        outputs = get_model_outputs(model, x, args.layers)
         Y[os.path.relpath(image_filepath, args.images_directory)] = outputs
-    save(Y, os.path.join(args.images_directory, 'activations'))
+    save(Y, os.path.join(args.images_directory, '%s-activations' % args.model))
 
 
 if __name__ == '__main__':
