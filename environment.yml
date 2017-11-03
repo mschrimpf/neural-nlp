@@ -7,5 +7,6 @@ dependencies:
   - keras
   - h5py
   - pip:
+    - sklearn
 #    - git+https://github.com/mschrimpf/DenseNet.git  # cannot be installed automatically because of missing setup.py. Instead, clone and copy manually to site-packages.
     - keras_squeezenet
