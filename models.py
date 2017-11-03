@@ -1,9 +1,11 @@
 import argparse
 import os
-import pickle
+from collections import OrderedDict
 from glob import iglob
 
 import numpy as np
+
+from utils import save
 
 
 def load_image(image_filepath, image_size):
@@ -14,12 +16,6 @@ def load_image(image_filepath, image_size):
     return x
 
 
-def save(image_activations, target_filepath):
-    print("Saving to %s" % target_filepath)
-    with open(target_filepath + '.pkl', 'wb') as file:
-        pickle.dump(image_activations, file)
-
-
 def get_model_outputs(model, x, layer_names):
     from keras import backend as K
     inp = model.input  # input placeholder
@@ -27,7 +23,10 @@ def get_model_outputs(model, x, layer_names):
     outputs = [layer.output for layer in selected_layers]
     functor = K.function([inp] + [K.learning_phase()], outputs)  # evaluation function
     layer_outs = functor([x, 0.])  # 1.: training, 0.: test
-    return list(zip([layer.name for layer in selected_layers], layer_outs))
+    layer_results = OrderedDict()
+    for layer, outs in zip(selected_layers, layer_outs):
+        layer_results[layer.name] = outs
+    return layer_results
 
 
 def densenet(image_size):
