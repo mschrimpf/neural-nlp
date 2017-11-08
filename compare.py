@@ -28,7 +28,6 @@ def main():
     hvm = mkgu.get_assembly(name="HvM")
     hvm = hvm.sel(region=args.region).sel(var=args.variance)
     hvm.load()
-    hvm = hvm.groupby('id').mean(dim='presentation').squeeze("time_bin")
 
     # model data
     image_activations = load_image_activations(args.activations_filepath)
@@ -44,6 +43,7 @@ def main():
             layer_object_activations[layer][obj[0]][image_id] = image_activations.flatten()
 
     # compare
+    hvm = hvm.groupby('id').mean(dim='presentation').squeeze("time_bin")
     layer_metrics = {}
     for layer, object_activations in layer_object_activations.items():
         print('Layer %s' % layer)
@@ -58,14 +58,13 @@ def main():
                 neural_responses.append(neural_image_responses)  # spike count, averaged over multiple presentations
 
                 objects.append(obj)
-        # fit all neuroids separately
-        layer_neuroid_metrics = {}
-        for neuroid in neural_responses[0].neuroid:
-            neuroid_responses = [object_responses.sel(neuroid=neuroid).data for object_responses in neural_responses]
-            layer_neuroid_metrics[neuroid] = compare(np.array(layer_activations), np.array(neuroid_responses), objects)
-        layer_metrics[layer] = np.median(list(layer_neuroid_metrics.values()))
+        # fit all neuroids jointly
+        layer_activations = np.array(layer_activations)
+        neural_responses = np.array([n.data for n in neural_responses])
+        layer_metrics[layer] = compare(layer_activations, neural_responses, objects)
         print("%s -> %f" % (layer, layer_metrics[layer]))
-    save(layer_metrics, args.activations_filepath.replace('.pkl', '-correlations.pkl'))
+
+    save({'args': args, 'layer_metrics': layer_metrics}, args.activations_filepath.replace('.pkl', '-correlations.pkl'))
 
 
 def compare(layer_activations, neural_responses, object_labels, splits=10, max_components=200, test_size=.25):
@@ -77,9 +76,9 @@ def compare(layer_activations, neural_responses, object_labels, splits=10, max_c
         reg = PLSRegression(n_components=25, scale=False)
         reg.fit(layer_activations[train_idx], neural_responses[train_idx])
         pred = reg.predict(layer_activations[test_idx])
-        rs = pearsonr_matrix(np.expand_dims(neural_responses[test_idx], 1), pred)
-        correlations.append(rs)
-    return np.mean(correlations)  # TODO: mean here?
+        rs = pearsonr_matrix(neural_responses[test_idx], pred)
+        correlations.append(np.median(rs))  # median across neuroids
+    return np.mean(correlations)  # mean across splits
 
 
 def pearsonr_matrix(data1, data2, axis=1):
