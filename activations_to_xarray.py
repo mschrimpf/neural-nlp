@@ -12,7 +12,6 @@ def main():
                         default=os.path.join(os.path.dirname(__file__), 'images', 'sorted',
                                              'squeezenet-activations.pkl'))
     parser.add_argument('--pcs', type=int, default=200)
-    parser.add_argument('--variance', type=str, default='V6')
     args = parser.parse_args()
     print("Running with args", args)
 
@@ -24,7 +23,7 @@ def main():
         data_dict = model_data[image_data]
         data = list(data_dict.values())
         layers = list(data_dict.keys())
-        princomps = range(1, 201)
+        princomps = range(1, args.pcs + 1)
         x_xrarray = xr.DataArray(data, coords=[layers, princomps],
                                  dims=['layer', 'princomp'])
         array_list.append(x_xrarray)
