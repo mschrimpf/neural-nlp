@@ -39,6 +39,12 @@ def vgg16(image_size):
     return model, preprocess_input
 
 
+def mobilenet(image_size):
+    from keras.applications.mobilenet import MobileNet, preprocess_input
+    model = MobileNet(weights='imagenet', input_shape=(image_size, image_size, 3))
+    return model, preprocess_input
+
+
 def marrnet(image_size):
     from marrnet import MarrNet, preprocess
     model = MarrNet()
@@ -55,6 +61,7 @@ def main():
         'vgg16': vgg16,
         'densenet': densenet,
         'squeezenet': squeezenet,
+        'mobilenet': mobilenet,
         'marrnet': marrnet
     }
     parser = argparse.ArgumentParser('model comparison')
