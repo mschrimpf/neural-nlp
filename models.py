@@ -1,4 +1,5 @@
 import argparse
+import copy
 import functools
 import logging
 import os
@@ -64,6 +65,7 @@ def main():
     parser.add_argument('--image_size', type=int, default=224)
     parser.add_argument('--images_directory', type=str,
                         default=os.path.join(os.path.dirname(__file__), 'images', 'sorted'))
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
     log_level = logging.getLevelName(args.log_level)
@@ -83,7 +85,7 @@ def main():
 
     # output
     logger.debug('Computing activations')
-    layer_outputs = get_model_outputs(model, images, args.layers, pca_components=args.pca)
+    layer_outputs = get_model_outputs(model, images, args.layers, batch_size=args.batch_size, pca_components=args.pca)
     Y = {}
     for i, image_filepath in enumerate(image_filepaths):
         image_relpath = os.path.relpath(image_filepath, args.images_directory)
@@ -155,13 +157,33 @@ def load_image_keras(image_filepath, image_size):
     return x
 
 
-def get_model_outputs(model, x, layer_names, pca_components=None):
+def get_model_outputs(model, x, layer_names, batch_size=None, pca_components=None):
     logger.info('Computing layer outputs')
     model_type = get_model_type(model)
     compute_layer_outputs = {ModelType.KERAS: compute_layer_outputs_keras,
                              ModelType.PYTORCH: compute_layer_outputs_pytorch}[model_type]
-    return compute_layer_outputs(layer_names, model, x,
-                                 functools.partial(arrange_layer_output, pca_components=pca_components))
+    if batch_size is None or not (0 < batch_size < len(x)):
+        logger.debug("Computing all outputs at once")
+        return compute_layer_outputs(layer_names, model, x,
+                                     functools.partial(arrange_layer_output, pca_components=pca_components))
+
+    outputs = None
+    batch_start = 0
+    while batch_start < len(x):
+        batch_end = min(batch_start + batch_size, len(x))
+        logger.debug('Batch: %d->%d/%d', batch_start, batch_end, len(x))
+        batch = x[batch_start:batch_end]
+        batch_output = compute_layer_outputs(layer_names, model, batch)
+        if outputs is None:
+            outputs = copy.copy(batch_output)
+        else:
+            for layer_name, layer_output in batch_output.items():
+                outputs[layer_name] = np.concatenate((outputs[layer_name], layer_output))
+        batch_start = batch_end
+    for layer_name, layer_output in outputs.items():
+        logger.debug('Arranging layer output %s (shape %s)', layer_name, str(layer_output.shape))
+        outputs[layer_name] = arrange_layer_output(layer_output, pca_components=pca_components)
+    return outputs
 
 
 def compute_layer_outputs_keras(layer_names, model, x, arrange_output=lambda x: x):
@@ -189,13 +211,16 @@ def compute_layer_outputs_pytorch(layer_names, model, x, arrange_output=lambda x
 
     for layer_name in layer_names:
         layer = walk_pytorch_module(model, layer_name)
-        layer.register_forward_hook(lambda _layer, _input, output: store_layer_output(layer_name, output))
+        layer.register_forward_hook(lambda _layer, _input, output, name=layer_name: store_layer_output(name, output))
     model(x)
     return layer_results
 
 
 def arrange_layer_output(layer_output, pca_components):
-    if pca_components is not None and np.prod(layer_output.shape[1:]) > pca_components:
+    if pca_components is not None and 0 < pca_components < np.prod(layer_output.shape[1:]):
+        assert layer_output.shape[0] >= pca_components, \
+            "output has %d components but must have more than %d PCA components" % (
+                layer_output.shape[0], pca_components)
         layer_output = layer_output.reshape(layer_output.shape[0], -1)
         layer_output = PCA(n_components=pca_components).fit_transform(layer_output)
     return layer_output
