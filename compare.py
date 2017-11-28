@@ -1,8 +1,9 @@
 import argparse
+import logging
 import os
 import pickle
-import warnings
-from collections import defaultdict
+import sys
+from collections import defaultdict, OrderedDict
 
 import mkgu
 import numpy as np
@@ -10,8 +11,11 @@ import scipy.stats
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.decomposition import PCA
 from sklearn.model_selection import StratifiedShuffleSplit
+from xarray import Dataset, DataArray
 
 from utils import save
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -21,8 +25,12 @@ def main():
                                              'vgg16-activations.pkl'))
     parser.add_argument('--region', type=str, default='IT')
     parser.add_argument('--variance', type=str, default='V6')
+    parser.add_argument('--ignore_layers', type=str, nargs='+', default=[])
+    parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
-    print("Running with args", args)
+    log_level = logging.getLevelName(args.log_level)
+    logging.basicConfig(stream=sys.stdout, level=log_level)
+    logger.info("Running with args %s", vars(args))
 
     # neural data
     hvm = mkgu.get_assembly(name="HvM")
@@ -30,23 +38,17 @@ def main():
     hvm.load()
 
     # model data
-    image_activations = load_image_activations(args.activations_filepath)
-    layer_object_activations = defaultdict(lambda: defaultdict(dict))
-    for image_path, layer_activations in image_activations.items():
-        image_id = get_id_from_image_path(image_path)
-        if image_id not in hvm.id.values:
-            warnings.warn("Image %s not found in neural recordings" % image_path)
-            continue
-        obj = np.unique(hvm.sel(id=image_id).obj.data)
-        assert len(obj) == 1
-        for layer, image_activations in layer_activations.items():
-            layer_object_activations[layer][obj[0]][image_id] = image_activations.flatten()
+    image_activations = load_image_activations(args.activations_filepath)['activations']
+    layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, hvm)
 
     # compare
     hvm = hvm.groupby('id').mean(dim='presentation').squeeze("time_bin")
-    layer_metrics = {}
+    layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
     for layer, object_activations in layer_object_activations.items():
-        print('Layer %s' % layer)
+        if layer in args.ignore_layers:
+            logger.debug('Ignoring layer %s', layer)
+            continue
+        logger.debug('Layer %s' % layer)
         layer_activations = []
         neural_responses = []
         objects = []
@@ -61,24 +63,80 @@ def main():
         # fit all neuroids jointly
         layer_activations = np.array(layer_activations)
         neural_responses = np.array([n.data for n in neural_responses])
-        layer_metrics[layer] = compare(layer_activations, neural_responses, objects)
-        print("%s -> %f" % (layer, layer_metrics[layer]))
+        cross_predictions = split_predict(layer_activations, neural_responses, objects)
+        layer_predictions[layer] = cross_predictions
+        layer_metrics[layer] = correlate(cross_predictions)
+        mean, std = layer_correlation_meanstd(layer_metrics[layer])
+        logger.info("%s -> %f+-%f" % (layer, mean, std))
 
-    save({'args': args, 'layer_metrics': layer_metrics}, args.activations_filepath.replace('.pkl', '-correlations.pkl'))
+    savepath = args.activations_filepath.replace('.pkl', '-correlations-region_%s-variance_%s.pkl' % (
+        args.region, args.variance))
+    logger.debug('Saving to %s', savepath)
+    save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
 
 
-def compare(layer_activations, neural_responses, object_labels, splits=10, max_components=200, test_size=.25):
-    if layer_activations.shape[1] > max_components:
-        layer_activations = PCA(n_components=max_components).fit_transform(layer_activations)
-    cross_validation = StratifiedShuffleSplit(n_splits=splits, test_size=test_size)
-    correlations = []
-    for it, (train_idx, test_idx) in enumerate(cross_validation.split(layer_activations, object_labels)):
+def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
+    layer_object_activations = defaultdict(lambda: defaultdict(dict))
+    missing_hvm_image_paths = []
+    for image_path, layer_activations in image_activations.items():
+        image_id = get_id_from_image_path(image_path)
+        if image_id not in hvm.id.values:
+            missing_hvm_image_paths.append(image_path)
+            continue
+        obj = np.unique(hvm.sel(id=image_id).obj.data)
+        assert len(obj) == 1
+        for layer, image_activations in layer_activations.items():
+            layer_object_activations[layer][obj[0]][image_id] = image_activations.flatten()
+    if len(missing_hvm_image_paths) > 0:
+        missing_paths = ", ".join(missing_hvm_image_paths)
+        if len(missing_paths) > 300:
+            missing_paths = missing_paths[:300] + "..."
+        logger.warning("%d images not found in neural recordings: %s", len(missing_hvm_image_paths), missing_paths)
+    return layer_object_activations
+
+
+def split_predict(source_responses, target_responses, object_labels, num_splits=10, max_components=200, test_size=.25):
+    if source_responses.shape[1] > max_components:
+        source_responses = PCA(n_components=max_components).fit_transform(source_responses)
+    cross_validation = StratifiedShuffleSplit(n_splits=num_splits, test_size=test_size)
+    results = []
+    for split_iterator, (train_idx, test_idx) in enumerate(cross_validation.split(source_responses, object_labels)):
+        logger.debug('Fitting split %d/%d', split_iterator, num_splits)
         reg = PLSRegression(n_components=25, scale=False)
-        reg.fit(layer_activations[train_idx], neural_responses[train_idx])
-        pred = reg.predict(layer_activations[test_idx])
-        rs = pearsonr_matrix(neural_responses[test_idx], pred)
-        correlations.append(np.median(rs))  # median across neuroids
-    return np.mean(correlations)  # mean across splits
+        reg.fit(source_responses[train_idx], target_responses[train_idx])
+        predicted_responses = reg.predict(source_responses[test_idx])
+        results.append(Dataset({'source': (['index', 'source_dim'], source_responses[test_idx]),
+                                'prediction': (['index', 'neuroid'], predicted_responses),
+                                'target': (['index', 'neuroid'], target_responses[test_idx])},
+                               coords={'index': test_idx, 'neuroid': range(target_responses.shape[1]),
+                                       'source_dim': range(source_responses.shape[1]),
+                                       'split': split_iterator}))
+    return results
+
+
+def correlate(fitted_responses):
+    correlations = []
+    for split_data in fitted_responses:
+        split = np.unique(split_data.split.data)
+        logger.debug('Correlating split %d/%d', split, len(fitted_responses))
+        rs = pearsonr_matrix(split_data.target.data, split_data.prediction.data)
+        correlations.append(DataArray(rs, coords={'neuroid': split_data.neuroid},
+                                      attrs={'index': split_data.index, 'split': split}))
+    return correlations
+
+
+def layer_correlation_meanstd(correlations):
+    neuroid_medians = [np.median(correlation.data) for correlation in correlations]
+    return np.mean(neuroid_medians), np.std(neuroid_medians)
+
+
+def layers_correlation_meanstd(layers_correlations):
+    means, stds = [], []
+    for layer_correlation in layers_correlations.values():
+        mean, std = layer_correlation_meanstd(layer_correlation)
+        means.append(mean)
+        stds.append(std)
+    return means, stds
 
 
 def pearsonr_matrix(data1, data2, axis=1):
