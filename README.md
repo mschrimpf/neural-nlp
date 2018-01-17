@@ -1,7 +1,7 @@
 # Neural Correlations between deep neural nets and cortex
 Evaluate how well your model correlates with neural data 
 (retrieved from [mkgu](https://github.com/dicarlolab/mkgu): macaque monkey cortex, areas V4 and IT).
-See [here](plot.ipynb) for the results of some models.
+See [here](model_neural_correlations.ipynb) for the results of some models.
 
 ## Installation
 First, install [mkgu](https://github.com/dicarlolab/mkgu)
@@ -12,6 +12,7 @@ First, install [mkgu](https://github.com/dicarlolab/mkgu)
 Next, install all other dependencies using:
 ```bash
 conda env create -f environment.yml
+source activate neural-correlations
 ```
 
 Finally, retrieve the images:
