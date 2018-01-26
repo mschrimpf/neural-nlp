@@ -120,7 +120,7 @@ def correlate(fitted_responses):
         split = np.unique(split_data.split.data)
         logger.debug('Correlating split %d/%d', split, len(fitted_responses))
         rs = pearsonr_matrix(split_data.target.data, split_data.prediction.data)
-        correlations.append(DataArray(rs, coords={'neuroid': split_data.neuroid},
+        correlations.append(DataArray(rs, dims=['neuroid'], coords={'neuroid': split_data.neuroid},
                                       attrs={'index': split_data.index, 'split': split}))
     return correlations
 
