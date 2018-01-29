@@ -1,4 +1,4 @@
-name: neural-correlations
+name: neural-metrics
 channels:
 - defaults
 - anaconda

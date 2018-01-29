@@ -1,5 +1,5 @@
-# Neural Correlations between deep neural nets and cortex
-Evaluate how well your model correlates with neural data 
+# Neural Metrics to compare deep neural nets and cortex
+Evaluate how well your model predicts neural data 
 (retrieved from [mkgu](https://github.com/dicarlolab/mkgu): macaque monkey cortex, areas V4 and IT).
 See [here](model_neural_correlations.ipynb) for the results of some models.
 
@@ -12,7 +12,7 @@ First, install [mkgu](https://github.com/dicarlolab/mkgu)
 Next, install all other dependencies using:
 ```bash
 conda env create -f environment.yml
-source activate neural-correlations
+conda activate neural-metrics
 ```
 
 Finally, retrieve the images:
@@ -29,8 +29,8 @@ python models.py --model vgg16 \
 ```
 This will give you a file `images/sorted/vgg16-activations.pkl` with activations for each layer and image.
 
-Next, compute the model-cortex correlations:
+Next, compute the model-cortex metrics:
 ```bash
 python compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region IT
 ```
-This will output the correlations between every layer and the neural data.
+This will output the metrics for every layer compared to the neural data.

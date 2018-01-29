@@ -15,7 +15,7 @@ from PIL import Image
 from sklearn.decomposition import PCA
 from torch.autograd import Variable
 
-from utils import save
+from neural_metrics.utils import save
 
 PYTORCH_SUBMODULE_SEPARATOR = '.'
 
