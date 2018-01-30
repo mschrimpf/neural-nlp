@@ -23,13 +23,20 @@ Finally, retrieve the images:
 ## Usage
 Compute model activations (features):
 ```bash
-python models.py --model vgg16 \
+PYTHONPATH=. python neural_metrics/models.py --model vgg16 \
   --layers block1_pool block2_pool block3_pool block4_pool block5_pool fc1 fc2
 ```
 This will give you a file `images/sorted/vgg16-activations.pkl` with activations for each layer and image.
 
 Next, compute the model-cortex metrics:
 ```bash
-python compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region IT
+PYTHONPATH=. python neural_metrics/compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region IT
 ```
 This will output the metrics for every layer compared to the neural data.
+
+Finally, plot the results:
+```bash
+PYTHONPATH=. python neural_metrics/plot.py --correlations_filepaths \
+  images/sorted/vgg16-activations-correlations-region_V4-variance_V6.pkl \
+  images/sorted/vgg16-activations-correlations-region_IT-variance_V6.pkl
+```

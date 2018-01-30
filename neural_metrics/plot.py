@@ -1,9 +1,14 @@
+import argparse
+import logging
 import pickle
+import sys
 from collections import OrderedDict, Iterable
 
 from matplotlib import pyplot
 
 from neural_metrics.compare import layers_correlation_meanstd
+
+logger = logging.getLogger(__name__)
 
 
 def plot_layer_correlations(filepaths, reverse=False):
@@ -21,3 +26,18 @@ def plot_layer_correlations(filepaths, reverse=False):
         pyplot.errorbar(x, means, yerr=stds, label='%s %s' % (args.region, args.variance))
         pyplot.xticks(x, layer_metrics.keys(), rotation='vertical')
     pyplot.legend()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--log_level', type=str, default='INFO')
+    parser.add_argument('--correlations_filepaths', type=str, nargs='+', required=True)
+
+    args = parser.parse_args()
+    logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
+    logger.info("Running with args %s", vars(args))
+    plot_layer_correlations(args.correlations_filepaths)
+
+
+if __name__ == '__main__':
+    main()
