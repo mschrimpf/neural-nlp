@@ -30,6 +30,7 @@ This will give you a file `images/sorted/vgg16-activations.pkl` with activations
 
 Next, compute the model-cortex metrics:
 ```bash
+PYTHONPATH=. python neural_metrics/compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region V4
 PYTHONPATH=. python neural_metrics/compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region IT
 ```
 This will output the metrics for every layer compared to the neural data.
