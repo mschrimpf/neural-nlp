@@ -1,24 +1,23 @@
 # Neural Metrics to compare deep neural nets and cortex
 Evaluate how well your model predicts neural data 
 (retrieved from [mkgu](https://github.com/dicarlolab/mkgu): macaque monkey cortex, areas V4 and IT).
-See [here](model_neural_correlations.ipynb) for the results of some models.
+See [here](results/models_neuralfit.ipynb) for the results of some models.
 
 ## Installation
-First, install [mkgu](https://github.com/dicarlolab/mkgu)
-1. install mkgu: `python setup.py install` (you might have to install its dependencies by hand first using conda/pip)
-2. as a workaround to [an issue](https://github.com/dicarlolab/mkgu/issues/16), copy `mkgu/mkgu/lookup.db` to `site-packages/mkgu-0.1.0-py3.6.egg/mkgu`.
-3. configure AWS credentials: using awscli `aws configure` (options e.g. region `us-east-1`, format `json`)
-
-Next, install all other dependencies using:
+Install dependencies with conda:
 ```bash
 conda env create -f environment.yml
 conda activate neural-metrics
 ```
 
+Configure AWS credentials in order to retrieve the neural data: 
+using awscli `aws configure` (options e.g. region `us-east-1`, format `json`).
+[Chris Shay](cshay@mit.edu) can get you access.
+
 Finally, retrieve the images:
-1. ask Jonas Kubilius or Jon-Prescott Roy for the unsorted images, identified by a hash as their filename
+1. ask [Martin Schrimpf](msch@mit.edu) for the unsorted images, identified by a hash as their filename
 2. put the images in the directory `images/unsorted`
-3. in the subdirectory `images`, run `python image_directory_sort.py`. This will sort all the images by category, object id and variance into the directory `images/sorted`
+3. in the subdirectory `images`, run `python image_directory_sort.py`. This will sort all the images by category, object id and variance into the directory `images/sorted`.
 
 
 ## Usage

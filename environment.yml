@@ -12,6 +12,7 @@ dependencies:
   - scikit-learn
   - matplotlib
   - pip:
+    - git+https://github.com/dicarlolab/mkgu
     - git+https://github.com/mschrimpf/DenseNet.git
     - git+https://github.com/rcmalli/keras-squeezenet.git
     - pillow
