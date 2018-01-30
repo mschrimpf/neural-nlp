@@ -19,15 +19,18 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--activations_filepath', type=str,
-                        default=os.path.join(os.path.dirname(__file__), 'images', 'sorted', 'Chairs',
+                        default=os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted', 'Chairs',
                                              'vgg16-activations.pkl'))
-    parser.add_argument('--region', type=str, default='IT')
-    parser.add_argument('--variance', type=str, default='V6')
+
+    parser.add_argument('--output_directory', type=str, default=None, help='directory to save results to')
+    parser.add_argument('--region', type=str, default='IT', help='region in brain to compare to')
+    parser.add_argument('--variance', type=str, default='V6', help='type of images to compare to')
     parser.add_argument('--ignore_layers', type=str, nargs='+', default=[])
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
+    args.output_directory = args.output_directory or os.path.dirname(args.activations_filepath)
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
     logger.info("Running with args %s", vars(args))
@@ -69,8 +72,9 @@ def main():
         mean, std = layer_correlation_meanstd(layer_metrics[layer])
         logger.info("%s -> %f+-%f" % (layer, mean, std))
 
-    savepath = args.activations_filepath.replace('.pkl', '-correlations-region_%s-variance_%s.pkl' % (
-        args.region, args.variance))
+    [save_name, save_ext] = os.path.splitext(os.path.basename(args.activations_filepath))
+    savepath = os.path.join(args.output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
+        args.region, args.variance, save_ext))
     logger.debug('Saving to %s', savepath)
     save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
 
