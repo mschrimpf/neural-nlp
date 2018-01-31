@@ -20,63 +20,65 @@ logger = logging.getLogger(__name__)
 
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--activations_filepath', type=str,
-                        default=os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted', 'Chairs',
-                                             'vgg16-activations.pkl'))
-
-    parser.add_argument('--output_directory', type=str, default=None, help='directory to save results to')
+    parser.add_argument('--activations_filepath', type=str, nargs='+',
+                        default=[os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted', 'Chairs',
+                                              'vgg16-activations.pkl')],
+                        help='one or more filepaths to the model activations')
+    parser.add_argument('--output_directory', type=str, default=None,
+                        help='directory to save results to. directory of activations_filepath if None')
     parser.add_argument('--region', type=str, default='IT', help='region in brain to compare to')
     parser.add_argument('--variance', type=str, default='V6', help='type of images to compare to')
     parser.add_argument('--ignore_layers', type=str, nargs='+', default=[])
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
-    args.output_directory = args.output_directory or os.path.dirname(args.activations_filepath)
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
     logger.info("Running with args %s", vars(args))
 
     # neural data
-    hvm = mkgu.get_assembly(name="HvM")
-    hvm = hvm.sel(region=args.region).sel(var=args.variance)
-    hvm.load()
+    raw_data = mkgu.get_assembly(name="HvM")
+    raw_data = raw_data.sel(region=args.region).sel(var=args.variance)
+    raw_data.load()
+    standardized_data = raw_data.groupby('id').mean(dim='presentation').squeeze("time_bin")
 
-    # model data
-    image_activations = load_image_activations(args.activations_filepath)['activations']
-    layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, hvm)
+    for activations_filepath in args.activations_filepath:
+        # model data
+        image_activations = load_image_activations(activations_filepath)['activations']
+        layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
 
-    # compare
-    hvm = hvm.groupby('id').mean(dim='presentation').squeeze("time_bin")
-    layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
-    for layer, object_activations in layer_object_activations.items():
-        if layer in args.ignore_layers:
-            logger.debug('Ignoring layer %s', layer)
-            continue
-        logger.debug('Layer %s' % layer)
-        layer_activations = []
-        neural_responses = []
-        objects = []
-        for obj, image_activations in object_activations.items():
-            for image_id, image_activation in image_activations.items():
-                layer_activations.append(image_activation)
+        # compare
+        layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
+        for layer, object_activations in layer_object_activations.items():
+            if layer in args.ignore_layers:
+                logger.debug('Ignoring layer %s', layer)
+                continue
+            logger.debug('Layer %s' % layer)
+            layer_activations = []
+            neural_responses = []
+            objects = []
+            for obj, image_activations in object_activations.items():
+                for image_id, image_activation in image_activations.items():
+                    layer_activations.append(image_activation)
 
-                neural_image_responses = hvm.sel(id=image_id)
-                neural_responses.append(neural_image_responses)  # spike count, averaged over multiple presentations
+                    neural_image_responses = standardized_data.sel(id=image_id)
+                    neural_responses.append(neural_image_responses)  # spike count, averaged over multiple presentations
 
-                objects.append(obj)
-        # fit all neuroids jointly
-        layer_activations = np.array(layer_activations)
-        neural_responses = np.array([n.data for n in neural_responses])
-        cross_predictions = split_predict(layer_activations, neural_responses, objects)
-        layer_predictions[layer] = cross_predictions
-        layer_metrics[layer] = correlate(cross_predictions)
-        mean, std = layer_correlation_meanstd(layer_metrics[layer])
-        logger.info("%s -> %f+-%f" % (layer, mean, std))
+                    objects.append(obj)
+            # fit all neuroids jointly
+            layer_activations = np.array(layer_activations)
+            neural_responses = np.array([n.data for n in neural_responses])
+            cross_predictions = split_predict(layer_activations, neural_responses, objects)
+            layer_predictions[layer] = cross_predictions
+            layer_metrics[layer] = correlate(cross_predictions)
+            mean, std = layer_correlation_meanstd(layer_metrics[layer])
+            logger.info("%s -> %f+-%f" % (layer, mean, std))
 
-    [save_name, save_ext] = os.path.splitext(os.path.basename(args.activations_filepath))
-    savepath = os.path.join(args.output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
-        args.region, args.variance, save_ext))
-    logger.debug('Saving to %s', savepath)
-    save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
+        [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
+        output_directory = args.output_directory or os.path.dirname(activations_filepath)
+        savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
+            args.region, args.variance, save_ext))
+        logger.debug('Saving to %s', savepath)
+        save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
 
 
 def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
