@@ -42,43 +42,48 @@ def main():
     standardized_data = raw_data.groupby('id').mean(dim='presentation').squeeze("time_bin")
 
     for activations_filepath in args.activations_filepath:
-        # model data
-        image_activations = load_image_activations(activations_filepath)['activations']
-        layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
+        logger.info("Processing {}".format(activations_filepath))
+        try:
+            # model data
+            image_activations = load_image_activations(activations_filepath)['activations']
+            layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
 
-        # compare
-        layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
-        for layer, object_activations in layer_object_activations.items():
-            if layer in args.ignore_layers:
-                logger.debug('Ignoring layer %s', layer)
-                continue
-            logger.debug('Layer %s' % layer)
-            layer_activations = []
-            neural_responses = []
-            objects = []
-            for obj, image_activations in object_activations.items():
-                for image_id, image_activation in image_activations.items():
-                    layer_activations.append(image_activation)
+            # compare
+            layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
+            for layer, object_activations in layer_object_activations.items():
+                if layer in args.ignore_layers:
+                    logger.debug('Ignoring layer {}'.format(layer))
+                    continue
+                logger.debug('Layer {}'.format(layer))
+                layer_activations = []
+                neural_responses = []
+                objects = []
+                for obj, image_activations in object_activations.items():
+                    for image_id, image_activation in image_activations.items():
+                        layer_activations.append(image_activation)
 
-                    neural_image_responses = standardized_data.sel(id=image_id)
-                    neural_responses.append(neural_image_responses)  # spike count, averaged over multiple presentations
+                        # spike count, averaged over multiple presentations
+                        neural_image_responses = standardized_data.sel(id=image_id)
+                        neural_responses.append(neural_image_responses)
 
-                    objects.append(obj)
-            # fit all neuroids jointly
-            layer_activations = np.array(layer_activations)
-            neural_responses = np.array([n.data for n in neural_responses])
-            cross_predictions = split_predict(layer_activations, neural_responses, objects)
-            layer_predictions[layer] = cross_predictions
-            layer_metrics[layer] = correlate(cross_predictions)
-            mean, std = layer_correlation_meanstd(layer_metrics[layer])
-            logger.info("%s -> %f+-%f" % (layer, mean, std))
+                        objects.append(obj)
+                # fit all neuroids jointly
+                layer_activations = np.array(layer_activations)
+                neural_responses = np.array([n.data for n in neural_responses])
+                cross_predictions = split_predict(layer_activations, neural_responses, objects)
+                layer_predictions[layer] = cross_predictions
+                layer_metrics[layer] = correlate(cross_predictions)
+                mean, std = layer_correlation_meanstd(layer_metrics[layer])
+                logger.info("{} -> {}+-{}".format(layer, mean, std))
 
-        [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
-        output_directory = args.output_directory or os.path.dirname(activations_filepath)
-        savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
-            args.region, args.variance, save_ext))
-        logger.debug('Saving to %s', savepath)
-        save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
+            [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
+            output_directory = args.output_directory or os.path.dirname(activations_filepath)
+            savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
+                args.region, args.variance, save_ext))
+            logger.debug('Saving to {}'.format( savepath))
+            save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
+        except Exception:
+            logger.exception("Error during {}".format(activations_filepath))
 
 
 def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
@@ -97,7 +102,8 @@ def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
         missing_paths = ", ".join(missing_hvm_image_paths)
         if len(missing_paths) > 300:
             missing_paths = missing_paths[:300] + "..."
-        logger.warning("%d images not found in neural recordings: %s", len(missing_hvm_image_paths), missing_paths)
+        logger.warning("{} images not found in neural recordings: {}"
+                       .format(len(missing_hvm_image_paths), missing_paths))
     return layer_object_activations
 
 
@@ -107,7 +113,7 @@ def split_predict(source_responses, target_responses, object_labels, num_splits=
     cross_validation = StratifiedShuffleSplit(n_splits=num_splits, test_size=test_size)
     results = []
     for split_iterator, (train_idx, test_idx) in enumerate(cross_validation.split(source_responses, object_labels)):
-        logger.debug('Fitting split %d/%d', split_iterator, num_splits)
+        logger.debug('Fitting split {}/{}'.format(split_iterator, num_splits))
         reg = PLSRegression(n_components=25, scale=False)
         reg.fit(source_responses[train_idx], target_responses[train_idx])
         predicted_responses = reg.predict(source_responses[test_idx])
@@ -124,7 +130,7 @@ def correlate(fitted_responses):
     correlations = []
     for split_data in fitted_responses:
         split = np.unique(split_data.split.data)
-        logger.debug('Correlating split %d/%d', split, len(fitted_responses))
+        logger.debug('Correlating split {}/{}'.format(split, len(fitted_responses)))
         rs = pearsonr_matrix(split_data.target.data, split_data.prediction.data)
         correlations.append(DataArray(rs, dims=['neuroid'], coords={'neuroid': split_data.neuroid},
                                       attrs={'index': split_data.index, 'split': split}))
