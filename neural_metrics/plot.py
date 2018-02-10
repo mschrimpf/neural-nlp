@@ -11,21 +11,28 @@ from neural_metrics.compare import layers_correlation_meanstd
 logger = logging.getLogger(__name__)
 
 
-def plot_layer_correlations(filepaths, reverse=False):
+def plot_layer_correlations(filepaths, labels=None, reverse=False, output_filepath=None):
     if not isinstance(filepaths, Iterable):
         filepaths = [filepaths]
-    for filepath in filepaths:
+    for i, filepath in enumerate(filepaths):
         with open(filepath, 'rb') as file:
             data = pickle.load(file)
         layer_metrics, args = data['layer_metrics'], data['args']
+        default_label = '{} ({})'.format(args.region, args.variance)
+        label = labels[i] if labels is not None else default_label
         if reverse:
             layer_metrics = OrderedDict(reversed(list(layer_metrics.items())))
-        means, stds = layers_correlation_meanstd(layer_metrics)
 
+        means, stds = layers_correlation_meanstd(layer_metrics)
         x = range(len(layer_metrics))
-        pyplot.errorbar(x, means, yerr=stds, label='%s %s' % (args.region, args.variance))
+        pyplot.errorbar(x, means, yerr=stds, label=label)
         pyplot.xticks(x, layer_metrics.keys(), rotation='vertical')
     pyplot.legend()
+
+    if output_filepath is None:
+        pyplot.show()
+    else:
+        pyplot.savefig(output_filepath)
 
 
 def main():

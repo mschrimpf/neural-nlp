@@ -21,6 +21,14 @@ Finally, retrieve the images:
 
 
 ## Usage
+### All-in-one
+```bash
+PYTHONPATH=. python neural_metrics --model vgg16 \
+  --layers block1_pool block2_pool block3_pool block4_pool block5_pool fc1 fc2 \
+  --regions V4 IT
+```
+
+### Step-by-step
 Compute model activations (features):
 ```bash
 PYTHONPATH=. python neural_metrics/models.py --model vgg16 \

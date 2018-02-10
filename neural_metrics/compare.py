@@ -18,6 +18,11 @@ from neural_metrics.utils import save
 logger = logging.getLogger(__name__)
 
 
+class _Defaults(object):
+    region = 'IT'
+    variance = 'V6'
+
+
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--activations_filepath', type=str, nargs='+',
@@ -26,64 +31,71 @@ def main():
                         help='one or more filepaths to the model activations')
     parser.add_argument('--output_directory', type=str, default=None,
                         help='directory to save results to. directory of activations_filepath if None')
-    parser.add_argument('--region', type=str, default='IT', help='region in brain to compare to')
-    parser.add_argument('--variance', type=str, default='V6', help='type of images to compare to')
-    parser.add_argument('--ignore_layers', type=str, nargs='+', default=[])
+    parser.add_argument('--region', type=str, default=_Defaults.region, help='region in brain to compare to')
+    parser.add_argument('--variance', type=str, default=_Defaults.variance, help='type of images to compare to')
+    parser.add_argument('--ignore_layers', type=str, nargs='+', default=None)
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
     logger.info("Running with args %s", vars(args))
 
-    # neural data
-    raw_data = mkgu.get_assembly(name="HvM")
-    raw_data = raw_data.sel(region=args.region).sel(var=args.variance)
-    raw_data.load()
-    standardized_data = raw_data.groupby('id').mean(dim='presentation').squeeze("time_bin")
-
     for activations_filepath in args.activations_filepath:
         logger.info("Processing {}".format(activations_filepath))
         try:
-            # model data
-            image_activations = load_image_activations(activations_filepath)['activations']
-            layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
-
-            # compare
-            layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
-            for layer, object_activations in layer_object_activations.items():
-                if layer in args.ignore_layers:
-                    logger.debug('Ignoring layer {}'.format(layer))
-                    continue
-                logger.debug('Layer {}'.format(layer))
-                layer_activations = []
-                neural_responses = []
-                objects = []
-                for obj, image_activations in object_activations.items():
-                    for image_id, image_activation in image_activations.items():
-                        layer_activations.append(image_activation)
-
-                        # spike count, averaged over multiple presentations
-                        neural_image_responses = standardized_data.sel(id=image_id)
-                        neural_responses.append(neural_image_responses)
-
-                        objects.append(obj)
-                # fit all neuroids jointly
-                layer_activations = np.array(layer_activations)
-                neural_responses = np.array([n.data for n in neural_responses])
-                cross_predictions = split_predict(layer_activations, neural_responses, objects)
-                layer_predictions[layer] = cross_predictions
-                layer_metrics[layer] = correlate(cross_predictions)
-                mean, std = layer_correlation_meanstd(layer_metrics[layer])
-                logger.info("{} -> {}+-{}".format(layer, mean, std))
-
-            [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
-            output_directory = args.output_directory or os.path.dirname(activations_filepath)
-            savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
-                args.region, args.variance, save_ext))
-            logger.debug('Saving to {}'.format( savepath))
-            save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
+            metrics_for_activations(activations_filepath,
+                                    region=args.region, variance=args.variance,
+                                    output_directory=args.output_directory, ignore_layers=args.ignore_layers)
         except Exception:
             logger.exception("Error during {}".format(activations_filepath))
+
+
+def metrics_for_activations(activations_filepath, use_cached=False,
+                            region=_Defaults.region, variance=_Defaults.variance,
+                            output_directory=None, ignore_layers=None):
+    args = locals()
+    [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
+    output_directory = output_directory or os.path.dirname(activations_filepath)
+    savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
+        region, variance, save_ext))
+    if use_cached and os.path.isfile(savepath):
+        logger.info('Using cached activations: {}'.format(savepath))
+        return savepath
+    # neural data
+    raw_data, standardized_data = _load_data(region=region, variance=variance)
+    # model data
+    image_activations = load_image_activations(activations_filepath)['activations']
+    layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
+    # compare
+    layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
+    for layer, object_activations in layer_object_activations.items():
+        if ignore_layers and layer in ignore_layers:
+            logger.debug('Ignoring layer {}'.format(layer))
+            continue
+        logger.debug('Layer {}'.format(layer))
+        layer_activations = []
+        neural_responses = []
+        objects = []
+        for obj, image_activations in object_activations.items():
+            for image_id, image_activation in image_activations.items():
+                layer_activations.append(image_activation)
+
+                # spike count, averaged over multiple presentations
+                neural_image_responses = standardized_data.sel(id=image_id)
+                neural_responses.append(neural_image_responses)
+
+                objects.append(obj)
+        # fit all neuroids jointly
+        layer_activations = np.array(layer_activations)
+        neural_responses = np.array([n.data for n in neural_responses])
+        cross_predictions = split_predict(layer_activations, neural_responses, objects)
+        layer_predictions[layer] = cross_predictions
+        layer_metrics[layer] = correlate(cross_predictions)
+        mean, std = layer_correlation_meanstd(layer_metrics[layer])
+        logger.info("{} -> {}+-{}".format(layer, mean, std))
+    logger.debug('Saving to {}'.format(savepath))
+    save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
+    return layer_metrics
 
 
 def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
@@ -169,6 +181,23 @@ def load_image_activations(activations_filepath):
 
 def get_id_from_image_path(image_path):
     return os.path.splitext(os.path.basename(image_path))[0]
+
+
+_data = None
+_data_params = None, None
+
+
+def _load_data(region, variance):
+    global _data_params
+    if _data is not None and _data_params == (region, variance):
+        return _data
+
+    raw_data = mkgu.get_assembly(name="HvM")
+    raw_data = raw_data.sel(region=region).sel(var=variance)
+    raw_data.load()
+    standardized_data = raw_data.groupby('id').mean(dim='presentation').squeeze("time_bin")
+    _data_params = (region, variance)
+    return raw_data, standardized_data
 
 
 if __name__ == '__main__':

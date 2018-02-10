@@ -53,26 +53,33 @@ def marrnet(image_size):
     return model, preprocess()
 
 
+model_mappings = {
+    'vgg16': vgg16,
+    'densenet': densenet,
+    'squeezenet': squeezenet,
+    'mobilenet': mobilenet,
+    'marrnet': marrnet
+}
+
 logger = logging.getLogger()
 
 
+class _Defaults(object):
+    pca_components = 200
+    image_size = 224
+    images_directory = os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted')
+    batch_size = 64
+
+
 def main():
-    models = {
-        'vgg16': vgg16,
-        'densenet': densenet,
-        'squeezenet': squeezenet,
-        'mobilenet': mobilenet,
-        'marrnet': marrnet
-    }
     parser = argparse.ArgumentParser('model comparison')
-    parser.add_argument('--model', type=str, choices=list(models.keys()), default='squeezenet')
-    parser.add_argument('--layers', nargs='+', default=None)
-    parser.add_argument('--pca', type=int, default=200,
+    parser.add_argument('--model', type=str, required=True, choices=list(model_mappings.keys()))
+    parser.add_argument('--layers', nargs='+', required=True)
+    parser.add_argument('--pca', type=int, default=_Defaults.pca_components,
                         help='Number of components to reduce the flattened features to')
-    parser.add_argument('--image_size', type=int, default=224)
-    parser.add_argument('--images_directory', type=str,
-                        default=os.path.join(os.path.dirname(__file__), 'images', 'sorted'))
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--image_size', type=int, default=_Defaults.image_size)
+    parser.add_argument('--images_directory', type=str, default=_Defaults.images_directory)
+    parser.add_argument('--batch_size', type=int, default=_Defaults.batch_size)
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
     log_level = logging.getLevelName(args.log_level)
@@ -80,24 +87,38 @@ def main():
     logging.getLogger("PIL").setLevel(logging.WARNING)
     logger.info("Running with args %s", vars(args))
 
+    activations_for_model(model=args.model, layers=args.layers, pca_components=args.pca,
+                          image_size=args.image_size, images_directory=args.images_directory,
+                          batch_size=args.batch_size)
+
+
+def activations_for_model(model, layers, use_cached=False,
+                          pca_components=_Defaults.pca_components,
+                          image_size=_Defaults.image_size, images_directory=_Defaults.images_directory,
+                          batch_size=_Defaults.batch_size):
+    args = locals()
+    savepath = os.path.join(images_directory, '{}-activations.pkl'.format(model))
+    if use_cached and os.path.isfile(savepath):
+        logger.info('Using cached activations: {}'.format(savepath))
+        return savepath
     # model
     logger.debug('Creating model')
-    model, preprocess_input = models[args.model](args.image_size)
-    print_verify_model(model, args.layers)
+    model, preprocess_input = model_mappings[model](image_size)
+    print_verify_model(model, layers)
     model_type = get_model_type(model)
-
     # input
     logger.debug('Loading input images')
-    image_filepaths, images = prepare_images(args.images_directory, args.image_size, preprocess_input, model_type)
-
+    image_filepaths, images = prepare_images(images_directory, image_size, preprocess_input, model_type)
     # output
     logger.debug('Computing activations')
-    layer_outputs = get_model_outputs(model, images, args.layers, batch_size=args.batch_size, pca_components=args.pca)
-    Y = {}
+    layer_outputs = get_model_outputs(model, images, layers, batch_size=batch_size, pca_components=pca_components)
+    stimuli_layer_activations = {}
     for i, image_filepath in enumerate(image_filepaths):
-        image_relpath = os.path.relpath(image_filepath, args.images_directory)
-        Y[image_relpath] = {layer_name: layer_outputs[i] for layer_name, layer_outputs in layer_outputs.items()}
-    save({'activations': Y, 'args': args}, os.path.join(args.images_directory, '%s-activations' % args.model))
+        image_relpath = os.path.relpath(image_filepath, images_directory)
+        stimuli_layer_activations[image_relpath] = {layer_name: layer_outputs[i]
+                                                    for layer_name, layer_outputs in layer_outputs.items()}
+    save({'activations': stimuli_layer_activations, 'args': args}, savepath)
+    return savepath
 
 
 class ModelType(Enum):
