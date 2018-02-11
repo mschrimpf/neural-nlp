@@ -20,51 +20,43 @@ from neural_metrics.utils import save
 PYTORCH_SUBMODULE_SEPARATOR = '.'
 
 
-def densenet(image_size):
+def densenet(image_size, weights='imagenet'):
     from DenseNet import DenseNetImageNet121, preprocess_input
-    model = DenseNetImageNet121(input_shape=(image_size, image_size, 3))
+    model = DenseNetImageNet121(input_shape=(image_size, image_size, 3), weights=weights)
     return model, preprocess_input
 
 
-def squeezenet(image_size):
+def squeezenet(image_size, weights='imagenet'):
     from keras_squeezenet import SqueezeNet
     from keras.applications.imagenet_utils import preprocess_input
-    model = SqueezeNet(weights='imagenet', input_shape=(image_size, image_size, 3))
+    model = SqueezeNet(input_shape=(image_size, image_size, 3), weights=weights)
     return model, preprocess_input
 
 
-def vgg16(image_size):
+def vgg16(image_size, weights='imagenet'):
     from keras.applications.vgg16 import VGG16, preprocess_input
-    model = VGG16(weights='imagenet', input_shape=(image_size, image_size, 3))
+    model = VGG16(input_shape=(image_size, image_size, 3), weights=weights)
     return model, preprocess_input
 
 
-def mobilenet(image_size):
+def mobilenet(image_size, weights='imagenet'):
     from keras.applications.mobilenet import MobileNet, preprocess_input
-    model = MobileNet(weights='imagenet', input_shape=(image_size, image_size, 3))
+    model = MobileNet(input_shape=(image_size, image_size, 3), weights=weights)
     return model, preprocess_input
-
-
-def marrnet(image_size):
-    from marrnet import MarrNet, preprocess
-    model = MarrNet()
-    if image_size != 256:
-        logger.warning("Image size will be set to 256")
-    return model, preprocess()
 
 
 model_mappings = {
     'vgg16': vgg16,
     'densenet': densenet,
     'squeezenet': squeezenet,
-    'mobilenet': mobilenet,
-    'marrnet': marrnet
+    'mobilenet': mobilenet
 }
 
 logger = logging.getLogger()
 
 
 class _Defaults(object):
+    model_weights = 'imagenet'
     pca_components = 200
     image_size = 224
     images_directory = os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted')
@@ -74,6 +66,7 @@ class _Defaults(object):
 def main():
     parser = argparse.ArgumentParser('model comparison')
     parser.add_argument('--model', type=str, required=True, choices=list(model_mappings.keys()))
+    parser.add_argument('--model_weights', type=str, default=_Defaults.model_weights)
     parser.add_argument('--layers', nargs='+', required=True)
     parser.add_argument('--pca', type=int, default=_Defaults.pca_components,
                         help='Number of components to reduce the flattened features to')
@@ -93,17 +86,17 @@ def main():
 
 
 def activations_for_model(model, layers, use_cached=False,
-                          pca_components=_Defaults.pca_components,
+                          model_weights=_Defaults.model_weights, pca_components=_Defaults.pca_components,
                           image_size=_Defaults.image_size, images_directory=_Defaults.images_directory,
                           batch_size=_Defaults.batch_size):
     args = locals()
-    savepath = os.path.join(images_directory, '{}-activations.pkl'.format(model))
+    savepath = get_savepath(model, images_directory)
     if use_cached and os.path.isfile(savepath):
         logger.info('Using cached activations: {}'.format(savepath))
         return savepath
     # model
     logger.debug('Creating model')
-    model, preprocess_input = model_mappings[model](image_size)
+    model, preprocess_input = model_mappings[model](image_size, weights=model_weights)
     print_verify_model(model, layers)
     model_type = get_model_type(model)
     # input
@@ -119,6 +112,10 @@ def activations_for_model(model, layers, use_cached=False,
                                                     for layer_name, layer_outputs in layer_outputs.items()}
     save({'activations': stimuli_layer_activations, 'args': args}, savepath)
     return savepath
+
+
+def get_savepath(model, images_directory=_Defaults.images_directory):
+    return os.path.join(images_directory, '{}-activations.pkl'.format(model))
 
 
 class ModelType(Enum):
