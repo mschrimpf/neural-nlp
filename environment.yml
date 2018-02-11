@@ -11,6 +11,7 @@ dependencies:
   - h5py
   - scikit-learn
   - matplotlib
+  - jupyter
   - pip:
     - git+https://github.com/dicarlolab/mkgu
     - git+https://github.com/mschrimpf/DenseNet.git
