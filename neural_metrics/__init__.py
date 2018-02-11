@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def run(model, layers, regions=('V4', 'IT'), model_weights=models._Defaults.model_weights, save_plot=False):
     try:
         logger.debug("Attempt bypassing activations if metrics files exist")
-        activations_savepath = models.get_savepath(model)
+        activations_savepath = models.get_savepath(model, model_weights)
         metrics_savepaths = [metrics_for_activations(activations_savepath, region=region, use_cached=True)
                              for region in regions]
         logger.info("Bypassed activations computation by using existing metrics files")

@@ -67,6 +67,7 @@ def main():
     parser = argparse.ArgumentParser('model comparison')
     parser.add_argument('--model', type=str, required=True, choices=list(model_mappings.keys()))
     parser.add_argument('--model_weights', type=str, default=_Defaults.model_weights)
+    parser.add_argument('--no-model_weights', action='store_const', const=None, dest='model_weights')
     parser.add_argument('--layers', nargs='+', required=True)
     parser.add_argument('--pca', type=int, default=_Defaults.pca_components,
                         help='Number of components to reduce the flattened features to')
@@ -90,7 +91,7 @@ def activations_for_model(model, layers, use_cached=False,
                           image_size=_Defaults.image_size, images_directory=_Defaults.images_directory,
                           batch_size=_Defaults.batch_size):
     args = locals()
-    savepath = get_savepath(model, images_directory)
+    savepath = get_savepath(model, model_weights, images_directory)
     if use_cached and os.path.isfile(savepath):
         logger.info('Using cached activations: {}'.format(savepath))
         return savepath
@@ -114,8 +115,8 @@ def activations_for_model(model, layers, use_cached=False,
     return savepath
 
 
-def get_savepath(model, images_directory=_Defaults.images_directory):
-    return os.path.join(images_directory, '{}-activations.pkl'.format(model))
+def get_savepath(model, model_weights, images_directory=_Defaults.images_directory):
+    return os.path.join(images_directory, '{}-weights_{}-activations.pkl'.format(model, model_weights))
 
 
 class ModelType(Enum):
@@ -140,7 +141,7 @@ def print_verify_model(model, layer_names):
 
 
 def print_verify_model_pytorch(model, layer_names):
-    logger.info(str(model))
+    logger.debug(str(model))
 
     def collect_pytorch_layer_names(module, parent_module_parts):
         result = []
@@ -156,7 +157,7 @@ def print_verify_model_pytorch(model, layer_names):
 
 
 def print_verify_model_keras(model, layer_names):
-    model.summary(print_fn=logger.info)
+    model.summary(print_fn=logger.debug)
     nonexisting_layers = set(layer_names) - set([layer.name for layer in model.layers])
     assert len(nonexisting_layers) == 0, "Layers not found in keras model: %s" % str(nonexisting_layers)
 
