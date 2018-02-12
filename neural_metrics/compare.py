@@ -142,6 +142,8 @@ def correlate(fitted_responses):
     correlations = []
     for split_data in fitted_responses:
         split = np.unique(split_data.split.data)
+        assert len(split) == 1
+        split = split[0]
         logger.debug('Correlating split {}/{}'.format(split, len(fitted_responses)))
         rs = pearsonr_matrix(split_data.target.data, split_data.prediction.data)
         correlations.append(DataArray(rs, dims=['neuroid'], coords={'neuroid': split_data.neuroid},

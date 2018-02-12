@@ -18,7 +18,8 @@ def plot_layer_correlations(filepaths, labels=None, reverse=False, output_filepa
         with open(filepath, 'rb') as file:
             data = pickle.load(file)
         layer_metrics, args = data['layer_metrics'], data['args']
-        default_label = '{} ({})'.format(args.region, args.variance)
+        if isinstance(args, argparse.Namespace): args = vars(args)
+        default_label = '{} ({})'.format(args['region'], args['variance'])
         label = labels[i] if labels is not None else default_label
         if reverse:
             layer_metrics = OrderedDict(reversed(list(layer_metrics.items())))
