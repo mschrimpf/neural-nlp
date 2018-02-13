@@ -33,6 +33,7 @@ def main():
                         help='directory to save results to. directory of activations_filepath if None')
     parser.add_argument('--region', type=str, default=_Defaults.region, help='region in brain to compare to')
     parser.add_argument('--variance', type=str, default=_Defaults.variance, help='type of images to compare to')
+    parser.add_argument('--concat_up_to_n_layers', type=int, default=1)
     parser.add_argument('--ignore_layers', type=str, nargs='+', default=None)
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
@@ -45,6 +46,7 @@ def main():
         try:
             metrics_for_activations(activations_filepath,
                                     region=args.region, variance=args.variance,
+                                    concat_up_to_n_layers=args.concat_up_to_n_layers,
                                     output_directory=args.output_directory, ignore_layers=args.ignore_layers)
         except Exception:
             logger.exception("Error during {}".format(activations_filepath))
@@ -52,7 +54,8 @@ def main():
 
 def metrics_for_activations(activations_filepath, use_cached=False,
                             region=_Defaults.region, variance=_Defaults.variance,
-                            output_directory=None, ignore_layers=None):
+                            output_directory=None, ignore_layers=None,
+                            concat_up_to_n_layers=1):
     args = locals()
     [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
     output_directory = output_directory or os.path.dirname(activations_filepath)
@@ -66,13 +69,12 @@ def metrics_for_activations(activations_filepath, use_cached=False,
     # model data
     image_activations = load_image_activations(activations_filepath)['activations']
     layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
+    # prepare combined activations
+    comparison_basis = prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, ignore_layers)
     # compare
     layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
-    for layer, object_activations in layer_object_activations.items():
-        if ignore_layers and layer in ignore_layers:
-            logger.debug('Ignoring layer {}'.format(layer))
-            continue
-        logger.debug('Layer {}'.format(layer))
+    for layers, object_activations in comparison_basis.items():
+        logger.debug('Layer{} {}'.format('s' if len(layers) > 1 else '', layers if len(layers) > 1 else layers[0]))
         layer_activations = []
         neural_responses = []
         objects = []
@@ -89,13 +91,36 @@ def metrics_for_activations(activations_filepath, use_cached=False,
         layer_activations = np.array(layer_activations)
         neural_responses = np.array([n.data for n in neural_responses])
         cross_predictions = split_predict(layer_activations, neural_responses, objects)
-        layer_predictions[layer] = cross_predictions
-        layer_metrics[layer] = correlate(cross_predictions)
-        mean, std = layer_correlation_meanstd(layer_metrics[layer])
-        logger.info("{} -> {}+-{}".format(layer, mean, std))
+        layer_predictions[layers] = cross_predictions
+        layer_metrics[layers] = correlate(cross_predictions)
+        mean, std = layer_correlation_meanstd(layer_metrics[layers])
+        logger.info("{} -> {}+-{}".format(layers, mean, std))
     logger.debug('Saving to {}'.format(savepath))
     save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
     return layer_metrics
+
+
+def prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, ignore_layers):
+    comparison_layers = [layer for layer in layer_object_activations.keys()
+                         if not ignore_layers or layer not in ignore_layers]
+    if len(comparison_layers) != len(layer_object_activations):
+        logger.debug('Ignoring layer(s) {}'.format(", ".join(
+            [layer for layer in layer_object_activations.keys() if layer not in comparison_layers])))
+    comparison_basis = OrderedDict()
+    # this is horribly ugly. Really need to restructure the data with pandas/xarray
+    for layer_num, layer in enumerate(comparison_layers):
+        for max_layer in range(layer_num, min(layer_num + concat_up_to_n_layers, len(comparison_layers))):
+            logger.debug("Concatenating from layer {} ({}) up to {}".format(layer_num, layer, max_layer))
+            layers = tuple(comparison_layers[layer_num:max_layer + 1])
+            activations = {}
+            for obj, image_activations in layer_object_activations[layer].items():
+                activations[obj] = {}
+                for image_id in image_activations.keys():
+                    image_activations = [layer_object_activations[layer][obj][image_id] for layer in layers]
+                    activations[obj][image_id] = np.concatenate(image_activations) if len(image_activations) > 1 \
+                        else image_activations[0]
+            comparison_basis[layers] = activations
+    return comparison_basis
 
 
 def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
@@ -121,6 +146,7 @@ def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
 
 def split_predict(source_responses, target_responses, object_labels, num_splits=10, max_components=200, test_size=.25):
     if source_responses.shape[1] > max_components:
+        logger.debug('PCA from {} to {}'.format(source_responses.shape[1], max_components))
         source_responses = PCA(n_components=max_components).fit_transform(source_responses)
     cross_validation = StratifiedShuffleSplit(n_splits=num_splits, test_size=test_size)
     results = []
