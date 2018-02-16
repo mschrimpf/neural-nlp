@@ -12,7 +12,7 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import StratifiedShuffleSplit
 from xarray import Dataset, DataArray
 
-from neural_metrics.metrics import pearsonr_matrix
+from neural_metrics.metrics.similarities import pearsonr_matrix
 from neural_metrics.utils import save
 
 logger = logging.getLogger(__name__)

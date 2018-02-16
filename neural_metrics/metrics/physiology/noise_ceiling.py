@@ -11,7 +11,7 @@ import sys
 from sklearn.model_selection import train_test_split
 from sklearn.cross_decomposition import PLSRegression
 
-from neural_metrics.metrics import pearsonr_matrix
+from neural_metrics.metrics.similarities import pearsonr_matrix
 
 logger = logging.getLogger(__name__)
 
