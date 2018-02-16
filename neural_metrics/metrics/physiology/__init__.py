@@ -3,16 +3,16 @@ import logging
 import os
 import pickle
 import sys
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict, defaultdict
 
 import mkgu
 import numpy as np
-import scipy.stats
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.decomposition import PCA
 from sklearn.model_selection import StratifiedShuffleSplit
 from xarray import Dataset, DataArray
 
+from neural_metrics.metrics import pearsonr_matrix
 from neural_metrics.utils import save
 
 logger = logging.getLogger(__name__)
@@ -21,35 +21,6 @@ logger = logging.getLogger(__name__)
 class _Defaults(object):
     region = 'IT'
     variance = 'V6'
-
-
-def main():
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--activations_filepath', type=str, nargs='+',
-                        default=[os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted', 'Chairs',
-                                              'vgg16-activations.pkl')],
-                        help='one or more filepaths to the model activations')
-    parser.add_argument('--output_directory', type=str, default=None,
-                        help='directory to save results to. directory of activations_filepath if None')
-    parser.add_argument('--region', type=str, default=_Defaults.region, help='region in brain to compare to')
-    parser.add_argument('--variance', type=str, default=_Defaults.variance, help='type of images to compare to')
-    parser.add_argument('--concat_up_to_n_layers', type=int, default=1)
-    parser.add_argument('--ignore_layers', type=str, nargs='+', default=None)
-    parser.add_argument('--log_level', type=str, default='INFO')
-    args = parser.parse_args()
-    log_level = logging.getLevelName(args.log_level)
-    logging.basicConfig(stream=sys.stdout, level=log_level)
-    logger.info("Running with args %s", vars(args))
-
-    for activations_filepath in args.activations_filepath:
-        logger.info("Processing {}".format(activations_filepath))
-        try:
-            metrics_for_activations(activations_filepath,
-                                    region=args.region, variance=args.variance,
-                                    concat_up_to_n_layers=args.concat_up_to_n_layers,
-                                    output_directory=args.output_directory, ignore_layers=args.ignore_layers)
-        except Exception:
-            logger.exception("Error during {}".format(activations_filepath))
 
 
 def metrics_for_activations(activations_filepath, use_cached=False,
@@ -191,16 +162,6 @@ def layers_correlation_meanstd(layers_correlations):
     return means, stds
 
 
-def pearsonr_matrix(data1, data2, axis=1):
-    rs = []
-    for i in range(data1.shape[axis]):
-        d1 = np.take(data1, i, axis=axis)
-        d2 = np.take(data2, i, axis=axis)
-        r, p = scipy.stats.pearsonr(d1, d2)
-        rs.append(r)
-    return np.array(rs)
-
-
 def load_image_activations(activations_filepath):
     with open(activations_filepath, 'rb') as file:
         image_activations = pickle.load(file)
@@ -212,6 +173,7 @@ def get_id_from_image_path(image_path):
 
 
 _data = None
+
 _data_params = None, None
 
 
@@ -226,6 +188,35 @@ def _load_data(region, variance):
     standardized_data = raw_data.groupby('id').mean(dim='presentation').squeeze("time_bin")
     _data_params = (region, variance)
     return raw_data, standardized_data
+
+
+def main():
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--activations_filepath', type=str, nargs='+',
+                        default=[os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted', 'Chairs',
+                                              'vgg16-activations.pkl')],
+                        help='one or more filepaths to the model activations')
+    parser.add_argument('--output_directory', type=str, default=None,
+                        help='directory to save results to. directory of activations_filepath if None')
+    parser.add_argument('--region', type=str, default=_Defaults.region, help='region in brain to compare to')
+    parser.add_argument('--variance', type=str, default=_Defaults.variance, help='type of images to compare to')
+    parser.add_argument('--concat_up_to_n_layers', type=int, default=1)
+    parser.add_argument('--ignore_layers', type=str, nargs='+', default=None)
+    parser.add_argument('--log_level', type=str, default='INFO')
+    args = parser.parse_args()
+    log_level = logging.getLevelName(args.log_level)
+    logging.basicConfig(stream=sys.stdout, level=log_level)
+    logger.info("Running with args %s", vars(args))
+
+    for activations_filepath in args.activations_filepath:
+        logger.info("Processing {}".format(activations_filepath))
+        try:
+            metrics_for_activations(activations_filepath,
+                                    region=args.region, variance=args.variance,
+                                    concat_up_to_n_layers=args.concat_up_to_n_layers,
+                                    output_directory=args.output_directory, ignore_layers=args.ignore_layers)
+        except Exception:
+            logger.exception("Error during {}".format(activations_filepath))
 
 
 if __name__ == '__main__':

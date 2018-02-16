@@ -11,9 +11,37 @@ import sys
 from sklearn.model_selection import train_test_split
 from sklearn.cross_decomposition import PLSRegression
 
-from neural_metrics.compare import pearsonr_matrix
+from neural_metrics.metrics import pearsonr_matrix
 
 logger = logging.getLogger(__name__)
+
+
+def compare(category_data, regression_components=25, test_size=0.25):
+    nb_images = np.unique(category_data.id).shape[0]
+    data1, data2 = [], []
+
+    for id in np.unique(category_data.id.data):
+        image_data = category_data.sel(id=id)
+        presentations = set(image_data.presentation.data)
+        presentations_half1 = set(random.sample(presentations, math.floor(len(presentations) / 2)))
+        presentations_half2 = presentations - presentations_half1
+        if len(presentations_half2) > len(presentations_half1):
+            presentations_half2 = list(presentations_half2)[:-1]
+        d1 = image_data.sel(presentation=list(presentations_half1))
+        d2 = image_data.sel(presentation=list(presentations_half2))
+        data1.append(d1.data.T.mean(axis=0))
+        data2.append(d2.data.T.mean(axis=0))
+
+    data1 = np.concatenate(data1).reshape(nb_images, -1)
+    data2 = np.concatenate(data2).reshape(nb_images, -1)
+
+    X_train, X_test, Y_train, Y_test = train_test_split(data1, data2, test_size=test_size)
+    reg = PLSRegression(n_components=regression_components, scale=False)
+    reg.fit(X_train, Y_train)
+    pred = reg.predict(X_test)
+    rs = pearsonr_matrix(Y_test, pred)
+
+    return np.median(rs)
 
 
 def main():
@@ -56,34 +84,6 @@ def main():
             correlations.append(compare(category_data,
                                         regression_components=args.regression_components, test_size=args.test_size))
         logger.info("Correlations: {}".format(np.mean(correlations)))
-
-
-def compare(category_data, regression_components=25, test_size=0.25):
-    nb_images = np.unique(category_data.id).shape[0]
-    data1, data2 = [], []
-
-    for id in np.unique(category_data.id.data):
-        image_data = category_data.sel(id=id)
-        presentations = set(image_data.presentation.data)
-        presentations_half1 = set(random.sample(presentations, math.floor(len(presentations) / 2)))
-        presentations_half2 = presentations - presentations_half1
-        if len(presentations_half2) > len(presentations_half1):
-            presentations_half2 = list(presentations_half2)[:-1]
-        d1 = image_data.sel(presentation=list(presentations_half1))
-        d2 = image_data.sel(presentation=list(presentations_half2))
-        data1.append(d1.data.T.mean(axis=0))
-        data2.append(d2.data.T.mean(axis=0))
-
-    data1 = np.concatenate(data1).reshape(nb_images, -1)
-    data2 = np.concatenate(data2).reshape(nb_images, -1)
-
-    X_train, X_test, Y_train, Y_test = train_test_split(data1, data2, test_size=test_size)
-    reg = PLSRegression(n_components=regression_components, scale=False)
-    reg.fit(X_train, Y_train)
-    pred = reg.predict(X_test)
-    rs = pearsonr_matrix(Y_test, pred)
-
-    return np.median(rs)
 
 
 if __name__ == '__main__':

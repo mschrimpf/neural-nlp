@@ -6,7 +6,7 @@ from collections import OrderedDict, Iterable
 
 from matplotlib import pyplot
 
-from neural_metrics.compare import layers_correlation_meanstd
+from neural_metrics.metrics.physiology import layers_correlation_meanstd
 
 logger = logging.getLogger(__name__)
 

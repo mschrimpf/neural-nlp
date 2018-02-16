@@ -2,7 +2,7 @@ import logging
 import os
 
 from neural_metrics import models
-from neural_metrics.compare import metrics_for_activations
+from neural_metrics.metrics.physiology import metrics_for_activations
 from neural_metrics.models import activations_for_model
 from neural_metrics.plot import plot_layer_correlations
 
