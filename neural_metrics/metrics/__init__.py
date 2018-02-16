@@ -66,6 +66,8 @@ def main():
                                               'vgg16-activations.pkl')],
                         help='one or more filepaths to the model activations')
     parser.add_argument('--regions', type=str, nargs='+', default=['V4', 'IT'], help='region(s) in brain to compare to')
+    parser.add_argument('--map_all_layers', action='store_true', default=True)
+    parser.add_argument('--no-map_all_layers', action='store_false', dest='map_all_layers')
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
     logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
@@ -73,7 +75,7 @@ def main():
 
     for activations_filepath in args.activations_filepath:
         model_activations = load_model_activations(activations_filepath)
-        region_layer_mapping = physiology_mapping(model_activations, args.regions)
+        region_layer_mapping = physiology_mapping(model_activations, args.regions, map_all_layers=args.map_all_layers)
 
 
 if __name__ == '__main__':
