@@ -23,6 +23,62 @@ class _Defaults(object):
     variance = 'V6'
 
 
+class SimilarityWorker(object):
+    def __init__(self, model_activations, regions):
+        self._region_data = {region: _load_data(region=region)[1] for region in regions}
+        raw_reference_data = _load_data(region=next(iter(self._region_data.keys())))[0]
+        self._model_activations = rearrange_image_to_layer_object_image_activations(
+            model_activations, raw_reference_data)
+        self._cache = {}
+        self.logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
+
+    def __call__(self, layers, region):
+        if isinstance(layers, str):  # single layer passed
+            layers = [layers]
+        layers = tuple(layers)
+        unmatched_layers = [layer for layer in layers if layer not in self._model_activations]
+        if len(unmatched_layers) > 0:
+            raise ValueError("Layers {} not found in activations".format(",".join(unmatched_layers)))
+        if region not in self._region_data.keys():
+            raise ValueError("Unknown region {}".format(region))
+
+        if (layers, region) in self._cache:
+            self.logger.debug("Similarity between {} and {} from cache".format(",".join(layers), region))
+            _similarities = self._cache[(layers, region)]
+        else:
+            self.logger.debug("Computing similarity between {} and {}".format(",".join(layers), region))
+            layers_activations = _merge_layer_activations(layers, self._model_activations)
+            _similarities = predictions_similarity(layers_activations, self._region_data[region])[1]
+            self._cache[(layers, region)] = _similarities
+        return layer_correlation_meanstd(_similarities)[0]
+
+
+def predictions_similarity(object_activations, standardized_data):
+    layer_activations = []
+    neural_responses = []
+    objects = []
+    for obj, image_activations in object_activations.items():
+        for image_id, image_activation in image_activations.items():
+            layer_activations.append(image_activation)
+
+            # spike count, averaged over multiple presentations
+            neural_image_responses = standardized_data.sel(id=image_id)
+            neural_responses.append(neural_image_responses)
+
+            objects.append(obj)
+    # fit all neuroids jointly
+    layer_activations = np.array(layer_activations)
+    neural_responses = np.array([n.data for n in neural_responses])
+    cross_predictions = split_predict(layer_activations, neural_responses, objects)
+    similarities = correlate(cross_predictions)
+    return cross_predictions, similarities
+
+
+def layers_from_raw_activations(model_activations):
+    # model_activations: image_path -> {layer -> activations}
+    return list(model_activations[next(iter(model_activations.keys()))].keys())
+
+
 def metrics_for_activations(activations_filepath, use_cached=False,
                             region=_Defaults.region, variance=_Defaults.variance,
                             output_directory=None, ignore_layers=None,
@@ -38,7 +94,7 @@ def metrics_for_activations(activations_filepath, use_cached=False,
     # neural data
     raw_data, standardized_data = _load_data(region=region, variance=variance)
     # model data
-    image_activations = load_image_activations(activations_filepath)['activations']
+    image_activations = load_model_activations(activations_filepath)
     layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
     # prepare combined activations
     comparison_basis = prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, ignore_layers)
@@ -46,25 +102,10 @@ def metrics_for_activations(activations_filepath, use_cached=False,
     layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
     for layers, object_activations in comparison_basis.items():
         logger.debug('Layer{} {}'.format('s' if len(layers) > 1 else '', layers if len(layers) > 1 else layers[0]))
-        layer_activations = []
-        neural_responses = []
-        objects = []
-        for obj, image_activations in object_activations.items():
-            for image_id, image_activation in image_activations.items():
-                layer_activations.append(image_activation)
-
-                # spike count, averaged over multiple presentations
-                neural_image_responses = standardized_data.sel(id=image_id)
-                neural_responses.append(neural_image_responses)
-
-                objects.append(obj)
-        # fit all neuroids jointly
-        layer_activations = np.array(layer_activations)
-        neural_responses = np.array([n.data for n in neural_responses])
-        cross_predictions = split_predict(layer_activations, neural_responses, objects)
+        cross_predictions, similarities = predictions_similarity(object_activations, standardized_data)
         layer_predictions[layers] = cross_predictions
-        layer_metrics[layers] = correlate(cross_predictions)
-        mean, std = layer_correlation_meanstd(layer_metrics[layers])
+        layer_metrics[layers] = similarities
+        mean, std = layer_correlation_meanstd(similarities)
         logger.info("{} -> {}+-{}".format(layers, mean, std))
     logger.debug('Saving to {}'.format(savepath))
     save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
@@ -78,20 +119,25 @@ def prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, i
         logger.debug('Ignoring layer(s) {}'.format(", ".join(
             [layer for layer in layer_object_activations.keys() if layer not in comparison_layers])))
     comparison_basis = OrderedDict()
-    # this is horribly ugly. Really need to restructure the data with pandas/xarray
     for layer_num, layer in enumerate(comparison_layers):
         for max_layer in range(layer_num, min(layer_num + concat_up_to_n_layers, len(comparison_layers))):
             logger.debug("Concatenating from layer {} ({}) up to {}".format(layer_num, layer, max_layer))
             layers = tuple(comparison_layers[layer_num:max_layer + 1])
-            activations = {}
-            for obj, image_activations in layer_object_activations[layer].items():
-                activations[obj] = {}
-                for image_id in image_activations.keys():
-                    image_activations = [layer_object_activations[layer][obj][image_id] for layer in layers]
-                    activations[obj][image_id] = np.concatenate(image_activations) if len(image_activations) > 1 \
-                        else image_activations[0]
+            activations = _merge_layer_activations(layers, layer_object_activations)
             comparison_basis[layers] = activations
     return comparison_basis
+
+
+def _merge_layer_activations(layers, layer_object_activations):
+    # this is horribly ugly. Really need to restructure the data with pandas/xarrayF
+    activations = {}
+    for obj, image_activations in layer_object_activations[layers[0]].items():
+        activations[obj] = {}
+        for image_id in image_activations.keys():
+            image_activations = [layer_object_activations[layer][obj][image_id] for layer in layers]
+            activations[obj][image_id] = np.concatenate(image_activations) if len(image_activations) > 1 \
+                else image_activations[0]
+    return activations
 
 
 def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
@@ -141,7 +187,7 @@ def correlate(fitted_responses):
         split = np.unique(split_data.split.data)
         assert len(split) == 1
         split = split[0]
-        logger.debug('Correlating split {}/{}'.format(split, len(fitted_responses)))
+        logger.debug('Correlating split {}/{}'.format(split + 1, len(fitted_responses)))
         rs = pearsonr_matrix(split_data.target.data, split_data.prediction.data)
         correlations.append(DataArray(rs, dims=['neuroid'], coords={'neuroid': split_data.neuroid},
                                       attrs={'index': split_data.index, 'split': split}))
@@ -162,10 +208,10 @@ def layers_correlation_meanstd(layers_correlations):
     return means, stds
 
 
-def load_image_activations(activations_filepath):
+def load_model_activations(activations_filepath):
     with open(activations_filepath, 'rb') as file:
         image_activations = pickle.load(file)
-    return image_activations
+    return image_activations['activations']
 
 
 def get_id_from_image_path(image_path):
@@ -177,7 +223,7 @@ _data = None
 _data_params = None, None
 
 
-def _load_data(region, variance):
+def _load_data(region, variance='V6'):
     global _data_params
     if _data is not None and _data_params == (region, variance):
         return _data
@@ -193,7 +239,7 @@ def _load_data(region, variance):
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--activations_filepath', type=str, nargs='+',
-                        default=[os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted', 'Chairs',
+                        default=[os.path.join(os.path.dirname(__file__), '..', '..', '..', 'images', 'sorted', 'Chairs',
                                               'vgg16-activations.pkl')],
                         help='one or more filepaths to the model activations')
     parser.add_argument('--output_directory', type=str, default=None,
