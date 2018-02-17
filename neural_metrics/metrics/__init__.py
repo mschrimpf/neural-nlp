@@ -8,7 +8,9 @@ from operator import itemgetter
 import itertools
 from llist import dllist
 
+from neural_metrics.metrics.anatomy import combine_graph, score_edge_ratio, model_graph
 from neural_metrics.metrics.physiology import SimilarityWorker, load_model_activations, layers_from_raw_activations
+from neural_metrics.models import vgg16
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,8 @@ def physiology_mapping(model_activations, regions, map_all_layers=True):
     if not map_all_layers:
         return mapping
 
+    # TODO: handle case where one layer maps to two regions, e.g. when the model size is smaller than the regions
+
     # all layers
     linked_layers = dllist(layers_from_raw_activations(model_activations))
     mapping = OrderedDict((region, [layer]) for region, layer in zip(mapping.keys(), linked_layers))
@@ -53,10 +57,24 @@ def physiology_mapping(model_activations, regions, map_all_layers=True):
         candidate_similarities = {(candidate['region'], candidate['layers']):
                                       similarities(layers=candidate['layers'], region=candidate['region'])
                                   for candidate in candidates}
-        best_candidate = max(candidate_similarities.items(), key=itemgetter(1))[0]
+        best_candidate = max(candidate_similarities.items(), key=itemgetter(1))
+        if best_candidate[1] < 0:
+            logger.warning("Negative improvement from candidate")
+        best_candidate = best_candidate[0]
         region, layers = best_candidate[0], best_candidate[1]
         mapping[region] = layers
         logger.debug("Update mapping: {} -> {}".format(region, ",".join(layers)))
+    return mapping
+
+
+def score_anatomy(model, region_layer_mapping):
+    _model_graph = model_graph(model, layers=[*itertools.chain(*region_layer_mapping.values())])
+    _model_graph = combine_graph(_model_graph, region_layer_mapping)
+    return score_edge_ratio(_model_graph, relevant_regions=region_layer_mapping.keys())
+
+
+def _model_from_activations_filepath(activations_filepath):
+    return vgg16(image_size=224)[0]  # TODO
 
 
 def main():
@@ -76,6 +94,10 @@ def main():
     for activations_filepath in args.activations_filepath:
         model_activations = load_model_activations(activations_filepath)
         region_layer_mapping = physiology_mapping(model_activations, args.regions, map_all_layers=args.map_all_layers)
+        logger.info("Physiology mapping: " + ", ".join(
+            "{} -> {}".format(region, ",".join(layers)) for region, layers in region_layer_mapping.items()))
+        anatomy_score = score_anatomy(_model_from_activations_filepath(activations_filepath), region_layer_mapping)
+        logger.info("Anatomy score: {}".format(anatomy_score))
 
 
 if __name__ == '__main__':

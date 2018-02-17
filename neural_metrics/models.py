@@ -9,6 +9,7 @@ from enum import Enum
 from glob import iglob
 
 import keras
+import networkx as nx
 import numpy as np
 import torch
 from PIL import Image
@@ -240,6 +241,14 @@ def compute_layer_outputs_pytorch(layer_names, model, x, arrange_output=lambda x
         layer.register_forward_hook(lambda _layer, _input, output, name=layer_name: store_layer_output(name, output))
     model(x)
     return layer_results
+
+
+def get_model_graph_keras(model):
+    g = nx.DiGraph()
+    for layer in model.layers:
+        for outbound_node in layer._outbound_nodes:
+            g.add_edge(layer.name, outbound_node.outbound_layer.name)
+    return g
 
 
 def arrange_layer_output(layer_output, pca_components):
