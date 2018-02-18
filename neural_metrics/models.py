@@ -3,12 +3,14 @@ import copy
 import functools
 import logging
 import os
+import re
 import sys
 from collections import OrderedDict
 from enum import Enum
 from glob import iglob
 
 import keras
+import networkx as nx
 import numpy as np
 import torch
 from PIL import Image
@@ -67,6 +69,7 @@ def main():
     parser = argparse.ArgumentParser('model comparison')
     parser.add_argument('--model', type=str, required=True, choices=list(model_mappings.keys()))
     parser.add_argument('--model_weights', type=str, default=_Defaults.model_weights)
+    parser.add_argument('--no-model_weights', action='store_const', const=None, dest='model_weights')
     parser.add_argument('--layers', nargs='+', required=True)
     parser.add_argument('--pca', type=int, default=_Defaults.pca_components,
                         help='Number of components to reduce the flattened features to')
@@ -90,7 +93,7 @@ def activations_for_model(model, layers, use_cached=False,
                           image_size=_Defaults.image_size, images_directory=_Defaults.images_directory,
                           batch_size=_Defaults.batch_size):
     args = locals()
-    savepath = get_savepath(model, images_directory)
+    savepath = get_savepath(model, model_weights, images_directory)
     if use_cached and os.path.isfile(savepath):
         logger.info('Using cached activations: {}'.format(savepath))
         return savepath
@@ -112,10 +115,6 @@ def activations_for_model(model, layers, use_cached=False,
                                                     for layer_name, layer_outputs in layer_outputs.items()}
     save({'activations': stimuli_layer_activations, 'args': args}, savepath)
     return savepath
-
-
-def get_savepath(model, images_directory=_Defaults.images_directory):
-    return os.path.join(images_directory, '{}-activations.pkl'.format(model))
 
 
 class ModelType(Enum):
@@ -140,7 +139,7 @@ def print_verify_model(model, layer_names):
 
 
 def print_verify_model_pytorch(model, layer_names):
-    logger.info(str(model))
+    logger.debug(str(model))
 
     def collect_pytorch_layer_names(module, parent_module_parts):
         result = []
@@ -156,7 +155,7 @@ def print_verify_model_pytorch(model, layer_names):
 
 
 def print_verify_model_keras(model, layer_names):
-    model.summary(print_fn=logger.info)
+    model.summary(print_fn=logger.debug)
     nonexisting_layers = set(layer_names) - set([layer.name for layer in model.layers])
     assert len(nonexisting_layers) == 0, "Layers not found in keras model: %s" % str(nonexisting_layers)
 
@@ -241,6 +240,14 @@ def compute_layer_outputs_pytorch(layer_names, model, x, arrange_output=lambda x
     return layer_results
 
 
+def get_model_graph_keras(model):
+    g = nx.DiGraph()
+    for layer in model.layers:
+        for outbound_node in layer._outbound_nodes:
+            g.add_edge(layer.name, outbound_node.outbound_layer.name)
+    return g
+
+
 def arrange_layer_output(layer_output, pca_components):
     if pca_components is not None and 0 < pca_components < np.prod(layer_output.shape[1:]):
         assert layer_output.shape[0] >= pca_components, \
@@ -249,6 +256,17 @@ def arrange_layer_output(layer_output, pca_components):
         layer_output = layer_output.reshape(layer_output.shape[0], -1)
         layer_output = PCA(n_components=pca_components).fit_transform(layer_output)
     return layer_output
+
+
+def get_savepath(model, model_weights, images_directory=_Defaults.images_directory):
+    return os.path.join(images_directory, '{}-weights_{}-activations.pkl'.format(model, model_weights))
+
+
+def model_from_activations_filepath(activations_filepath):
+    match = re.match('^(.*)-weights_[^-]*-activations.pkl$', os.path.basename(activations_filepath))
+    if not match:
+        raise ValueError("Filename {} did not match".format(os.path.basename(activations_filepath)))
+    return match.group(1)
 
 
 if __name__ == '__main__':

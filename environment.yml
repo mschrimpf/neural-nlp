@@ -9,6 +9,7 @@ dependencies:
   - pytorch
   - torchvision
   - h5py
+  - networkx
   - scikit-learn
   - matplotlib
   - jupyter
@@ -17,3 +18,4 @@ dependencies:
     - git+https://github.com/mschrimpf/DenseNet.git
     - git+https://github.com/rcmalli/keras-squeezenet.git
     - pillow
+    - llist
