@@ -3,6 +3,7 @@ import copy
 import functools
 import logging
 import os
+import re
 import sys
 from collections import OrderedDict
 from enum import Enum
@@ -114,10 +115,6 @@ def activations_for_model(model, layers, use_cached=False,
                                                     for layer_name, layer_outputs in layer_outputs.items()}
     save({'activations': stimuli_layer_activations, 'args': args}, savepath)
     return savepath
-
-
-def get_savepath(model, model_weights, images_directory=_Defaults.images_directory):
-    return os.path.join(images_directory, '{}-weights_{}-activations.pkl'.format(model, model_weights))
 
 
 class ModelType(Enum):
@@ -259,6 +256,17 @@ def arrange_layer_output(layer_output, pca_components):
         layer_output = layer_output.reshape(layer_output.shape[0], -1)
         layer_output = PCA(n_components=pca_components).fit_transform(layer_output)
     return layer_output
+
+
+def get_savepath(model, model_weights, images_directory=_Defaults.images_directory):
+    return os.path.join(images_directory, '{}-weights_{}-activations.pkl'.format(model, model_weights))
+
+
+def model_from_activations_filepath(activations_filepath):
+    match = re.match('^(.*)-weights_[^-]*-activations.pkl$', os.path.basename(activations_filepath))
+    if not match:
+        raise ValueError("Filename {} did not match".format(os.path.basename(activations_filepath)))
+    return match.group(1)
 
 
 if __name__ == '__main__':

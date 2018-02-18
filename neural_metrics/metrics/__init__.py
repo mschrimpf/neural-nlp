@@ -9,9 +9,9 @@ from operator import itemgetter
 from llist import dllist
 
 from neural_metrics import models
-from neural_metrics.models import model_from_activations_filepath
 from neural_metrics.metrics.anatomy import combine_graph, score_edge_ratio, model_graph
 from neural_metrics.metrics.physiology import SimilarityWorker, load_model_activations, layers_from_raw_activations
+from neural_metrics.models import model_from_activations_filepath
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,11 @@ def physiology_mapping(model_activations_filepath, regions, map_all_layers=True)
     if not map_all_layers:
         return mapping
 
-    # TODO: handle case where one layer maps to two regions, e.g. when the model size is smaller than the regions
-
     # all layers
     linked_layers = dllist(similarities.get_model_layers())
     mapping = OrderedDict((region, ((layer,), score)) for region, (layer, score) in mapping.items())
-    get_mapped_layers = lambda: [*itertools.chain(*[layers for layers, score in mapping.values()])]
-    while len(similarities.get_model_layers()) != len(get_mapped_layers()):
-        mapped_layers = get_mapped_layers()
+    while len(similarities.get_model_layers()) != len(get_mapped_layers(mapping)):
+        mapped_layers = get_mapped_layers(mapping)
         candidates = []
         for region, (layers, score) in mapping.items():
             for prev_next in [(0, 'prev'), (-1, 'next')]:
@@ -69,16 +66,22 @@ def physiology_mapping(model_activations_filepath, regions, map_all_layers=True)
                                   for candidate in candidates}
         (region, layers), score = max(candidate_similarities.items(), key=itemgetter(1))
         if score < mapping[region][1]:
-            logger.warning("Negative improvement from candidate")
+            logger.warning("Negative improvement from candidate in region {} (was {}: {:.4f}, now {}: {:.4f})".format(
+                region, ",".join(mapping[region][0]), mapping[region][1], ",".join(layers), score))
         mapping[region] = layers, score
         logger.debug("Update mapping: {} -> {} ({:.2f})".format(region, ",".join(layers), score))
     return mapping
 
 
-def score_anatomy(model, region_layer_mapping):
-    _model_graph = model_graph(model, layers=[*itertools.chain(*region_layer_mapping.values())])
-    _model_graph = combine_graph(_model_graph, region_layer_mapping)
-    return score_edge_ratio(_model_graph, relevant_regions=region_layer_mapping.keys())
+def score_anatomy(model, region_layer_score_mapping):
+    _model_graph = model_graph(model, layers=get_mapped_layers(region_layer_score_mapping))
+    _model_graph = combine_graph(_model_graph, OrderedDict((region, layers) for region, (layers, score)
+                                                           in region_layer_score_mapping.items()))
+    return score_edge_ratio(_model_graph, relevant_regions=region_layer_score_mapping.keys())
+
+
+def get_mapped_layers(region_layer_score_mapping):
+    return [*itertools.chain(*[layers for layers, score in region_layer_score_mapping.values()])]
 
 
 def main():
