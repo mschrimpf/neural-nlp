@@ -24,13 +24,14 @@ class _Defaults(object):
 
 
 class SimilarityWorker(object):
-    def __init__(self, model_activations, regions):
+    def __init__(self, activations_filepath, regions, variance=_Defaults.variance):
         self._region_data = {region: _load_data(region=region)[1] for region in regions}
         raw_reference_data = _load_data(region=next(iter(self._region_data.keys())))[0]
+        self._model_activations = load_model_activations(activations_filepath)
         self._model_activations = rearrange_image_to_layer_object_image_activations(
-            model_activations, raw_reference_data)
-        self._cache = {}
-        self.logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
+            self._model_activations, raw_reference_data)
+        self._cache = self.StorageCache(activations_filepath, regions, variance)
+        self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
     def __call__(self, layers, region):
         if isinstance(layers, str):  # single layer passed
@@ -43,14 +44,61 @@ class SimilarityWorker(object):
             raise ValueError("Unknown region {}".format(region))
 
         if (layers, region) in self._cache:
-            self.logger.debug("Similarity between {} and {} from cache".format(",".join(layers), region))
+            self._logger.debug("Similarity between {} and {} from cache".format(",".join(layers), region))
             _similarities = self._cache[(layers, region)]
         else:
-            self.logger.debug("Computing similarity between {} and {}".format(",".join(layers), region))
+            self._logger.debug("Computing similarity between {} and {}".format(",".join(layers), region))
             layers_activations = _merge_layer_activations(layers, self._model_activations)
             _similarities = predictions_similarity(layers_activations, self._region_data[region])[1]
             self._cache[(layers, region)] = _similarities
         return layer_correlation_meanstd(_similarities)[0]
+
+    def get_model_layers(self):
+        return list(self._model_activations.keys())
+
+    class StorageCache(dict):
+        """
+        Keeps computed similarities in memory (the cache) and writes them to a file (the storage).
+        """
+
+        def __init__(self, activations_filepath, regions, variance):
+            super(SimilarityWorker.StorageCache, self).__init__()
+            self._activations_filepath, self._variance = activations_filepath, variance
+            self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
+            self._setitem_from_storage = False  # marks when items are set from loading, i.e. we do not have to save
+            for region in regions:
+                self._load_storage(region)
+
+        def __setitem__(self, key, value):
+            super(SimilarityWorker.StorageCache, self).__setitem__(key, value)
+            if self._setitem_from_storage:
+                return
+            layers, region = key
+            self._save_storage(region)
+
+        def _load_storage(self, region):
+            if not os.path.isfile(self._savepath(region)):
+                self._logger.debug("Region {} not stored in memory".format(region))
+                return
+            self._logger.debug("Loading region {} from storage".format(region))
+            with open(self._savepath(region), 'rb') as f:
+                region_storage = pickle.load(f)
+            for layers, stored_values in region_storage.items():
+                self._setitem_from_storage = True
+                self[(layers, region)] = stored_values
+                self._setitem_from_storage = False
+
+        def _save_storage(self, region):
+            self._logger.debug("Saving region {} to storage".format(region))
+            region_storage = {}
+            for (layers, _region), values in self.items():
+                if _region == region:
+                    region_storage[layers] = values
+            with open(self._savepath(region), 'wb') as f:
+                pickle.dump(region_storage, f)
+
+        def _savepath(self, region):
+            return get_savepath(self._activations_filepath, region=region, variance=self._variance)
 
 
 def predictions_similarity(object_activations, standardized_data):
@@ -84,10 +132,7 @@ def metrics_for_activations(activations_filepath, use_cached=False,
                             output_directory=None, ignore_layers=None,
                             concat_up_to_n_layers=1):
     args = locals()
-    [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
-    output_directory = output_directory or os.path.dirname(activations_filepath)
-    savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
-        region, variance, save_ext))
+    savepath = get_savepath(activations_filepath, region, variance, output_directory)
     if use_cached and os.path.isfile(savepath):
         logger.info('Using cached activations: {}'.format(savepath))
         return savepath
@@ -110,6 +155,14 @@ def metrics_for_activations(activations_filepath, use_cached=False,
     logger.debug('Saving to {}'.format(savepath))
     save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
     return layer_metrics
+
+
+def get_savepath(activations_filepath, region, variance, output_directory=None):
+    [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
+    output_directory = output_directory or os.path.dirname(activations_filepath)
+    savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
+        region, variance, save_ext))
+    return savepath
 
 
 def prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, ignore_layers):
