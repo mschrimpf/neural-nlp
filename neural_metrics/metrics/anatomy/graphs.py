@@ -1,6 +1,4 @@
-import argparse
 import logging
-import sys
 
 import networkx as nx
 
