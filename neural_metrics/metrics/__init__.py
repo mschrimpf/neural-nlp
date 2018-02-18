@@ -1,16 +1,17 @@
 import argparse
+import itertools
 import logging
 import os
+import re
 import sys
 from collections import OrderedDict
 from operator import itemgetter
 
-import itertools
 from llist import dllist
 
+from neural_metrics import models
 from neural_metrics.metrics.anatomy import combine_graph, score_edge_ratio, model_graph
 from neural_metrics.metrics.physiology import SimilarityWorker, load_model_activations, layers_from_raw_activations
-from neural_metrics.models import vgg16
 
 logger = logging.getLogger(__name__)
 
@@ -74,15 +75,20 @@ def score_anatomy(model, region_layer_mapping):
 
 
 def _model_from_activations_filepath(activations_filepath):
-    return vgg16(image_size=224)[0]  # TODO
+    match = re.match('^(.*)-weights_[^-]*-activations.pkl$', os.path.basename(activations_filepath))
+    if not match:
+        raise ValueError("Filename {} did not match".format(os.path.basename(activations_filepath)))
+    return match.group(1)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--activations_filepath', type=str, nargs='+',
-                        default=[os.path.join(os.path.dirname(__file__), '..', '..', 'images', 'sorted', 'Chairs',
-                                              'vgg16-activations.pkl')],
+    parser.add_argument('--activations_filepath', type=str,
+                        default=os.path.join(os.path.dirname(__file__), '..', '..', 'images', 'sorted',
+                                             'vgg16-weights_imagenet-activations.pkl'),
                         help='one or more filepaths to the model activations')
+    parser.add_argument('--model', type=str, default=None, choices=models.model_mappings.keys(),
+                        help='name of the model. Inferred from `--activations_filepath` if None')
     parser.add_argument('--regions', type=str, nargs='+', default=['V4', 'IT'], help='region(s) in brain to compare to')
     parser.add_argument('--map_all_layers', action='store_true', default=True)
     parser.add_argument('--no-map_all_layers', action='store_false', dest='map_all_layers')
@@ -91,13 +97,16 @@ def main():
     logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
     logger.info("Running with args %s", vars(args))
 
-    for activations_filepath in args.activations_filepath:
-        model_activations = load_model_activations(activations_filepath)
-        region_layer_mapping = physiology_mapping(model_activations, args.regions, map_all_layers=args.map_all_layers)
-        logger.info("Physiology mapping: " + ", ".join(
-            "{} -> {}".format(region, ",".join(layers)) for region, layers in region_layer_mapping.items()))
-        anatomy_score = score_anatomy(_model_from_activations_filepath(activations_filepath), region_layer_mapping)
-        logger.info("Anatomy score: {}".format(anatomy_score))
+    model_name = args.model if args.model else _model_from_activations_filepath(args.activations_filepath)
+    model = models.model_mappings[model_name](image_size=models._Defaults.image_size)[0]
+
+    model_activations = load_model_activations(args.activations_filepath)
+    region_layer_mapping = physiology_mapping(model_activations, args.regions, map_all_layers=args.map_all_layers)
+    logger.info("Physiology mapping: " + ", ".join(
+        "{} -> {}".format(region, ",".join(layers)) for region, layers in region_layer_mapping.items()))
+
+    anatomy_score = score_anatomy(model, region_layer_mapping)
+    logger.info("Anatomy score: {}".format(anatomy_score))
 
 
 if __name__ == '__main__':
