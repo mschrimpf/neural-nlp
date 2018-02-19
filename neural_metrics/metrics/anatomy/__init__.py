@@ -1,7 +1,8 @@
-from neural_metrics.models import get_model_graph_keras
+import networkx as nx
+
+from neural_metrics.models import get_model_graph
 from . import graphs
 from .graphs import cut_graph, combine_graph
-import networkx as nx
 
 anatomy_graph = nx.DiGraph()  # derived from Felleman & van Essen
 anatomy_graph.add_edge('input', 'V1')
@@ -21,5 +22,5 @@ def score_edge_ratio(model_graph, relevant_regions):
 
 
 def model_graph(model, layers):
-    graph = get_model_graph_keras(model)
+    graph = get_model_graph(model)
     return cut_graph(graph, keep_nodes=layers, fill_in=True)

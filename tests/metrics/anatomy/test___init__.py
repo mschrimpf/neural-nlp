@@ -4,7 +4,7 @@ import networkx as nx
 
 from neural_metrics.metrics import model_graph
 from neural_metrics.models import vgg16
-from tests.metrics.anatomy import TestGraphComparison
+from tests import TestGraphComparison
 
 
 class TestModelGraph(TestGraphComparison):

@@ -4,7 +4,7 @@ from collections import OrderedDict
 import networkx as nx
 
 from neural_metrics.metrics.anatomy.graphs import combine_graph, score_edge_ratio, cut_graph
-from tests.metrics.anatomy import TestGraphComparison
+from tests import TestGraphComparison
 
 
 class TestCombineGraph(TestGraphComparison):

@@ -54,7 +54,7 @@ model_mappings = {
     'mobilenet': mobilenet
 }
 
-logger = logging.getLogger()
+_logger = logging.getLogger(__name__)
 
 
 class _Defaults(object):
@@ -81,7 +81,7 @@ def main():
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
     logging.getLogger("PIL").setLevel(logging.WARNING)
-    logger.info("Running with args %s", vars(args))
+    _logger.info("Running with args %s", vars(args))
 
     activations_for_model(model=args.model, layers=args.layers, pca_components=args.pca,
                           image_size=args.image_size, images_directory=args.images_directory,
@@ -95,18 +95,18 @@ def activations_for_model(model, layers, use_cached=False,
     args = locals()
     savepath = get_savepath(model, model_weights, images_directory)
     if use_cached and os.path.isfile(savepath):
-        logger.info('Using cached activations: {}'.format(savepath))
+        _logger.info('Using cached activations: {}'.format(savepath))
         return savepath
     # model
-    logger.debug('Creating model')
+    _logger.debug('Creating model')
     model, preprocess_input = model_mappings[model](image_size, weights=model_weights)
     print_verify_model(model, layers)
     model_type = get_model_type(model)
     # input
-    logger.debug('Loading input images')
+    _logger.debug('Loading input images')
     image_filepaths, images = prepare_images(images_directory, image_size, preprocess_input, model_type)
     # output
-    logger.debug('Computing activations')
+    _logger.debug('Computing activations')
     layer_outputs = get_model_outputs(model, images, layers, batch_size=batch_size, pca_components=pca_components)
     stimuli_layer_activations = {}
     for i, image_filepath in enumerate(image_filepaths):
@@ -139,7 +139,7 @@ def print_verify_model(model, layer_names):
 
 
 def print_verify_model_pytorch(model, layer_names):
-    logger.debug(str(model))
+    _logger.debug(str(model))
 
     def collect_pytorch_layer_names(module, parent_module_parts):
         result = []
@@ -155,7 +155,7 @@ def print_verify_model_pytorch(model, layer_names):
 
 
 def print_verify_model_keras(model, layer_names):
-    model.summary(print_fn=logger.debug)
+    model.summary(print_fn=_logger.debug)
     nonexisting_layers = set(layer_names) - set([layer.name for layer in model.layers])
     assert len(nonexisting_layers) == 0, "Layers not found in keras model: %s" % str(nonexisting_layers)
 
@@ -182,12 +182,12 @@ def load_image_keras(image_filepath, image_size):
 
 
 def get_model_outputs(model, x, layer_names, batch_size=None, pca_components=None):
-    logger.info('Computing layer outputs')
+    _logger.info('Computing layer outputs')
     model_type = get_model_type(model)
     compute_layer_outputs = {ModelType.KERAS: compute_layer_outputs_keras,
                              ModelType.PYTORCH: compute_layer_outputs_pytorch}[model_type]
     if batch_size is None or not (0 < batch_size < len(x)):
-        logger.debug("Computing all outputs at once")
+        _logger.debug("Computing all outputs at once")
         return compute_layer_outputs(layer_names, model, x,
                                      functools.partial(arrange_layer_output, pca_components=pca_components))
 
@@ -195,7 +195,7 @@ def get_model_outputs(model, x, layer_names, batch_size=None, pca_components=Non
     batch_start = 0
     while batch_start < len(x):
         batch_end = min(batch_start + batch_size, len(x))
-        logger.debug('Batch: %d->%d/%d', batch_start, batch_end, len(x))
+        _logger.debug('Batch: %d->%d/%d', batch_start, batch_end, len(x))
         batch = x[batch_start:batch_end]
         batch_output = compute_layer_outputs(layer_names, model, batch)
         if outputs is None:
@@ -205,7 +205,7 @@ def get_model_outputs(model, x, layer_names, batch_size=None, pca_components=Non
                 outputs[layer_name] = np.concatenate((outputs[layer_name], layer_output))
         batch_start = batch_end
     for layer_name, layer_output in outputs.items():
-        logger.debug('Arranging layer output %s (shape %s)', layer_name, str(layer_output.shape))
+        _logger.debug('Arranging layer output %s (shape %s)', layer_name, str(layer_output.shape))
         outputs[layer_name] = arrange_layer_output(layer_output, pca_components=pca_components)
     return outputs
 
@@ -240,12 +240,24 @@ def compute_layer_outputs_pytorch(layer_names, model, x, arrange_output=lambda x
     return layer_results
 
 
-def get_model_graph_keras(model):
+def get_model_graph(model):
+    model_type = get_model_type(model)
+    if model_type == ModelType.KERAS:
+        return _get_model_graph_keras(model)
+    elif model_type == ModelType.PYTORCH:
+        return _get_model_graph_pytorch(model)
+
+
+def _get_model_graph_keras(model):
     g = nx.DiGraph()
     for layer in model.layers:
         for outbound_node in layer._outbound_nodes:
             g.add_edge(layer.name, outbound_node.outbound_layer.name)
     return g
+
+
+def _get_model_graph_pytorch(model):
+    raise NotImplementedError()
 
 
 def arrange_layer_output(layer_output, pca_components):
