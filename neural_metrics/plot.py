@@ -4,11 +4,24 @@ import pickle
 import sys
 from collections import OrderedDict, Iterable
 
+import os
 from matplotlib import pyplot
 
 from neural_metrics.metrics.physiology import layers_correlation_meanstd
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
+
+results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
+
+
+def plot_scores(scores, output_filepath=None):
+    type_color_mapping = {'physiology': '#80b1d3', 'anatomy': '#8dd3c7'}
+
+    x = range(len(scores))
+    pyplot.bar(x, [score.y for score in scores], yerr=[score.yerr for score in scores],
+               tick_label=[score.name if score.type != 'anatomy' else 'anatomy' for score in scores],
+               color=[type_color_mapping[score.type] for score in scores])
+    _show_or_save(output_filepath)
 
 
 def plot_layer_correlations(filepaths, labels=None, reverse=False, output_filepath=None):
@@ -30,6 +43,10 @@ def plot_layer_correlations(filepaths, labels=None, reverse=False, output_filepa
         pyplot.xticks(x, layer_metrics.keys(), rotation='vertical')
     pyplot.legend()
 
+    _show_or_save(output_filepath)
+
+
+def _show_or_save(output_filepath):
     if output_filepath is None:
         pyplot.show()
     else:
@@ -43,7 +60,7 @@ def main():
 
     args = parser.parse_args()
     logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
-    logger.info("Running with args %s", vars(args))
+    _logger.info("Running with args %s", vars(args))
     plot_layer_correlations(args.correlations_filepaths)
 
 

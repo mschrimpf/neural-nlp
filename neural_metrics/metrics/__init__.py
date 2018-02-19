@@ -16,7 +16,7 @@ from neural_metrics.models import model_from_activations_filepath
 logger = logging.getLogger(__name__)
 
 
-def physiology_mapping(model_activations_filepath, regions, map_all_layers=True):
+def physiology_mapping(model_activations_filepath, regions, map_all_layers=True, use_cached=True):
     """
     Pseudocode:
 
@@ -29,7 +29,7 @@ def physiology_mapping(model_activations_filepath, regions, map_all_layers=True)
       choose the best single layer addition improvement and add to the corresponding m
     ```
     """
-    similarities = SimilarityWorker(model_activations_filepath, regions)
+    similarities = SimilarityWorker(model_activations_filepath, regions, use_cached=use_cached)
     assert len(similarities.get_model_layers()) > len(regions)
 
     # single layer
@@ -84,6 +84,32 @@ def get_mapped_layers(region_layer_score_mapping):
     return [*itertools.chain(*[layers for layers, score in region_layer_score_mapping.values()])]
 
 
+class Score(object):
+    def __init__(self, name, type, y, yerr, explanation):
+        self.name = name
+        self.type = type
+        self.y = y
+        self.yerr = yerr
+        self.explanation = explanation
+
+
+def score_model_activations(activations_filepath, regions, model_name=None, map_all_layers=True, use_cached=True):
+    model_name = model_name or model_from_activations_filepath(activations_filepath)
+    model = models.model_mappings[model_name](image_size=models._Defaults.image_size)[0]
+
+    region_layer_mapping = physiology_mapping(activations_filepath, regions, map_all_layers=map_all_layers)
+    logger.info("Physiology mapping: " + ", ".join(
+        "{} -> {} ({:.2f})".format(region, ",".join(layers), score)
+        for region, (layers, score) in region_layer_mapping.items()))
+
+    anatomy_score = score_anatomy(model, region_layer_mapping)
+    logger.info("Anatomy score: {}".format(anatomy_score))
+
+    return [Score(name=region, type='physiology', y=score, yerr=0, explanation=layers)
+            for region, (layers, score) in region_layer_mapping.items()] + \
+           [Score(name='edge_ratio', type='anatomy', y=anatomy_score, yerr=0, explanation=None)]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--activations_filepath', type=str,
@@ -100,17 +126,9 @@ def main():
     logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
     logger.info("Running with args {}".format(vars(args)))
 
-    model_name = args.model if args.model else model_from_activations_filepath(args.activations_filepath)
-    model = models.model_mappings[model_name](image_size=models._Defaults.image_size)[0]
-
-    region_layer_mapping = physiology_mapping(args.activations_filepath, args.regions,
-                                              map_all_layers=args.map_all_layers)
-    logger.info("Physiology mapping: " + ", ".join(
-        "{} -> {} ({:.2f})".format(region, ",".join(layers), score)
-        for region, (layers, score) in region_layer_mapping.items()))
-
-    anatomy_score = score_anatomy(model, region_layer_mapping)
-    logger.info("Anatomy score: {}".format(anatomy_score))
+    scores = score_model_activations(args.activations_filepath, regions=args.regions, model_name=args.model,
+                                     map_all_layers=args.map_all_layers)
+    print(scores)
 
 
 if __name__ == '__main__':

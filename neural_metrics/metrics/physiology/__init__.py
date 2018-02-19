@@ -21,16 +21,17 @@ logger = logging.getLogger(__name__)
 class _Defaults(object):
     region = 'IT'
     variance = 'V6'
+    concat_up_to_n_layers = 1
 
 
 class SimilarityWorker(object):
-    def __init__(self, activations_filepath, regions, variance=_Defaults.variance):
+    def __init__(self, activations_filepath, regions, variance=_Defaults.variance, use_cached=True):
         self._region_data = {region: _load_data(region=region)[1] for region in regions}
         raw_reference_data = _load_data(region=next(iter(self._region_data.keys())))[0]
         self._model_activations = load_model_activations(activations_filepath)
         self._model_activations = rearrange_image_to_layer_object_image_activations(
             self._model_activations, raw_reference_data)
-        self._cache = self.StorageCache(activations_filepath, regions, variance)
+        self._cache = self.StorageCache(activations_filepath, regions, variance, use_cached=use_cached)
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
     def __call__(self, layers, region):
@@ -61,13 +62,14 @@ class SimilarityWorker(object):
         Keeps computed similarities in memory (the cache) and writes them to a file (the storage).
         """
 
-        def __init__(self, activations_filepath, regions, variance):
+        def __init__(self, activations_filepath, regions, variance, use_cached=True):
             super(SimilarityWorker.StorageCache, self).__init__()
             self._activations_filepath, self._variance = activations_filepath, variance
             self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
             self._setitem_from_storage = False  # marks when items are set from loading, i.e. we do not have to save
-            for region in regions:
-                self._load_storage(region)
+            if use_cached:
+                for region in regions:
+                    self._load_storage(region)
 
         def __setitem__(self, key, value):
             super(SimilarityWorker.StorageCache, self).__setitem__(key, value)
@@ -130,7 +132,7 @@ def layers_from_raw_activations(model_activations):
 def metrics_for_activations(activations_filepath, use_cached=False,
                             region=_Defaults.region, variance=_Defaults.variance,
                             output_directory=None, ignore_layers=None,
-                            concat_up_to_n_layers=1):
+                            concat_up_to_n_layers=_Defaults.concat_up_to_n_layers):
     args = locals()
     savepath = get_savepath(activations_filepath, region, variance, output_directory)
     if use_cached and os.path.isfile(savepath):
@@ -154,7 +156,7 @@ def metrics_for_activations(activations_filepath, use_cached=False,
         logger.info("{} -> {}+-{}".format(layers, mean, std))
     logger.debug('Saving to {}'.format(savepath))
     save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
-    return layer_metrics
+    return savepath
 
 
 def get_savepath(activations_filepath, region, variance, output_directory=None):
@@ -289,6 +291,34 @@ def _load_data(region, variance='V6'):
     return raw_data, standardized_data
 
 
+def run(activations_filepaths, regions, variance=_Defaults.variance,
+        concat_up_to_n_layers=_Defaults.concat_up_to_n_layers,
+        output_directory=None, ignore_layers=None,
+        save_plot=False):
+    from neural_metrics import plot_layer_correlations, results_dir
+    if isinstance(activations_filepaths, str):  # single filepath
+        activations_filepaths = [activations_filepaths]
+    for activations_filepath in activations_filepaths:
+        logger.info("Processing {}".format(activations_filepath))
+        savepaths = []
+        for region in regions:
+            try:
+                savepath = metrics_for_activations(activations_filepath,
+                                                   region=region, variance=variance,
+                                                   concat_up_to_n_layers=concat_up_to_n_layers,
+                                                   output_directory=output_directory,
+                                                   ignore_layers=ignore_layers)
+                savepaths.append(savepath)
+            except Exception:
+                logger.exception("Error during {}, region {}".format(activations_filepath, region))
+        file_name = os.path.splitext(os.path.basename(activations_filepath))[0]
+        output_filepath = os.path.join(results_dir,
+                                       '{}-physiology-regions_{}.{}'.format(file_name, ''.join(regions), 'svg'))
+        if save_plot:
+            logger.info('Plot saved to {}'.format(output_filepath))
+        plot_layer_correlations(savepaths, labels=regions, output_filepath=None)
+
+
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--activations_filepath', type=str, nargs='+',
@@ -297,7 +327,7 @@ def main():
                         help='one or more filepaths to the model activations')
     parser.add_argument('--output_directory', type=str, default=None,
                         help='directory to save results to. directory of activations_filepath if None')
-    parser.add_argument('--region', type=str, default=_Defaults.region, help='region in brain to compare to')
+    parser.add_argument('--regions', type=str, nargs='+', default=['V4', 'IT'], help='region(s) in brain to compare to')
     parser.add_argument('--variance', type=str, default=_Defaults.variance, help='type of images to compare to')
     parser.add_argument('--concat_up_to_n_layers', type=int, default=1)
     parser.add_argument('--ignore_layers', type=str, nargs='+', default=None)
@@ -306,16 +336,8 @@ def main():
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
     logger.info("Running with args %s", vars(args))
-
-    for activations_filepath in args.activations_filepath:
-        logger.info("Processing {}".format(activations_filepath))
-        try:
-            metrics_for_activations(activations_filepath,
-                                    region=args.region, variance=args.variance,
-                                    concat_up_to_n_layers=args.concat_up_to_n_layers,
-                                    output_directory=args.output_directory, ignore_layers=args.ignore_layers)
-        except Exception:
-            logger.exception("Error during {}".format(activations_filepath))
+    run(activations_filepaths=args.activations_filepath, regions=args.regions, variance=args.region,
+        ignore_layers=args.ignore_layers, save_plot=True)
 
 
 if __name__ == '__main__':
