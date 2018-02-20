@@ -19,7 +19,7 @@ class _Defaults(object):
     model_weights = 'imagenet'
     pca_components = 200
     image_size = 224
-    images_directory = os.path.join(os.path.dirname(__file__), '..', 'images', 'sorted')
+    images_directory = os.path.join(os.path.dirname(__file__), '..', '..', 'images', 'sorted')
     batch_size = 64
 
 
@@ -88,7 +88,7 @@ def print_verify_model_pytorch(model, layer_names):
     def collect_pytorch_layer_names(module, parent_module_parts):
         result = []
         for submodule_name, submodule in module._modules.items():
-            if not isinstance(submodule, torch.nn.Sequential):
+            if not hasattr(submodule, '_modules') or len(submodule._modules) == 0:
                 result.append(PYTORCH_SUBMODULE_SEPARATOR.join(parent_module_parts + [submodule_name]))
             else:
                 result += collect_pytorch_layer_names(submodule, parent_module_parts + [submodule_name])
