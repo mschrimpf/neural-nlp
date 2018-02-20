@@ -3,7 +3,7 @@ import unittest
 import networkx as nx
 
 from neural_metrics.metrics import model_graph
-from neural_metrics.models import vgg16
+from neural_metrics.models.implementations import vgg16
 from tests import TestGraphComparison
 
 

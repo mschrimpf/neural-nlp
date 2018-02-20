@@ -1,6 +1,6 @@
 import networkx as nx
 
-from neural_metrics.models import get_model_graph
+from neural_metrics.models.graph import get_model_graph
 from . import graphs
 from .graphs import cut_graph, combine_graph
 

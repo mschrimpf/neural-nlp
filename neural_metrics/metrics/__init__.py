@@ -11,7 +11,7 @@ from llist import dllist
 from neural_metrics import models
 from neural_metrics.metrics.anatomy import combine_graph, score_edge_ratio, model_graph
 from neural_metrics.metrics.physiology import SimilarityWorker, load_model_activations, layers_from_raw_activations
-from neural_metrics.models import model_from_activations_filepath
+from neural_metrics.models import model_name_from_activations_filepath
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class Score(object):
 
 
 def score_model_activations(activations_filepath, regions, model_name=None, map_all_layers=True, use_cached=True):
-    model_name = model_name or model_from_activations_filepath(activations_filepath)
+    model_name = model_name or model_name_from_activations_filepath(activations_filepath)
     model = models.model_mappings[model_name](image_size=models._Defaults.image_size)[0]
 
     region_layer_mapping = physiology_mapping(activations_filepath, regions, map_all_layers=map_all_layers)

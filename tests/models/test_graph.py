@@ -2,8 +2,8 @@ import unittest
 
 import networkx as nx
 
-from neural_metrics.models import get_model_graph
-from neural_metrics.models import vgg16
+from neural_metrics.models.graph import get_model_graph
+from neural_metrics.models.implementations import vgg16
 from tests import TestGraphComparison
 
 
