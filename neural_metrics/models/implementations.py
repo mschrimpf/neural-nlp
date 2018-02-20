@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.autograd import Variable
+from torchvision.transforms import transforms
 
 from neural_metrics.models.type import ModelType
 
@@ -38,11 +39,55 @@ def mobilenet(image_size, weights='imagenet'):
     return model, preprocess_input
 
 
+def resnet50(image_size, weights='imagenet'):
+    from keras.applications.resnet50 import ResNet50, preprocess_input
+    model = ResNet50(input_shape=(image_size, image_size, 3), weights=weights)
+    return model, preprocess_input
+
+
+def resnet152(image_size, weights='imagenet'):
+    from torchvision.models.resnet import resnet152
+    assert weights in ['imagenet', None]
+    model = resnet152(pretrained=weights == 'imagenet')
+    return model, torchvision_preprocess_input(image_size=image_size)
+
+
+def inception_v3(image_size, weights='imagenet'):
+    from keras.applications.inception_v3 import InceptionV3, preprocess_input
+    model = InceptionV3(input_shape=(image_size, image_size, 3), weights=weights)
+    return model, preprocess_input
+
+
+def inception_resnet_v2(image_size, weights='imagenet'):
+    from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
+    model = InceptionResNetV2(input_shape=(image_size, image_size, 3), weights=weights)
+    return model, preprocess_input
+
+
+def nasnet(image_size, weights='imagenet'):
+    from keras.applications.nasnet import NASNet, preprocess_input
+    model = NASNet(input_shape=(image_size, image_size, 3), weights=weights)
+    return model, preprocess_input
+
+
+def alexnet(image_size, weights='imagenet'):
+    from torchvision.models.alexnet import alexnet
+    assert weights in ['imagenet', None]
+    model = alexnet(pretrained=weights == 'imagenet')
+    return model, torchvision_preprocess_input(image_size=image_size)
+
+
 model_mappings = {
+    'alexnet': alexnet,
     'vgg16': vgg16,
     'densenet': densenet,
     'squeezenet': squeezenet,
-    'mobilenet': mobilenet
+    'mobilenet': mobilenet,
+    'resnet50': resnet50,
+    'resnet152': resnet152,
+    'inception_v3': inception_v3,
+    'inception_resnet_v2': inception_resnet_v2,
+    'nasnet': nasnet
 }
 
 
@@ -65,3 +110,12 @@ def load_image_keras(image_filepath, image_size):
     x = image.img_to_array(img)
     x = np.expand_dims(x, axis=0)
     return x
+
+
+def torchvision_preprocess_input(image_size, normalize_mean=[0.485, 0.456, 0.406], normalize_std=[0.229, 0.224, 0.225]):
+    return transforms.Compose([
+        transforms.Resize(image_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normalize_mean, std=normalize_std),
+        lambda img: img.unsqueeze(0)
+    ])
