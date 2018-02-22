@@ -15,7 +15,7 @@ from xarray import Dataset, DataArray
 from neural_metrics.metrics.similarities import pearsonr_matrix
 from neural_metrics.utils import save
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 class _Defaults(object):
@@ -85,7 +85,7 @@ class SimilarityWorker(object):
             self._logger.debug("Loading region {} from storage".format(region))
             with open(self._savepath(region), 'rb') as f:
                 region_storage = pickle.load(f)
-            for layers, stored_values in region_storage.items():
+            for layers, stored_values in region_storage['data'].items():
                 self._setitem_from_storage = True
                 self[(layers, region)] = stored_values
                 self._setitem_from_storage = False
@@ -97,7 +97,7 @@ class SimilarityWorker(object):
                 if _region == region:
                     region_storage[layers] = values
             with open(self._savepath(region), 'wb') as f:
-                pickle.dump(region_storage, f)
+                pickle.dump({'data': region_storage, 'args': {'region': region, 'variance': self._variance}}, f)
 
         def _savepath(self, region):
             return get_savepath(self._activations_filepath, region=region, variance=self._variance)
@@ -129,14 +129,14 @@ def layers_from_raw_activations(model_activations):
     return list(model_activations[next(iter(model_activations.keys()))].keys())
 
 
-def metrics_for_activations(activations_filepath, use_cached=False,
+def metrics_for_activations(activations_filepath, use_cached=True,
                             region=_Defaults.region, variance=_Defaults.variance,
                             output_directory=None, ignore_layers=None,
                             concat_up_to_n_layers=_Defaults.concat_up_to_n_layers):
     args = locals()
     savepath = get_savepath(activations_filepath, region, variance, output_directory)
     if use_cached and os.path.isfile(savepath):
-        logger.info('Using cached activations: {}'.format(savepath))
+        _logger.info('Using cached activations: {}'.format(savepath))
         return savepath
     # neural data
     raw_data, standardized_data = _load_data(region=region, variance=variance)
@@ -148,13 +148,13 @@ def metrics_for_activations(activations_filepath, use_cached=False,
     # compare
     layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
     for layers, object_activations in comparison_basis.items():
-        logger.debug('Layer{} {}'.format('s' if len(layers) > 1 else '', layers if len(layers) > 1 else layers[0]))
+        _logger.debug('Layer{} {}'.format('s' if len(layers) > 1 else '', layers if len(layers) > 1 else layers[0]))
         cross_predictions, similarities = predictions_similarity(object_activations, standardized_data)
         layer_predictions[layers] = cross_predictions
         layer_metrics[layers] = similarities
         mean, std = layer_correlation_meanstd(similarities)
-        logger.info("{} -> {}+-{}".format(layers, mean, std))
-    logger.debug('Saving to {}'.format(savepath))
+        _logger.info("{} -> {}+-{}".format(layers, mean, std))
+    _logger.debug('Saving to {}'.format(savepath))
     save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
     return savepath
 
@@ -171,12 +171,12 @@ def prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, i
     comparison_layers = [layer for layer in layer_object_activations.keys()
                          if not ignore_layers or layer not in ignore_layers]
     if len(comparison_layers) != len(layer_object_activations):
-        logger.debug('Ignoring layer(s) {}'.format(", ".join(
+        _logger.debug('Ignoring layer(s) {}'.format(", ".join(
             [layer for layer in layer_object_activations.keys() if layer not in comparison_layers])))
     comparison_basis = OrderedDict()
     for layer_num, layer in enumerate(comparison_layers):
         for max_layer in range(layer_num, min(layer_num + concat_up_to_n_layers, len(comparison_layers))):
-            logger.debug("Concatenating from layer {} ({}) up to {}".format(layer_num, layer, max_layer))
+            _logger.debug("Concatenating from layer {} ({}) up to {}".format(layer_num, layer, max_layer))
             layers = tuple(comparison_layers[layer_num:max_layer + 1])
             activations = _merge_layer_activations(layers, layer_object_activations)
             comparison_basis[layers] = activations
@@ -211,19 +211,19 @@ def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
         missing_paths = ", ".join(missing_hvm_image_paths)
         if len(missing_paths) > 300:
             missing_paths = missing_paths[:300] + "..."
-        logger.warning("{} images not found in neural recordings: {}"
-                       .format(len(missing_hvm_image_paths), missing_paths))
+        _logger.warning("{} images not found in neural recordings: {}"
+                        .format(len(missing_hvm_image_paths), missing_paths))
     return layer_object_activations
 
 
 def split_predict(source_responses, target_responses, object_labels, num_splits=10, max_components=200, test_size=.25):
     if source_responses.shape[1] > max_components:
-        logger.debug('PCA from {} to {}'.format(source_responses.shape[1], max_components))
+        _logger.debug('PCA from {} to {}'.format(source_responses.shape[1], max_components))
         source_responses = PCA(n_components=max_components).fit_transform(source_responses)
     cross_validation = StratifiedShuffleSplit(n_splits=num_splits, test_size=test_size)
     results = []
     for split_iterator, (train_idx, test_idx) in enumerate(cross_validation.split(source_responses, object_labels)):
-        logger.debug('Fitting split {}/{}'.format(split_iterator, num_splits))
+        _logger.debug('Fitting split {}/{}'.format(split_iterator, num_splits))
         reg = PLSRegression(n_components=25, scale=False)
         reg.fit(source_responses[train_idx], target_responses[train_idx])
         predicted_responses = reg.predict(source_responses[test_idx])
@@ -242,7 +242,7 @@ def correlate(fitted_responses):
         split = np.unique(split_data.split.data)
         assert len(split) == 1
         split = split[0]
-        logger.debug('Correlating split {}/{}'.format(split + 1, len(fitted_responses)))
+        _logger.debug('Correlating split {}/{}'.format(split + 1, len(fitted_responses)))
         rs = pearsonr_matrix(split_data.target.data, split_data.prediction.data)
         correlations.append(DataArray(rs, dims=['neuroid'], coords={'neuroid': split_data.neuroid},
                                       attrs={'index': split_data.index, 'split': split}))
@@ -299,7 +299,7 @@ def run(activations_filepaths, regions, variance=_Defaults.variance,
     if isinstance(activations_filepaths, str):  # single filepath
         activations_filepaths = [activations_filepaths]
     for activations_filepath in activations_filepaths:
-        logger.info("Processing {}".format(activations_filepath))
+        _logger.info("Processing {}".format(activations_filepath))
         savepaths = []
         for region in regions:
             try:
@@ -310,13 +310,11 @@ def run(activations_filepaths, regions, variance=_Defaults.variance,
                                                    ignore_layers=ignore_layers)
                 savepaths.append(savepath)
             except Exception:
-                logger.exception("Error during {}, region {}".format(activations_filepath, region))
+                _logger.exception("Error during {}, region {}".format(activations_filepath, region))
         file_name = os.path.splitext(os.path.basename(activations_filepath))[0]
         output_filepath = os.path.join(results_dir,
                                        '{}-physiology-regions_{}.{}'.format(file_name, ''.join(regions), 'svg'))
-        if save_plot:
-            logger.info('Plot saved to {}'.format(output_filepath))
-        plot_layer_correlations(savepaths, labels=regions, output_filepath=None)
+        plot_layer_correlations(savepaths, labels=regions, output_filepath=output_filepath if save_plot else None)
 
 
 def main():
@@ -335,8 +333,8 @@ def main():
     args = parser.parse_args()
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
-    logger.info("Running with args %s", vars(args))
-    run(activations_filepaths=args.activations_filepath, regions=args.regions, variance=args.region,
+    _logger.info("Running with args %s", vars(args))
+    run(activations_filepaths=args.activations_filepath, regions=args.regions, variance=args.variance,
         ignore_layers=args.ignore_layers, save_plot=True)
 
 

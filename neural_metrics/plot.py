@@ -30,13 +30,14 @@ def plot_layer_correlations(filepaths, labels=None, reverse=False, output_filepa
     for i, filepath in enumerate(filepaths):
         with open(filepath, 'rb') as file:
             data = pickle.load(file)
-        layer_metrics, args = data['layer_metrics'], data['args']
+        layer_metrics, args = data['data'], data['args']
         if isinstance(args, argparse.Namespace): args = vars(args)
         default_label = '{} ({})'.format(args['region'], args['variance'])
         label = labels[i] if labels is not None else default_label
         if reverse:
             layer_metrics = OrderedDict(reversed(list(layer_metrics.items())))
 
+        layer_metrics = OrderedDict((layer, scores) for layer, scores in layer_metrics.items() if len(layer) == 1)
         means, stds = layers_correlation_meanstd(layer_metrics)
         x = range(len(layer_metrics))
         pyplot.errorbar(x, means, yerr=stds, label=label)
@@ -50,6 +51,7 @@ def _show_or_save(output_filepath):
     if output_filepath is None:
         pyplot.show()
     else:
+        _logger.info('Plot saved to {}'.format(output_filepath))
         pyplot.savefig(output_filepath)
 
 
