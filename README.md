@@ -1,7 +1,7 @@
 # Neural Metrics to compare deep neural nets and cortex
 Evaluate how well your model predicts neural data 
 (retrieved from [mkgu](https://github.com/dicarlolab/mkgu): macaque monkey cortex, areas V4 and IT).
-See [here](results/models_neuralfit.ipynb) for the results of some models.
+See [here](results/scores.ipynb) for the results of some models.
 
 ## Installation
 Install dependencies with conda:

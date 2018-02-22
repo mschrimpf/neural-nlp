@@ -27,3 +27,4 @@ def run(model, layers, regions=_Defaults.regions,
     plot_scores(scores, output_filepath=output_filepath if save_plot else None)
     if save_plot:
         logger.info('Plot saved to {}'.format(output_filepath))
+    return scores
