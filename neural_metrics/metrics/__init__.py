@@ -16,7 +16,7 @@ from neural_metrics.models import model_name_from_activations_filepath
 logger = logging.getLogger(__name__)
 
 
-def physiology_mapping(model_activations_filepath, regions, map_all_layers=True, use_cached=True):
+def _propose_mapping_update_prevnext(linked_layers, mapping, similarities, ignored_regions=()):
     """
     Pseudocode:
 
@@ -29,6 +29,87 @@ def physiology_mapping(model_activations_filepath, regions, map_all_layers=True,
       choose the best single layer addition improvement and add to the corresponding m
     ```
     """
+    mapped_layers = get_mapped_layers(mapping)
+    candidates = []
+    for region, (layers, score) in mapping.items():
+        if region in ignored_regions:
+            continue
+        for prev_next in [(0, 'prev'), (-1, 'next')]:
+            linked_node = _linked_node(linked_layers, layers[prev_next[0]])
+            prev_next_node = getattr(linked_node, prev_next[1])
+            if prev_next_node is not None and prev_next_node.value not in mapped_layers:
+                layers_candidate = ((prev_next_node.value,) + layers) if prev_next[1] == 'prev' \
+                    else layers + (prev_next_node.value,)
+                candidates.append({'layers': layers_candidate, 'region': region})
+    if len(candidates) == 0:
+        return None
+    candidate_similarities = {(candidate['region'], candidate['layers']):
+                                  similarities(layers=candidate['layers'], region=candidate['region'])
+                              for candidate in candidates}
+    mapping_update = max(candidate_similarities.items(), key=itemgetter(1))
+    return mapping_update
+
+
+def _mapping_update_ranking(linked_layers, mapping, similarities, ignored_regions=()):
+    layer_region_mapping = {layer: region for region, (layers, score) in mapping.items() for layer in layers}
+
+    def layer_connected_to_region(layer, region):
+        """
+        Path from layer to region must not be interrupted by another region
+        """
+        linked_node = _linked_node(linked_layers, layer)
+        num_foreign_regions = 0
+        for prevnext in ('prev', 'next'):
+            node = getattr(linked_node, prevnext)
+            while node is not None:
+                if node.value in layer_region_mapping:
+                    foreign_region = layer_region_mapping[node.value] != region
+                    num_foreign_regions = num_foreign_regions + foreign_region
+                    break
+                node = getattr(node, prevnext)
+            # for the sake of this algorithm, we consider the end of the nodes to be a foreign region
+            num_foreign_regions = num_foreign_regions + (node is None)
+        return num_foreign_regions <= 1
+
+    def enclosed_layers(layers, boundary_layer):
+        linked_node = _linked_node(linked_layers, boundary_layer)
+        for prevnext in ('prev', 'next'):
+            node = linked_node
+            enclosed, match = [], False
+            while node is not None:
+                match = match or node.value in layers
+                if match and node.value not in layers:
+                    return enclosed
+                if prevnext == 'prev':
+                    enclosed.insert(0, node.value)
+                else:
+                    enclosed.append(node.value)
+                node = getattr(node, prevnext)
+            if match:  # end of list
+                return enclosed
+        assert False
+
+    mapped_layers = get_mapped_layers(mapping)
+    candidate_single_layer_scores = []
+    for region in mapping.keys():
+        if region in ignored_regions:
+            continue
+        region_candidate_scores = [({'region': region, 'layer': layer}, similarities(region=region, layers=[layer]))
+                                   for layer in linked_layers
+                                   if layer not in mapped_layers and layer_connected_to_region(layer, region)]
+        candidate_single_layer_scores.extend(region_candidate_scores)
+    if len(candidate_single_layer_scores) == 0:
+        return None
+    ranked_layers = sorted(candidate_single_layer_scores, key=itemgetter(1), reverse=True)
+    next_best_layer = ranked_layers[0][0]
+    region, layer = next_best_layer['region'], next_best_layer['layer']
+    layers = enclosed_layers(mapping[region][0], layer)
+    return (region, layers), similarities(region=region, layers=layers)
+
+
+def physiology_mapping(model_activations_filepath, regions,
+                       map_all_layers=True, _mapping_update=_mapping_update_ranking,
+                       use_cached=True):
     similarities = SimilarityWorker(model_activations_filepath, regions, use_cached=use_cached)
     assert len(similarities.get_model_layers()) > len(regions)
 
@@ -51,20 +132,11 @@ def physiology_mapping(model_activations_filepath, regions, map_all_layers=True,
     linked_layers = dllist(similarities.get_model_layers())
     mapping = OrderedDict((region, ((layer,), score)) for region, (layer, score) in mapping.items())
     while len(similarities.get_model_layers()) != len(get_mapped_layers(mapping)):
-        mapped_layers = get_mapped_layers(mapping)
-        candidates = []
-        for region, (layers, score) in mapping.items():
-            for prev_next in [(0, 'prev'), (-1, 'next')]:
-                linked_node = linked_layers.nodeat([node == layers[prev_next[0]] for node in linked_layers].index(True))
-                prev_next_node = getattr(linked_node, prev_next[1])
-                if prev_next_node is not None and prev_next_node.value not in mapped_layers:
-                    layers_candidate = ((prev_next_node.value,) + layers) if prev_next[1] == 'prev' \
-                        else layers + (prev_next_node.value,)
-                    candidates.append({'layers': layers_candidate, 'region': region})
-        candidate_similarities = {(candidate['region'], candidate['layers']):
-                                      similarities(layers=candidate['layers'], region=candidate['region'])
-                                  for candidate in candidates}
-        (region, layers), score = max(candidate_similarities.items(), key=itemgetter(1))
+        mapping_update = _mapping_update(linked_layers, mapping, similarities)
+        if mapping_update is None:
+            logger.info("No more mapping proposals")
+            break
+        (region, layers), score = mapping_update
         if score < mapping[region][1]:
             logger.warning("Negative improvement from candidate in region {} (was {}: {:.4f}, now {}: {:.4f})".format(
                 region, ",".join(mapping[region][0]), mapping[region][1], ",".join(layers), score))
@@ -82,6 +154,10 @@ def score_anatomy(model, region_layer_score_mapping):
 
 def get_mapped_layers(region_layer_score_mapping):
     return [*itertools.chain(*[layers for layers, score in region_layer_score_mapping.values()])]
+
+
+def _linked_node(linked_layers, node_value):
+    return linked_layers.nodeat([node == node_value for node in linked_layers].index(True))
 
 
 class Score(object):
