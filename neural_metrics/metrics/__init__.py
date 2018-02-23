@@ -142,18 +142,7 @@ def physiology_mapping(model_activations_filepath, regions,
     similarities = SimilarityWorker(model_activations_filepath, regions, use_cached=use_cached)
     assert len(similarities.get_model_layers()) > len(regions)
 
-    # single layer
-    single_layer_similarities = {(layer, region): similarities(layers=layer, region=region)
-                                 for layer in similarities.get_model_layers() for region in regions}
-    mapping = OrderedDict()
-    for region in regions:
-        best_layer = max([layer for layer, _region in single_layer_similarities.keys() if _region == region
-                          # not mapped already
-                          and layer not in [mapped_layer for mapped_layer, mapped_score in mapping.values()]],
-                         key=lambda layer: single_layer_similarities[(layer, region)])
-        score = single_layer_similarities[(best_layer, region)]
-        mapping[region] = best_layer, score
-        logger.debug("Update mapping: {} -> {} ({:.2f})".format(region, best_layer, score))
+    mapping = map_single_layers(regions, similarities)
     if not map_all_layers:
         return mapping
 
@@ -175,6 +164,21 @@ def physiology_mapping(model_activations_filepath, regions,
                 finished_regions.append(region)
         mapping[region] = layers, score
         logger.debug("Update mapping: {} -> {} ({:.2f})".format(region, ",".join(layers), score))
+    return mapping
+
+
+def map_single_layers(regions, similarities):
+    single_layer_similarities = {(layer, region): similarities(layers=layer, region=region)
+                                 for layer in similarities.get_model_layers() for region in regions}
+    mapping = OrderedDict()
+    for region in regions:
+        best_layer = max([layer for layer, _region in single_layer_similarities.keys() if _region == region
+                          # not mapped already
+                          and layer not in [mapped_layer for mapped_layer, mapped_score in mapping.values()]],
+                         key=lambda layer: single_layer_similarities[(layer, region)])
+        score = single_layer_similarities[(best_layer, region)]
+        mapping[region] = best_layer, score
+        logger.debug("Update mapping: {} -> {} ({:.2f})".format(region, best_layer, score))
     return mapping
 
 
