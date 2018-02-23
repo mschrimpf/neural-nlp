@@ -101,7 +101,7 @@ def _mapping_update_all_surround(linked_layers, mapping, similarities, ignored_r
                            and layer_connected_to_region(layer, region, linked_layers, layer_region_mapping)]
         candidate_layers = [expanded_layers[start:start + num_layers]
                             for num_layers in range(1, len(expanded_layers) + 1)
-                            for start in range(len(expanded_layers) - num_layers)]
+                            for start in range(len(expanded_layers) - num_layers + 1)]
         candidate_layers = [layers for layers in candidate_layers if all(layer in layers for layer in layer_basis)
                             and set(layers) != set(layer_basis)]
         for layers in candidate_layers:
@@ -138,7 +138,7 @@ def layer_connected_to_region(layer, region, linked_layers, layer_region_mapping
 
 def physiology_mapping(model_activations_filepath, regions,
                        map_all_layers=True, _mapping_update=_mapping_update_all_surround,
-                       no_negative_updates=False, use_cached=True):
+                       no_negative_updates=True, use_cached=True):
     similarities = SimilarityWorker(model_activations_filepath, regions, use_cached=use_cached)
     assert len(similarities.get_model_layers()) > len(regions)
 
@@ -159,7 +159,7 @@ def physiology_mapping(model_activations_filepath, regions,
         if score < mapping[region][1]:
             logger.warning("Negative change from candidate in region {} (was {}: {:.4f}, now {}: {:.4f}){}".format(
                 region, ",".join(mapping[region][0]), mapping[region][1], ",".join(layers), score,
-                "ignoring region" if no_negative_updates else ""))
+                " - ignoring region" if no_negative_updates else ""))
             if no_negative_updates:
                 finished_regions.append(region)
         mapping[region] = layers, score
