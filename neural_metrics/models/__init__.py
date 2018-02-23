@@ -4,8 +4,6 @@ import os
 import re
 import sys
 
-import torch
-
 from neural_metrics.models.implementations import model_mappings, prepare_images
 from neural_metrics.models.outputs import get_model_outputs
 from neural_metrics.models.type import ModelType, get_model_type
@@ -104,7 +102,7 @@ def print_verify_model_keras(model, layer_names):
     assert len(nonexisting_layers) == 0, "Layers not found in keras model: %s" % str(nonexisting_layers)
 
 
-def get_savepath(model, model_weights, images_directory=_Defaults.images_directory):
+def get_savepath(model, model_weights=_Defaults.model_weights, images_directory=_Defaults.images_directory):
     return os.path.join(images_directory, '{}-weights_{}-activations.pkl'.format(model, model_weights))
 
 
