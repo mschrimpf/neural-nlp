@@ -79,11 +79,12 @@ class SimilarityWorker(object):
             self._save_storage(region)
 
         def _load_storage(self, region):
-            if not os.path.isfile(self._savepath(region)):
+            region_savepath = self._savepath(region)
+            if not os.path.isfile(region_savepath):
                 self._logger.debug("Region {} not stored in memory".format(region))
                 return
-            self._logger.debug("Loading region {} from storage".format(region))
-            with open(self._savepath(region), 'rb') as f:
+            self._logger.debug("Loading region {} from storage: {}".format(region, region_savepath))
+            with open(region_savepath, 'rb') as f:
                 region_storage = pickle.load(f)
             for layers, stored_values in region_storage['data'].items():
                 self._setitem_from_storage = True
@@ -91,13 +92,16 @@ class SimilarityWorker(object):
                 self._setitem_from_storage = False
 
         def _save_storage(self, region):
-            self._logger.debug("Saving region {} to storage".format(region))
+            savepath = self._savepath(region)
+            self._logger.debug("Saving region {} to storage: {}".format(region, savepath))
             region_storage = {}
             for (layers, _region), values in self.items():
                 if _region == region:
                     region_storage[layers] = values
-            with open(self._savepath(region), 'wb') as f:
+            savepath_part = savepath + '.filepart'  # write first to avoid partial writes
+            with open(savepath_part, 'wb') as f:
                 pickle.dump({'data': region_storage, 'args': {'region': region, 'variance': self._variance}}, f)
+            os.rename(savepath_part, savepath)
 
         def _savepath(self, region):
             return get_savepath(self._activations_filepath, region=region, variance=self._variance)
