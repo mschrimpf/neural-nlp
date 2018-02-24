@@ -1,7 +1,9 @@
-import numpy as np
+import logging
 import os
 from llist import dllist
-import logging
+
+import numpy as np
+import sys
 from matplotlib import pyplot
 
 from neural_metrics import models
@@ -11,7 +13,8 @@ from neural_metrics.metrics.physiology import SimilarityWorker
 _logger = logging.getLogger(__name__)
 
 
-def plot_layer_combinations_gradient(model, model_weights=models._Defaults.model_weights, regions=('V4', 'IT')):
+def plot_layer_combinations_from_single_layer(model, model_weights=models._Defaults.model_weights,
+                                              regions=('V4', 'IT')):
     activations_filepath = models.get_savepath(model, model_weights=model_weights)
     assert os.path.isfile(activations_filepath)
     for region in regions:
@@ -47,5 +50,28 @@ def plot_layer_combinations_gradient(model, model_weights=models._Defaults.model
         pyplot.show()
 
 
+def plot_all_connected_layer_combinations(model, model_weights=models._Defaults.model_weights,
+                                          regions=('V4', 'IT'), cutoff=20):
+    activations_filepath = models.get_savepath(model, model_weights=model_weights)
+    assert os.path.isfile(activations_filepath)
+    for region in regions:
+        similarities = SimilarityWorker(activations_filepath, (region,))
+        layers = similarities.get_model_layers()
+        layer_combinations = [layers[start:start + num_layers]
+                              for num_layers in range(1, len(layers) + 1)
+                              for start in range(len(layers) - num_layers + 1)]
+        _logger.debug("{} combinations".format(len(layer_combinations)))
+        scores = [similarities(region=region, layers=layers) for layers in layer_combinations]
+        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:cutoff]
+
+        pyplot.plot(range(len(ranked_indices)), [scores[i] for i in ranked_indices])
+        pyplot.xticks(range(len(ranked_indices)),
+                      ["{}{}".format(layers[0], " - " + layers[-1] if len(layers) > 1 else "")
+                       for layers in [layer_combinations[i] for i in ranked_indices]], rotation='vertical')
+        pyplot.title(region)
+        pyplot.show()
+
+
 if __name__ == '__main__':
-    plot_layer_combinations_gradient('vgg16')
+    logging.basicConfig(stream=sys.stdout, level=logging.getLevelName("DEBUG"))
+    plot_all_connected_layer_combinations('resnet50')
