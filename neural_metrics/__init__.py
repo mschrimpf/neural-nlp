@@ -20,7 +20,7 @@ def run(model, layers, regions=_Defaults.regions,
     activations_savepath = activations_for_model(model=model, model_weights=model_weights,
                                                  layers=layers, use_cached=True)
     logger.info('Computing scores')
-    scores = score_model_activations(activations_savepath, regions, use_cached=True)
+    scores = score_model_activations(activations_savepath, regions)
     logger.info('Plotting')
     file_name = os.path.splitext(os.path.basename(activations_savepath))[0]
     output_filepath = os.path.join(results_dir, '{}-scores-regions_{}.{}'.format(file_name, ''.join(regions), 'svg'))

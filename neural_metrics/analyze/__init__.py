@@ -7,7 +7,7 @@ import sys
 from matplotlib import pyplot
 
 from neural_metrics import models
-from neural_metrics.metrics import map_single_layers, _linked_node
+from neural_metrics.metrics.physiology.mapping import map_single_layers, _linked_node
 from neural_metrics.metrics.physiology import SimilarityWorker
 
 _logger = logging.getLogger(__name__)

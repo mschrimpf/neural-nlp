@@ -1,7 +1,7 @@
 import unittest
 from llist import dllist
 
-from neural_metrics.metrics import _mapping_update_ranking, _mapping_update_all_surround
+from neural_metrics.metrics.physiology.mapping import mapping_update_ranking, mapping_update_all_surround
 
 
 class TestMappingUpdateRanking(unittest.TestCase):
@@ -11,7 +11,7 @@ class TestMappingUpdateRanking(unittest.TestCase):
 
         linked_layers = dllist(['layer{}'.format(i + 1) for i in range(8)])
         mapping = {'region1': (('layer3',), 0.5), 'region2': (('layer6',), 0.5)}
-        (region, layers), score = _mapping_update_ranking(linked_layers, mapping, similarities)
+        (region, layers), score = mapping_update_ranking(linked_layers, mapping, similarities)
         self.assertEqual('region1', region)
         self.assertListEqual(['layer3', 'layer4'], layers)
         self.assertEqual(0.1, score)
@@ -22,7 +22,7 @@ class TestMappingUpdateRanking(unittest.TestCase):
 
         linked_layers = dllist(['layer{}'.format(i + 1) for i in range(8)])
         mapping = {'region1': (('layer3',), 0.5), 'region2': (('layer6',), 0.5)}
-        (region, layers), score = _mapping_update_ranking(linked_layers, mapping, similarities)
+        (region, layers), score = mapping_update_ranking(linked_layers, mapping, similarities)
         self.assertEqual('region1', region)
         self.assertListEqual(['layer3', 'layer4', 'layer5'], layers)
         self.assertEqual(0.1, score)
@@ -41,7 +41,7 @@ class TestMappingUpdateRanking(unittest.TestCase):
 
         linked_layers = dllist(['layer{}'.format(i + 1) for i in range(8)])
         mapping = {'region1': (('layer3',), 0.5), 'region2': (('layer6',), 0.5)}
-        (region, layers), score = _mapping_update_ranking(linked_layers, mapping, similarities)
+        (region, layers), score = mapping_update_ranking(linked_layers, mapping, similarities)
         self.assertEqual('region1', region)
         self.assertListEqual(['layer3', 'layer4'], layers)
         self.assertEqual(0.1, score)
@@ -52,7 +52,7 @@ class TestMappingUpdateRanking(unittest.TestCase):
 
         linked_layers = dllist(['layer{}'.format(i + 1) for i in range(3)])
         mapping = {'region1': (('layer1', 'layer2'), 0.5), 'region2': (('layer3',), 0.5)}
-        proposal = _mapping_update_ranking(linked_layers, mapping, similarities)
+        proposal = mapping_update_ranking(linked_layers, mapping, similarities)
         self.assertIsNone(proposal)
 
 
@@ -63,7 +63,7 @@ class TestMappingAllSurrounding(unittest.TestCase):
 
         linked_layers = dllist(['layer{}'.format(i + 1) for i in range(8)])
         mapping = {'region1': (('layer3',), 0.5), 'region2': (('layer6',), 0.5)}
-        (region, layers), score = _mapping_update_all_surround(linked_layers, mapping, similarities)
+        (region, layers), score = mapping_update_all_surround(linked_layers, mapping, similarities)
         self.assertEqual('region1', region)
         self.assertListEqual(['layer2', 'layer3', 'layer4'], layers)
         self.assertEqual(0.4, score)

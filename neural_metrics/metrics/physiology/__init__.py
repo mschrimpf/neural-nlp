@@ -1,9 +1,8 @@
 import argparse
 import logging
 import os
-import pickle
 import sys
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 
 import mkgu
 import numpy as np
@@ -12,29 +11,31 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import StratifiedShuffleSplit
 from xarray import Dataset, DataArray
 
+from neural_metrics import utils
 from neural_metrics.metrics.similarities import pearsonr_matrix
-from neural_metrics.utils import save
+from neural_metrics.models import load_model_activations
 
 _logger = logging.getLogger(__name__)
 
 
 class _Defaults(object):
-    region = 'IT'
+    regions = ['V4', 'IT']
     variance = 'V6'
-    concat_up_to_n_layers = 1
 
 
 class SimilarityWorker(object):
-    def __init__(self, activations_filepath, regions, variance=_Defaults.variance, use_cached=True):
+    def __init__(self, activations_filepath, regions, variance=_Defaults.variance,
+                 output_directory=None, use_cached=True):
+        self._variance = variance
         self._region_data = {region: _load_data(region=region)[1] for region in regions}
         raw_reference_data = _load_data(region=next(iter(self._region_data.keys())))[0]
         self._model_activations = load_model_activations(activations_filepath)
-        self._model_activations = rearrange_image_to_layer_object_image_activations(
+        self._model_activations = _rearrange_image_to_layer_object_image_activations(
             self._model_activations, raw_reference_data)
-        self._cache = self.StorageCache(activations_filepath, regions, variance, use_cached=use_cached)
+        self._cache = self.StorageCache(activations_filepath, output_directory=output_directory, use_cached=use_cached)
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
-    def __call__(self, layers, region):
+    def __call__(self, layers, region, return_raw=False):
         if isinstance(layers, str):  # single layer passed
             layers = [layers]
         layers = tuple(layers)
@@ -44,70 +45,34 @@ class SimilarityWorker(object):
         if region not in self._region_data.keys():
             raise ValueError("Unknown region {}".format(region))
 
-        if (layers, region) in self._cache:
+        cache_key = (layers, region, self._variance)
+        if cache_key in self._cache:
             self._logger.debug("Similarity between {} and {} from cache".format(",".join(layers), region))
-            _similarities = self._cache[(layers, region)]
+            _similarities = self._cache[cache_key]
         else:
             self._logger.debug("Computing similarity between {} and {}".format(",".join(layers), region))
             layers_activations = _merge_layer_activations(layers, self._model_activations)
-            _similarities = predictions_similarity(layers_activations, self._region_data[region])[1]
-            self._cache[(layers, region)] = _similarities
-        return layer_correlation_meanstd(_similarities)[0]
+            _similarities = _predictions_similarity(layers_activations, self._region_data[region])[1]
+            self._cache[cache_key] = _similarities
+        return _layer_correlation_meanstd(_similarities)[0] if not return_raw else _similarities
 
     def get_model_layers(self):
         return list(self._model_activations.keys())
 
-    class StorageCache(dict):
-        """
-        Keeps computed similarities in memory (the cache) and writes them to a file (the storage).
-        """
+    def get_savepath(self):
+        return self._cache._savepath
 
-        def __init__(self, activations_filepath, regions, variance, use_cached=True):
-            super(SimilarityWorker.StorageCache, self).__init__()
-            self._activations_filepath, self._variance = activations_filepath, variance
-            self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
-            self._setitem_from_storage = False  # marks when items are set from loading, i.e. we do not have to save
-            if use_cached:
-                for region in regions:
-                    self._load_storage(region)
+    class StorageCache(utils.StorageCache):
+        def __init__(self, activations_filepath, output_directory=None, use_cached=True):
+            savepath = get_savepath(activations_filepath, output_directory=output_directory)
+            super(SimilarityWorker.StorageCache, self).__init__(savepath=savepath, use_cached=use_cached)
 
         def __setitem__(self, key, value):
+            assert len(key) == 3  # layers, region, variance
             super(SimilarityWorker.StorageCache, self).__setitem__(key, value)
-            if self._setitem_from_storage:
-                return
-            layers, region = key
-            self._save_storage(region)
-
-        def _load_storage(self, region):
-            region_savepath = self._savepath(region)
-            if not os.path.isfile(region_savepath):
-                self._logger.debug("Region {} not stored in memory".format(region))
-                return
-            self._logger.debug("Loading region {} from storage: {}".format(region, region_savepath))
-            with open(region_savepath, 'rb') as f:
-                region_storage = pickle.load(f)
-            for layers, stored_values in region_storage['data'].items():
-                self._setitem_from_storage = True
-                self[(layers, region)] = stored_values
-                self._setitem_from_storage = False
-
-        def _save_storage(self, region):
-            savepath = self._savepath(region)
-            self._logger.debug("Saving region {} to storage: {}".format(region, savepath))
-            region_storage = {}
-            for (layers, _region), values in self.items():
-                if _region == region:
-                    region_storage[layers] = values
-            savepath_part = savepath + '.filepart'  # write first to avoid partial writes
-            with open(savepath_part, 'wb') as f:
-                pickle.dump({'data': region_storage, 'args': {'region': region, 'variance': self._variance}}, f)
-            os.rename(savepath_part, savepath)
-
-        def _savepath(self, region):
-            return get_savepath(self._activations_filepath, region=region, variance=self._variance)
 
 
-def predictions_similarity(object_activations, standardized_data):
+def _predictions_similarity(object_activations, standardized_data):
     layer_activations = []
     neural_responses = []
     objects = []
@@ -123,68 +88,30 @@ def predictions_similarity(object_activations, standardized_data):
     # fit all neuroids jointly
     layer_activations = np.array(layer_activations)
     neural_responses = np.array([n.data for n in neural_responses])
-    cross_predictions = split_predict(layer_activations, neural_responses, objects)
-    similarities = correlate(cross_predictions)
+    cross_predictions = _split_predict(layer_activations, neural_responses, objects)
+    similarities = _correlate(cross_predictions)
     return cross_predictions, similarities
 
 
-def layers_from_raw_activations(model_activations):
-    # model_activations: image_path -> {layer -> activations}
-    return list(model_activations[next(iter(model_activations.keys()))].keys())
+def metrics_for_activations(activations_filepath, regions=_Defaults.regions, variance=_Defaults.variance,
+                            output_directory=None, use_cached=True):
+    similarities = SimilarityWorker(activations_filepath, regions=regions, variance=variance,
+                                    output_directory=output_directory, use_cached=use_cached)
+    for region in regions:
+        _logger.debug('Region {}'.format(region))
+        for layer in similarities.get_model_layers():
+            _logger.debug('Layer {}'.format(layer))
+            _similarities = similarities(layers=[layer], region=region, return_raw=True)
+            mean, std = _layer_correlation_meanstd(_similarities)
+            _logger.info("{} -> {}+-{}".format(layer, mean, std))
+    return similarities.get_savepath()
 
 
-def metrics_for_activations(activations_filepath, use_cached=True,
-                            region=_Defaults.region, variance=_Defaults.variance,
-                            output_directory=None, ignore_layers=None,
-                            concat_up_to_n_layers=_Defaults.concat_up_to_n_layers):
-    args = locals()
-    savepath = get_savepath(activations_filepath, region, variance, output_directory)
-    if use_cached and os.path.isfile(savepath):
-        _logger.info('Using cached activations: {}'.format(savepath))
-        return savepath
-    # neural data
-    raw_data, standardized_data = _load_data(region=region, variance=variance)
-    # model data
-    image_activations = load_model_activations(activations_filepath)
-    layer_object_activations = rearrange_image_to_layer_object_image_activations(image_activations, raw_data)
-    # prepare combined activations
-    comparison_basis = prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, ignore_layers)
-    # compare
-    layer_metrics, layer_predictions = OrderedDict(), OrderedDict()
-    for layers, object_activations in comparison_basis.items():
-        _logger.debug('Layer{} {}'.format('s' if len(layers) > 1 else '', layers if len(layers) > 1 else layers[0]))
-        cross_predictions, similarities = predictions_similarity(object_activations, standardized_data)
-        layer_predictions[layers] = cross_predictions
-        layer_metrics[layers] = similarities
-        mean, std = layer_correlation_meanstd(similarities)
-        _logger.info("{} -> {}+-{}".format(layers, mean, std))
-    _logger.debug('Saving to {}'.format(savepath))
-    save({'args': args, 'layer_metrics': layer_metrics, 'layer_predictions': layer_predictions}, savepath)
-    return savepath
-
-
-def get_savepath(activations_filepath, region, variance, output_directory=None):
+def get_savepath(activations_filepath, output_directory=None):
     [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
     output_directory = output_directory or os.path.dirname(activations_filepath)
-    savepath = os.path.join(output_directory, save_name + '-correlations-region_{}-variance_{}{}'.format(
-        region, variance, save_ext))
+    savepath = os.path.join(output_directory, save_name + '-correlations{}'.format(save_ext))
     return savepath
-
-
-def prepare_layer_activations(layer_object_activations, concat_up_to_n_layers, ignore_layers):
-    comparison_layers = [layer for layer in layer_object_activations.keys()
-                         if not ignore_layers or layer not in ignore_layers]
-    if len(comparison_layers) != len(layer_object_activations):
-        _logger.debug('Ignoring layer(s) {}'.format(", ".join(
-            [layer for layer in layer_object_activations.keys() if layer not in comparison_layers])))
-    comparison_basis = OrderedDict()
-    for layer_num, layer in enumerate(comparison_layers):
-        for max_layer in range(layer_num, min(layer_num + concat_up_to_n_layers, len(comparison_layers))):
-            _logger.debug("Concatenating from layer {} ({}) up to {}".format(layer_num, layer, max_layer))
-            layers = tuple(comparison_layers[layer_num:max_layer + 1])
-            activations = _merge_layer_activations(layers, layer_object_activations)
-            comparison_basis[layers] = activations
-    return comparison_basis
 
 
 def _merge_layer_activations(layers, layer_object_activations):
@@ -199,11 +126,11 @@ def _merge_layer_activations(layers, layer_object_activations):
     return activations
 
 
-def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
+def _rearrange_image_to_layer_object_image_activations(image_activations, hvm):
     layer_object_activations = defaultdict(lambda: defaultdict(dict))
     missing_hvm_image_paths = []
     for image_path, layer_activations in image_activations.items():
-        image_id = get_id_from_image_path(image_path)
+        image_id = _get_id_from_image_path(image_path)
         if image_id not in hvm.id.values:
             missing_hvm_image_paths.append(image_path)
             continue
@@ -220,7 +147,11 @@ def rearrange_image_to_layer_object_image_activations(image_activations, hvm):
     return layer_object_activations
 
 
-def split_predict(source_responses, target_responses, object_labels, num_splits=10, max_components=200, test_size=.25):
+def _get_id_from_image_path(image_path):
+    return os.path.splitext(os.path.basename(image_path))[0]
+
+
+def _split_predict(source_responses, target_responses, object_labels, num_splits=10, max_components=200, test_size=.25):
     if source_responses.shape[1] > max_components:
         _logger.debug('PCA from {} to {}'.format(source_responses.shape[1], max_components))
         source_responses = PCA(n_components=max_components).fit_transform(source_responses)
@@ -240,7 +171,7 @@ def split_predict(source_responses, target_responses, object_labels, num_splits=
     return results
 
 
-def correlate(fitted_responses):
+def _correlate(fitted_responses):
     correlations = []
     for split_data in fitted_responses:
         split = np.unique(split_data.split.data)
@@ -253,28 +184,18 @@ def correlate(fitted_responses):
     return correlations
 
 
-def layer_correlation_meanstd(correlations):
+def _layer_correlation_meanstd(correlations):
     neuroid_medians = [np.median(correlation.data) for correlation in correlations]
     return np.mean(neuroid_medians), np.std(neuroid_medians)
 
 
-def layers_correlation_meanstd(layers_correlations):
+def _layers_correlation_meanstd(layers_correlations):
     means, stds = [], []
     for layer_correlation in layers_correlations.values():
-        mean, std = layer_correlation_meanstd(layer_correlation)
+        mean, std = _layer_correlation_meanstd(layer_correlation)
         means.append(mean)
         stds.append(std)
     return means, stds
-
-
-def load_model_activations(activations_filepath):
-    with open(activations_filepath, 'rb') as file:
-        image_activations = pickle.load(file)
-    return image_activations['activations']
-
-
-def get_id_from_image_path(image_path):
-    return os.path.splitext(os.path.basename(image_path))[0]
 
 
 _data = None
@@ -296,29 +217,21 @@ def _load_data(region, variance='V6'):
 
 
 def run(activations_filepaths, regions, variance=_Defaults.variance,
-        concat_up_to_n_layers=_Defaults.concat_up_to_n_layers,
-        output_directory=None, ignore_layers=None,
-        save_plot=False):
+        output_directory=None, save_plot=False):
     from neural_metrics import plot_layer_correlations, results_dir
     if isinstance(activations_filepaths, str):  # single filepath
         activations_filepaths = [activations_filepaths]
     for activations_filepath in activations_filepaths:
         _logger.info("Processing {}".format(activations_filepath))
-        savepaths = []
-        for region in regions:
-            try:
-                savepath = metrics_for_activations(activations_filepath,
-                                                   region=region, variance=variance,
-                                                   concat_up_to_n_layers=concat_up_to_n_layers,
-                                                   output_directory=output_directory,
-                                                   ignore_layers=ignore_layers)
-                savepaths.append(savepath)
-            except Exception:
-                _logger.exception("Error during {}, region {}".format(activations_filepath, region))
-        file_name = os.path.splitext(os.path.basename(activations_filepath))[0]
-        output_filepath = os.path.join(results_dir,
-                                       '{}-physiology-regions_{}.{}'.format(file_name, ''.join(regions), 'svg'))
-        plot_layer_correlations(savepaths, labels=regions, output_filepath=output_filepath if save_plot else None)
+        try:
+            savepath = metrics_for_activations(activations_filepath, regions=regions, variance=variance,
+                                               output_directory=output_directory)
+            file_name = os.path.splitext(os.path.basename(activations_filepath))[0]
+            output_filepath = os.path.join(results_dir,
+                                           '{}-physiology-regions_{}.{}'.format(file_name, ''.join(regions), 'svg'))
+            plot_layer_correlations(savepath, output_filepath=output_filepath if save_plot else None)
+        except Exception:
+            _logger.exception("Error during {}, regions {}".format(activations_filepath, regions))
 
 
 def main():
@@ -331,15 +244,12 @@ def main():
                         help='directory to save results to. directory of activations_filepath if None')
     parser.add_argument('--regions', type=str, nargs='+', default=['V4', 'IT'], help='region(s) in brain to compare to')
     parser.add_argument('--variance', type=str, default=_Defaults.variance, help='type of images to compare to')
-    parser.add_argument('--concat_up_to_n_layers', type=int, default=1)
-    parser.add_argument('--ignore_layers', type=str, nargs='+', default=None)
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
     log_level = logging.getLevelName(args.log_level)
     logging.basicConfig(stream=sys.stdout, level=log_level)
     _logger.info("Running with args %s", vars(args))
-    run(activations_filepaths=args.activations_filepath, regions=args.regions, variance=args.variance,
-        ignore_layers=args.ignore_layers, save_plot=True)
+    run(activations_filepaths=args.activations_filepath, regions=args.regions, variance=args.variance, save_plot=True)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import pickle
 import re
 import sys
 
@@ -115,3 +116,9 @@ def model_name_from_activations_filepath(activations_filepath):
 
 if __name__ == '__main__':
     main()
+
+
+def load_model_activations(activations_filepath):
+    with open(activations_filepath, 'rb') as file:
+        image_activations = pickle.load(file)
+    return image_activations['activations']
