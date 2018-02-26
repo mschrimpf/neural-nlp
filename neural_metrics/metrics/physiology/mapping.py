@@ -133,7 +133,7 @@ def physiology_mapping(model_activations_filepath, regions,
                        map_all_layers=True, _mapping_update=mapping_update_all_surround,
                        no_negative_updates=True, use_cached=True):
     similarities = SimilarityWorker(model_activations_filepath, regions, use_cached=use_cached)
-    assert len(similarities.get_model_layers()) > len(regions)
+    assert len(similarities.get_model_layers()) >= len(regions)
 
     mapping = map_single_layers(regions, similarities)
     if not map_all_layers:
