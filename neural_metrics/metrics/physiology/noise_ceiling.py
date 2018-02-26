@@ -1,19 +1,55 @@
 import argparse
-
+import logging
 import math
 import random
-
-import logging
-import mkgu
-import numpy as np
 import sys
 
-from sklearn.model_selection import train_test_split
+import mkgu
+import numpy as np
 from sklearn.cross_decomposition import PLSRegression
+from sklearn.model_selection import train_test_split
 
 from neural_metrics.metrics.similarities import pearsonr_matrix
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
+
+
+class _Defaults(object):
+    region = 'IT'
+    variance = 'V6'
+    test_size = 0.25
+    regression_components = 25
+    cross_correlations = 10
+
+
+def noise_ceiling_by_category(hvm=None, test_size=_Defaults.test_size,
+                              regression_components=_Defaults.regression_components,
+                              cross_correlations=_Defaults.cross_correlations):
+    hvm = hvm if hvm is not None else _load_hvm()
+    categories = np.unique(hvm.category)
+    category_correlations = {}
+    for category_iter, category in enumerate(categories):
+        _logger.debug("Category {}/{}: {}".format(category_iter + 1, cross_correlations, category))
+        category_data = hvm.sel(category=category).squeeze('time_bin')
+        correlations = []
+        for split in range(cross_correlations):
+            _logger.debug("Split {}/{}".format(split + 1, cross_correlations))
+            correlations.append(compare(category_data,
+                                        regression_components=regression_components, test_size=test_size))
+        category_correlations[category] = np.mean(correlations)
+    return category_correlations
+
+
+def noise_ceiling(hvm=None, test_size=_Defaults.test_size, regression_components=_Defaults.regression_components,
+                  cross_correlations=_Defaults.cross_correlations):
+    hvm = hvm if hvm is not None else _load_hvm()
+    category_data = hvm.squeeze('time_bin')
+    correlations = []
+    for split in range(cross_correlations):
+        _logger.debug("Split {}/{}".format(split + 1, cross_correlations))
+        correlations.append(compare(category_data,
+                                    regression_components=regression_components, test_size=test_size))
+    return np.mean(correlations)
 
 
 def compare(category_data, regression_components=25, test_size=0.25):
@@ -46,44 +82,38 @@ def compare(category_data, regression_components=25, test_size=0.25):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--region', type=str, default='IT')
-    parser.add_argument('--variance', type=str, default='V6')
+    parser.add_argument('--region', type=str, default=_Defaults.region)
+    parser.add_argument('--variance', type=str, default=_Defaults.variance)
     parser.add_argument('--by_category', action='store_true', default=False,
                         help='Calculate correlation across each category independently')
     parser.add_argument('--no-by_category', action='store_false', dest='by_category',
                         help='Calculate correlation across all images')
-    parser.add_argument('--cross_correlations', type=int, default=10)
-    parser.add_argument('--regression_components', type=int, default=25)
-    parser.add_argument('--test_size', type=int, default=0.25)
+    parser.add_argument('--cross_correlations', type=int, default=_Defaults.cross_correlations)
+    parser.add_argument('--regression_components', type=int, default=_Defaults.regression_components)
+    parser.add_argument('--test_size', type=int, default=_Defaults.test_size)
+    parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-    logger.info("Running with args %s", vars(args))
+    logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
+    _logger.info("Running with args %s", vars(args))
 
-    hvm = mkgu.get_assembly(name="HvM")
-    hvm = hvm.sel(region=args.region, var=args.variance)
-    hvm.load()
+    hvm = _load_hvm(region=args.region, variance=args.variance)
 
     if args.by_category:
-        categories = np.unique(hvm.category)
-        category_correlations = {}
-        for category_iter, category in enumerate(categories):
-            logger.debug("Category {}/{}: {}".format(category_iter + 1, args.cross_correlations, category))
-            category_data = hvm.sel(category=category).squeeze('time_bin')
-            correlations = []
-            for split in range(args.cross_correlations):
-                logger.debug("Split {}/{}".format(split + 1, args.cross_correlations))
-                correlations.append(compare(category_data,
-                                            regression_components=args.regression_components, test_size=args.test_size))
-            category_correlations[category] = np.mean(correlations)
-        logger.info("Category correlations: {}".format(category_correlations))
+        category_correlations = noise_ceiling_by_category(hvm, test_size=args.test_size,
+                                                          regression_components=args.regression_components,
+                                                          cross_correlations=args.cross_correlations)
+        _logger.info("Category correlations: {}".format(category_correlations))
     else:
-        category_data = hvm.squeeze('time_bin')
-        correlations = []
-        for split in range(args.cross_correlations):
-            logger.debug("Split {}/{}".format(split + 1, args.cross_correlations))
-            correlations.append(compare(category_data,
-                                        regression_components=args.regression_components, test_size=args.test_size))
-        logger.info("Correlations: {}".format(np.mean(correlations)))
+        ceiling = noise_ceiling(hvm, test_size=args.test_size, regression_components=args.regression_components,
+                                cross_correlations=args.cross_correlations)
+        _logger.info("Correlations: {}".format(ceiling))
+
+
+def _load_hvm(region=_Defaults.region, variance=_Defaults.variance):
+    hvm = mkgu.get_assembly(name="HvM")
+    hvm = hvm.sel(region=region, var=variance)
+    hvm.load()
+    return hvm
 
 
 if __name__ == '__main__':
