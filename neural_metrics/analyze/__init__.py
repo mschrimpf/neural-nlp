@@ -3,12 +3,11 @@ import os
 from llist import dllist
 
 import numpy as np
-import sys
 from matplotlib import pyplot
 
 from neural_metrics import models
-from neural_metrics.metrics.physiology.mapping import map_single_layers, _linked_node
 from neural_metrics.metrics.physiology import SimilarityWorker
+from neural_metrics.metrics.physiology.mapping import map_single_layers, _linked_node
 
 _logger = logging.getLogger(__name__)
 
@@ -51,27 +50,56 @@ def plot_layer_combinations_from_single_layer(model, model_weights=models._Defau
 
 
 def plot_all_connected_layer_combinations(model, model_weights=models._Defaults.model_weights,
-                                          regions=('V4', 'IT'), cutoff=20):
+                                          regions=('V4', 'IT'), cutoff=10):
     activations_filepath = models.get_savepath(model, model_weights=model_weights)
     assert os.path.isfile(activations_filepath)
     for region in regions:
+        _logger.debug("Region {}".format(region))
         similarities = SimilarityWorker(activations_filepath, (region,))
         layers = similarities.get_model_layers()
+        single_layer_scores = [(layer, similarities(region=region, layers=[layer])) for layer in layers]
+        best_single_layer, best_single_score = max(single_layer_scores, key=lambda layer_score: layer_score[1])
         layer_combinations = [layers[start:start + num_layers]
                               for num_layers in range(1, len(layers) + 1)
                               for start in range(len(layers) - num_layers + 1)]
         _logger.debug("{} combinations".format(len(layer_combinations)))
         scores = [similarities(region=region, layers=layers) for layers in layer_combinations]
-        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:cutoff]
+        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        x = list(range(len(ranked_indices)))
+        y = [scores[i] for i in ranked_indices]
 
-        pyplot.plot(range(len(ranked_indices)), [scores[i] for i in ranked_indices])
-        pyplot.xticks(range(len(ranked_indices)),
-                      ["{}{}".format(layers[0], " - " + layers[-1] if len(layers) > 1 else "")
-                       for layers in [layer_combinations[i] for i in ranked_indices]], rotation='vertical')
-        pyplot.title(region)
+        f, axes = pyplot.subplots(1, 2 if len(ranked_indices) > cutoff * 2 else 1, sharey=True, facecolor='w')
+        pyplot.suptitle(region)
+        for ax in axes:
+            ax.plot(x, y)
+            ax.plot(ax.get_xlim(), [best_single_score, best_single_score], color='gray', linestyle='dashed')
+            ax.set_xticks(x)
+            ax.set_xticklabels(["{}{}".format(layers[0], " - " + layers[-1] if len(layers) > 1 else "")
+                                for layers in [layer_combinations[i] for i in ranked_indices]], rotation='vertical')
+        axes[-1].text(x[-cutoff], best_single_score, 'best single layer ({})'.format(best_single_layer))
+        if len(axes) > 1:
+            axes[0].set_xlim(0, cutoff)
+            axes[1].set_xlim(len(ranked_indices) - cutoff, len(ranked_indices))
+
+            cutout_axes(*axes)
+
+        pyplot.tight_layout()
         pyplot.show()
 
 
-if __name__ == '__main__':
-    logging.basicConfig(stream=sys.stdout, level=logging.getLevelName("DEBUG"))
-    plot_all_connected_layer_combinations('resnet50')
+def cutout_axes(ax1, ax2):
+    # hide the spines between ax and ax2
+    ax1.spines['right'].set_visible(False)
+    ax2.spines['left'].set_visible(False)
+    ax1.yaxis.tick_left()
+    ax1.tick_params(labelright='off')
+    ax2.yaxis.tick_right()
+    # cut-out lines
+    d = .015  # how big to make the diagonal lines in axes coordinates
+    # arguments to pass plot, just so we don't keep repeating them
+    kwargs = dict(transform=ax1.transAxes, color='k', clip_on=False)
+    ax1.plot((1 - d, 1 + d), (-d, +d), **kwargs)
+    ax1.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
+    kwargs.update(transform=ax2.transAxes)  # switch to the bottom axes
+    ax2.plot((-d, +d), (1 - d, 1 + d), **kwargs)
+    ax2.plot((-d, +d), (-d, +d), **kwargs)
