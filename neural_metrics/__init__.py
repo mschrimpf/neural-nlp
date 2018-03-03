@@ -2,11 +2,6 @@ import logging
 import os
 
 from neural_metrics import models
-from neural_metrics.metrics import score_model_activations
-from neural_metrics.metrics.physiology import metrics_for_activations
-from neural_metrics.models import activations_for_model
-from neural_metrics.plot import plot_layer_correlations, plot_scores, results_dir
-
 logger = logging.getLogger(__name__)
 
 
@@ -16,6 +11,11 @@ class _Defaults(object):
 
 def run(model, layers, regions=_Defaults.regions,
         model_weights=models._Defaults.model_weights, save_plot=False):
+    from neural_metrics.metrics import score_model_activations
+    from neural_metrics.metrics.physiology import metrics_for_activations
+    from neural_metrics.models import activations_for_model
+    from neural_metrics.plot import plot_layer_correlations, plot_scores, results_dir
+
     logger.info('Computing activations')
     activations_savepath = activations_for_model(model=model, model_weights=model_weights,
                                                  layers=layers, use_cached=True)

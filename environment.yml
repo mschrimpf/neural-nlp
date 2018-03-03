@@ -1,4 +1,4 @@
-name: neural-metrics
+name: neural-nlp
 channels:
 - defaults
 - anaconda
@@ -7,15 +7,21 @@ dependencies:
   - python>=3.6
   - keras
   - pytorch
+  - tensorflow
+  - numpy
   - torchvision
   - h5py
   - networkx
   - scikit-learn
   - matplotlib
   - jupyter
+  - bazel
+  - nltk
+  - gensim
+  - theano
   - pip:
     - git+https://github.com/dicarlolab/mkgu
-    - git+https://github.com/mschrimpf/DenseNet.git
-    - git+https://github.com/rcmalli/keras-squeezenet.git
     - pillow
     - llist
+    - git+https://github.com/mschrimpf/skip-thoughts.git
+    - nbsvm
