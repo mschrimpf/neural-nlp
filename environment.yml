@@ -24,4 +24,5 @@ dependencies:
     - pillow
     - llist
     - git+https://github.com/mschrimpf/skip-thoughts.git
+    - git+https://github.com/mschrimpf/lm_1b.git
     - nbsvm
