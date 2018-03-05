@@ -1,5 +1,7 @@
 
-## Setup
+# Setup
+
+## Models
 
 ### Skip-Thoughts
 ```bash
@@ -36,4 +38,24 @@ wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckp
 wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax8
 
 wget http://download.tensorflow.org/models/LM_LSTM_CNN/vocab-2016-09-10.txt
+```
+
+## Data
+### Diverse sentences
+Retrieve from https://evlab.mit.edu/sites/default/files/documents/index.html.
+
+```bash
+mkdir -p ressources/data && cd "$_"
+
+wget https://www.dropbox.com/s/jtqnvzg3jz6dctq/stimuli_384sentences.txt?dl=1
+wget https://www.dropbox.com/s/qdft8l21e83kgz0/stimuli_243sentences.txt?dl=1
+```
+
+### Naturalistic stories
+From https://github.com/languageMIT/naturalstories.
+
+```bash
+mkdir -p ressources/data && cd "$_"
+
+wget https://github.com/languageMIT/naturalstories/blob/master/naturalstories_RTS/all_stories.tok
 ```

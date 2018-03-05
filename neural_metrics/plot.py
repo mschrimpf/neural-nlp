@@ -8,7 +8,7 @@ import os
 from matplotlib import pyplot
 
 from neural_metrics import metrics
-from neural_metrics.metrics.physiology import _layers_correlation_meanstd
+from neural_metrics.metrics.physiology.neural_fit import _layers_correlation_meanstd
 
 _logger = logging.getLogger(__name__)
 
