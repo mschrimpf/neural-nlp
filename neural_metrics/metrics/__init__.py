@@ -37,13 +37,16 @@ class Type(Enum):
 
 
 class ScoreWorker(object):
-    def __init__(self, activations_filepath, regions, model_name=None, map_all_layers=True):
+    def __init__(self, activations_filepath, regions, model_name=None, map_all_layers=True, output_directory=None):
         self._activations_filepath = activations_filepath
         self._regions = regions
         self._map_all_layers = map_all_layers
+        self._output_directory = output_directory
         self._model_name = model_name or model_name_from_activations_filepath(activations_filepath)
 
         [filepath, ext] = os.path.splitext(activations_filepath)
+        if output_directory is not None:
+            filepath = os.path.join(output_directory, os.path.basename(filepath))
         storage_savepath = '{}-scores{}'.format(filepath, ext)
         self._cache = StorageCache(savepath=storage_savepath)
 
@@ -51,7 +54,8 @@ class ScoreWorker(object):
         if (name, type) not in self._cache:
             if type == Type.PHYSIOLOGY:
                 region_layer_mapping = physiology_mapping(self._activations_filepath, self._regions,
-                                                          map_all_layers=self._map_all_layers)
+                                                          map_all_layers=self._map_all_layers,
+                                                          output_directory=self._output_directory)
                 for region, (layers, score) in region_layer_mapping.items():
                     self._cache[(region, Type.PHYSIOLOGY)] = Score(
                         name=region, type=Type.PHYSIOLOGY, y=score, yerr=0, explanation=layers)
@@ -71,9 +75,9 @@ class ScoreWorker(object):
         return self._cache[(name, type)]
 
 
-def score_model_activations(activations_filepath, regions, model_name=None, map_all_layers=True):
+def score_model_activations(activations_filepath, regions, model_name=None, map_all_layers=True, output_directory=None):
     scores = ScoreWorker(activations_filepath=activations_filepath, regions=regions, map_all_layers=map_all_layers,
-                         model_name=model_name)
+                         model_name=model_name, output_directory=output_directory)
     physiology_scores = [scores(name=region, type=Type.PHYSIOLOGY) for region in regions]
     _logger.info("Physiology mapping: " + ", ".join("{} -> {} ({:.2f})".format(
         score.name, ",".join(score.explanation) if not isinstance(score.explanation, str) else score.explanation,
