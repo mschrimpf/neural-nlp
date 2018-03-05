@@ -13,7 +13,6 @@ from xarray import Dataset, DataArray
 
 from neural_metrics import utils
 from neural_metrics.metrics.similarities import pearsonr_matrix
-from neural_metrics.models import load_model_activations
 
 _logger = logging.getLogger(__name__)
 
@@ -24,15 +23,15 @@ class _Defaults(object):
 
 
 class SimilarityWorker(object):
-    def __init__(self, activations_filepath, regions, variance=_Defaults.variance,
+    def __init__(self, model_activations, basepath, regions, variance=_Defaults.variance,
                  output_directory=None, use_cached=True):
         self._variance = variance
         self._region_data = {region: _load_data(region=region)[1] for region in regions}
         raw_reference_data = _load_data(region=next(iter(self._region_data.keys())))[0]
-        self._model_activations = load_model_activations(activations_filepath)
+        self._model_activations = model_activations
         self._model_activations = _rearrange_image_to_layer_object_image_activations(
             self._model_activations, raw_reference_data)
-        self._cache = self.StorageCache(activations_filepath, output_directory=output_directory, use_cached=use_cached)
+        self._cache = self.StorageCache(basepath, output_directory=output_directory, use_cached=use_cached)
         self._logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
 
     def __call__(self, layers, region, return_raw=False):
@@ -63,8 +62,8 @@ class SimilarityWorker(object):
         return self._cache._savepath
 
     class StorageCache(utils.StorageCache):
-        def __init__(self, activations_filepath, output_directory=None, use_cached=True):
-            savepath = get_savepath(activations_filepath, output_directory=output_directory)
+        def __init__(self, basepath, output_directory=None, use_cached=True):
+            savepath = get_savepath(basepath, output_directory=output_directory)
             super(SimilarityWorker.StorageCache, self).__init__(savepath=savepath, use_cached=use_cached)
 
         def __setitem__(self, key, value):
@@ -107,10 +106,10 @@ def metrics_for_activations(activations_filepath, regions=_Defaults.regions, var
     return similarities.get_savepath()
 
 
-def get_savepath(activations_filepath, output_directory=None):
-    [save_name, save_ext] = os.path.splitext(os.path.basename(activations_filepath))
-    output_directory = output_directory or os.path.dirname(activations_filepath)
-    savepath = os.path.join(output_directory, save_name + '-correlations{}'.format(save_ext))
+def get_savepath(basepath, output_directory=None):
+    save_name = os.path.splitext(os.path.basename(basepath))[0]
+    output_directory = output_directory or os.path.dirname(basepath)
+    savepath = os.path.join(output_directory, save_name + '-correlations.pkl')
     return savepath
 
 

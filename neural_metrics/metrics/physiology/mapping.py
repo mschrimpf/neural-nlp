@@ -129,10 +129,10 @@ def layer_connected_to_region(layer, region, linked_layers, layer_region_mapping
     return num_foreign_regions <= 1
 
 
-def physiology_mapping(model_activations_filepath, regions,
+def physiology_mapping(model_activations, basepath, regions,
                        map_all_layers=True, _mapping_update=mapping_update_all_surround,
                        no_negative_updates=True, output_directory=None, use_cached=True):
-    similarities = SimilarityWorker(model_activations_filepath, regions,
+    similarities = SimilarityWorker(model_activations, basepath=basepath, regions=regions,
                                     output_directory=output_directory, use_cached=use_cached)
     assert len(similarities.get_model_layers()) >= len(regions)
 

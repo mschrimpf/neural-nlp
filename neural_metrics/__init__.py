@@ -17,13 +17,13 @@ def run(model, layers, regions=_Defaults.regions,
     from neural_metrics.plot import plot_layer_correlations, plot_scores, results_dir
 
     logger.info('Computing activations')
-    activations_savepath = activations_for_model(model=model, model_weights=model_weights,
-                                                 layers=layers, use_cached=True)
+    activations = activations_for_model(model=model, layers=layers, model_weights=model_weights)
+    activations_filepath = models.get_savepath(model, model_weights)
     logger.info('Computing scores')
-    scores = score_model_activations(activations_savepath, regions)
+    scores = score_model_activations(activations, regions, basepath=activations_filepath)
     logger.info('Plotting')
-    file_name = os.path.splitext(os.path.basename(activations_savepath))[0]
-    output_filepath = os.path.join(results_dir, '{}-scores-regions_{}.{}'.format(file_name, ''.join(regions), 'svg'))
+    output_filepath = os.path.join(results_dir, '{}-scores-regions_{}.{}'.format(
+        os.path.basename(os.path.splitext(activations_filepath)[0]), ''.join(regions), 'svg'))
     plot_scores(scores, output_filepath=output_filepath if save_plot else None)
     if save_plot:
         logger.info('Plot saved to {}'.format(output_filepath))

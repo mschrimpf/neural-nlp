@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from llist import dllist
 
 import numpy as np
@@ -8,16 +9,18 @@ from matplotlib import pyplot
 from neural_metrics import models
 from neural_metrics.metrics.physiology import SimilarityWorker
 from neural_metrics.metrics.physiology.mapping import map_single_layers, _linked_node
+from neural_metrics.models import ActivationsWorker
 
 _logger = logging.getLogger(__name__)
 
 
-def plot_layer_combinations_from_single_layer(model, model_weights=models._Defaults.model_weights,
+def plot_layer_combinations_from_single_layer(model_name, layers, model_weights=models._Defaults.model_weights,
                                               regions=('V4', 'IT')):
-    activations_filepath = models.get_savepath(model, model_weights=model_weights)
-    assert os.path.isfile(activations_filepath)
+    activations_worker = ActivationsWorker(model_name=model_name, model_weights=model_weights)
+    model_activations = activations_worker(layers=layers)
+    activations_filepath = activations_worker.get_savepath()
     for region in regions:
-        similarities = SimilarityWorker(activations_filepath, (region,))
+        similarities = SimilarityWorker(model_activations, basepath=activations_filepath, regions=(region,))
         single_layer = map_single_layers((region,), similarities)[region][0]
         linked_layers = dllist(similarities.get_model_layers())
         linked_node = _linked_node(linked_layers, single_layer)
@@ -49,13 +52,15 @@ def plot_layer_combinations_from_single_layer(model, model_weights=models._Defau
         pyplot.show()
 
 
-def plot_all_connected_layer_combinations(model, model_weights=models._Defaults.model_weights,
+def plot_all_connected_layer_combinations(model_name, layers, model_weights=models._Defaults.model_weights,
                                           regions=('V4', 'IT'), cutoff=10):
-    activations_filepath = models.get_savepath(model, model_weights=model_weights)
+    activations_worker = ActivationsWorker(model_name=model_name, model_weights=model_weights)
+    model_activations = activations_worker(layers=layers)
+    activations_filepath = activations_worker.get_savepath()
     assert os.path.isfile(activations_filepath)
     for region in regions:
         _logger.debug("Region {}".format(region))
-        similarities = SimilarityWorker(activations_filepath, (region,))
+        similarities = SimilarityWorker(model_activations, basepath=activations_filepath, regions=(region,))
         layers = similarities.get_model_layers()
         single_layer_scores = [(layer, similarities(region=region, layers=[layer])) for layer in layers]
         best_single_layer, best_single_score = max(single_layer_scores, key=lambda layer_score: layer_score[1])
