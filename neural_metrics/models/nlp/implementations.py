@@ -26,3 +26,9 @@ def lm_1b():
         return np.array([embedding[-1][0] for embedding in embeddings])  # only output last embedding, discard time
 
     return encode
+
+
+model_mappings = {
+    'skip-thoughts': skip_thoughts,
+    'lm_1b': lm_1b
+}
