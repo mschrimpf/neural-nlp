@@ -2,21 +2,18 @@ import argparse
 import logging
 import sys
 
-import neural_metrics
-from neural_metrics import models, run
+from neural_nlp import models, data, run
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, required=True, choices=models.model_mappings.keys())
 parser.add_argument('--model_weights', type=str, default=models._Defaults.model_weights)
 parser.add_argument('--no-model_weights', action='store_const', const=None, dest='model_weights')
-parser.add_argument('--layers', type=str, nargs='+', required=True)
-parser.add_argument('--regions', type=str, nargs='+', default=neural_metrics._Defaults.regions)
+parser.add_argument('--dataset', type=str, required=True, choices=data.data_mappings.keys())
 parser.add_argument('--log_level', type=str, default='INFO')
 args = parser.parse_args()
 logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(args.log_level))
-logger.info("Running with args %s", vars(args))
+_logger.info("Running with args %s", vars(args))
 
-run(model=args.model, model_weights=args.model_weights,
-    layers=args.layers, regions=args.regions, save_plot=True)
+run(model=args.model, model_weights=args.model_weights, dataset_name=args.dataset)

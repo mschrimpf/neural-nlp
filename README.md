@@ -1,51 +1,67 @@
-# Neural Metrics to compare deep neural nets and cortex
-Evaluate how well your model predicts neural data 
-(retrieved from [mkgu](https://github.com/dicarlolab/mkgu): macaque monkey cortex, areas V4 and IT).
-See [here](results/scores.ipynb) for the results of some models.
 
-## Installation
-Install dependencies with conda:
+# Setup
+
+## Models
+
+### Skip-Thoughts
 ```bash
-conda env create -f environment.yml
-conda activate neural-metrics
+# In the project root
+mkdir -p ressources/skip-thoughts && cd "$_"
+
+wget http://www.cs.toronto.edu/~rkiros/models/dictionary.txt
+wget http://www.cs.toronto.edu/~rkiros/models/utable.npy
+wget http://www.cs.toronto.edu/~rkiros/models/btable.npy
+wget http://www.cs.toronto.edu/~rkiros/models/uni_skip.npz
+wget http://www.cs.toronto.edu/~rkiros/models/uni_skip.npz.pkl
+wget http://www.cs.toronto.edu/~rkiros/models/bi_skip.npz
+wget http://www.cs.toronto.edu/~rkiros/models/bi_skip.npz.pkl
+```
+See https://github.com/mschrimpf/skip-thoughts for more details.
+
+### LM 1B
+```bash
+mkdir -p ressources/lm_1b && cd "$_"
+
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/graph-2016-09-10.pbtxt
+
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-base
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-char-embedding
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-lstm
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax0
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax1
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax2
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax3
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax4
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax5
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax6
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax7
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax8
+
+wget http://download.tensorflow.org/models/LM_LSTM_CNN/vocab-2016-09-10.txt
 ```
 
-Configure AWS credentials in order to retrieve the neural data: 
-using awscli `aws configure` (options e.g. region `us-east-1`, format `json`).
-[Chris Shay](cshay@mit.edu) can get you access.
-
-Finally, retrieve the images:
-1. ask [Martin Schrimpf](msch@mit.edu) for the unsorted images, identified by a hash as their filename
-2. put the images in the directory `images/unsorted`
-3. in the subdirectory `images`, run `python image_directory_sort.py`. This will sort all the images by category, object id and variance into the directory `images/sorted`.
-
-
-## Usage
-### All-in-one
+### FastText
 ```bash
-PYTHONPATH=. python neural_metrics --model vgg16 \
-  --layers block1_pool block2_pool block3_pool block4_pool block5_pool fc1 fc2 \
-  --regions V4 IT
+wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki-news-300d-1M.vec.zip
 ```
 
-### Step-by-step
-Compute model activations (features):
-```bash
-PYTHONPATH=. python neural_metrics/models.py --model vgg16 \
-  --layers block1_pool block2_pool block3_pool block4_pool block5_pool fc1 fc2
-```
-This will give you a file `images/sorted/vgg16-activations.pkl` with activations for each layer and image.
 
-Next, compute the model-cortex metrics:
-```bash
-PYTHONPATH=. python neural_metrics/compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region V4
-PYTHONPATH=. python neural_metrics/compare.py --activations_filepath images/sorted/vgg16-activations.pkl --region IT
-```
-This will output the metrics for every layer compared to the neural data.
+## Data
+### Diverse sentences
+Retrieve from https://evlab.mit.edu/sites/default/files/documents/index.html.
 
-Finally, plot the results:
 ```bash
-PYTHONPATH=. python neural_metrics/plot.py --correlations_filepaths \
-  images/sorted/vgg16-activations-correlations-region_V4-variance_V6.pkl \
-  images/sorted/vgg16-activations-correlations-region_IT-variance_V6.pkl
+mkdir -p ressources/data && cd "$_"
+
+wget https://www.dropbox.com/s/jtqnvzg3jz6dctq/stimuli_384sentences.txt?dl=1
+wget https://www.dropbox.com/s/qdft8l21e83kgz0/stimuli_243sentences.txt?dl=1
+```
+
+### Naturalistic stories
+From https://github.com/languageMIT/naturalstories.
+
+```bash
+mkdir -p ressources/data && cd "$_"
+
+wget https://github.com/languageMIT/naturalstories/blob/master/naturalstories_RTS/all_stories.tok
 ```

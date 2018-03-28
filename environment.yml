@@ -1,21 +1,13 @@
 name: neural-nlp
 channels:
 - defaults
-- anaconda
-- pytorch
 dependencies:
   - python>=3.6
-  - keras
-  - pytorch
   - tensorflow
   - numpy
-  - torchvision
-  - h5py
-  - networkx
-  - scikit-learn
   - matplotlib
+  - seaborn
   - jupyter
-  - bazel
   - nltk
   - gensim
   - theano
