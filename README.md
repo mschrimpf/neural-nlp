@@ -51,7 +51,7 @@ wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki-news-300d-1M.vec.z
 Retrieve from https://evlab.mit.edu/sites/default/files/documents/index.html.
 
 ```bash
-mkdir -p ressources/data && cd "$_"
+mkdir -p ressources/data/diverse_sentences && cd "$_"
 
 wget https://www.dropbox.com/s/jtqnvzg3jz6dctq/stimuli_384sentences.txt?dl=1
 wget https://www.dropbox.com/s/qdft8l21e83kgz0/stimuli_243sentences.txt?dl=1
@@ -61,7 +61,7 @@ wget https://www.dropbox.com/s/qdft8l21e83kgz0/stimuli_243sentences.txt?dl=1
 From https://github.com/languageMIT/naturalstories.
 
 ```bash
-mkdir -p ressources/data && cd "$_"
+mkdir -p ressources/data/naturalistic_stories && cd "$_"
 
 wget https://github.com/languageMIT/naturalstories/blob/master/naturalstories_RTS/all_stories.tok
 ```
