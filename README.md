@@ -40,6 +40,13 @@ wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckp
 wget http://download.tensorflow.org/models/LM_LSTM_CNN/vocab-2016-09-10.txt
 ```
 
+### Word2Vec
+```bash
+mkdir -p ressources/models/word2vec && cd "$_"
+wget https://drive.google.com/uc?export=download&confirm=rLRy&id=0B7XkCwpI5KDYNlNUTTlSS21pQmM
+gzip -d GoogleNews-vectors-negative300.bin.gz && rm GoogleNews-vectors-negative300.bin.gz
+```
+
 ### FastText
 ```bash
 wget https://s3-us-west-1.amazonaws.com/fasttext-vectors/wiki-news-300d-1M.vec.zip
