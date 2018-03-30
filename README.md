@@ -20,7 +20,7 @@ See https://github.com/mschrimpf/skip-thoughts for more details.
 
 ### LM 1B
 ```bash
-mkdir -p ressources/lm_1b && cd "$_"
+mkdir -p ressources/models/lm_1b && cd "$_"
 
 wget http://download.tensorflow.org/models/LM_LSTM_CNN/graph-2016-09-10.pbtxt
 
@@ -38,14 +38,28 @@ wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckp
 wget http://download.tensorflow.org/models/LM_LSTM_CNN/all_shards-2016-09-10/ckpt-softmax8
 
 wget http://download.tensorflow.org/models/LM_LSTM_CNN/vocab-2016-09-10.txt
+
+cd ../../../
 ```
+See https://github.com/tensorflow/models/tree/master/research/lm_1b.
 
 ### Word2Vec
 ```bash
 mkdir -p ressources/models/word2vec && cd "$_"
-wget https://drive.google.com/uc?export=download&confirm=rLRy&id=0B7XkCwpI5KDYNlNUTTlSS21pQmM
-gzip -d GoogleNews-vectors-negative300.bin.gz && rm GoogleNews-vectors-negative300.bin.gz
+python ../../download_gdrive.py 0B7XkCwpI5KDYNlNUTTlSS21pQmM ./GoogleNews-vectors-negative300.bin.gz  # https://drive.google.com/uc?export=download&confirm=rLRy&id=0B7XkCwpI5KDYNlNUTTlSS21pQmM
+gzip -d GoogleNews-vectors-negative300.bin.gz
+cd ../../../
 ```
+See https://code.google.com/archive/p/word2vec.
+
+### GloVe
+```bash
+mkdir -p ressources/models/glove && cd "$_"
+wget http://nlp.stanford.edu/data/wordvecs/glove.840B.300d.zip
+unzip glove.840B.300d.zip -d . && rm glove.840B.300d.zip
+cd ../../../
+```
+See https://github.com/stanfordnlp/GloVe.
 
 ### FastText
 ```bash
