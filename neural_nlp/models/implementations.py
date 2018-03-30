@@ -1,7 +1,8 @@
 import os
 
-import gensim.models.keyedvectors as word2vec_storage
 import numpy as np
+from gensim.models.keyedvectors import KeyedVectors
+from gensim.scripts.glove2word2vec import glove2word2vec
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
@@ -42,12 +43,8 @@ def _mean_vector(feature_vectors, num_words):
     return np.divide(feature_vectors, num_words)
 
 
-def word2vec(weights=os.path.join(_ressources_dir, 'word2vec', 'GoogleNews-vectors-negative300.bin'),
-             combine_vectors=_mean_vector):
-    """
-    https://arxiv.org/pdf/1310.4546.pdf
-    """
-    model = word2vec_storage.KeyedVectors.load_word2vec_format(weights, binary=True)
+def _keyed_vector_model(weights, combine_vectors, binary=False):
+    model = KeyedVectors.load_word2vec_format(weights, binary=binary)
     index2word_set = set(model.index2word)
 
     def combined_feature_vector(sentence):
@@ -63,8 +60,28 @@ def word2vec(weights=os.path.join(_ressources_dir, 'word2vec', 'GoogleNews-vecto
     return combined_feature_vector
 
 
+def word2vec(weights='GoogleNews-vectors-negative300.bin', combine_vectors=_mean_vector):
+    """
+    https://arxiv.org/pdf/1310.4546.pdf
+    """
+    weights_file = os.path.join(_ressources_dir, 'word2vec', weights)
+    return _keyed_vector_model(weights_file, combine_vectors=combine_vectors, binary=True)
+
+
+def glove(weights='glove.840B.300d.txt', combine_vectors=_mean_vector):
+    """
+    http://www.aclweb.org/anthology/D14-1162
+    """
+    weights_file = os.path.join(_ressources_dir, 'glove', weights)
+    word2vec_weightsfile = weights_file + '.word2vec'
+    if not os.path.isfile(word2vec_weightsfile):
+        glove2word2vec(weights_file, word2vec_weightsfile)
+    return _keyed_vector_model(word2vec_weightsfile, combine_vectors=combine_vectors)
+
+
 model_mappings = {
     'skip-thoughts': skip_thoughts,
     'lm_1b': lm_1b,
-    'word2vec': word2vec
+    'word2vec': word2vec,
+    'glove': glove
 }
