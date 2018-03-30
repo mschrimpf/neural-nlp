@@ -1,41 +1,96 @@
+import logging
 import os
+from abc import ABCMeta
 
 import numpy as np
-from gensim.models.keyedvectors import KeyedVectors
-from gensim.scripts.glove2word2vec import glove2word2vec
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
 
-def skip_thoughts(weights=os.path.join(_ressources_dir, 'skip-thoughts')):
+class Model(object, abc=ABCMeta):
+    pass
+
+
+class SkipThoughts(Model):
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
-    import skipthoughts
-    model = skipthoughts.load_model(path_to_models=weights, path_to_tables=weights)
-    encoder = skipthoughts.Encoder(model)
-    return encoder.encode
+
+    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
+        import skipthoughts
+        model = skipthoughts.load_model(path_to_models=weights, path_to_tables=weights)
+        self._encoder = skipthoughts.Encoder(model)
+
+    def __call__(self, sentences):
+        return self._encoder.encode(sentences)
 
 
-def lm_1b(weights=os.path.join(_ressources_dir, 'lm_1b')):
+class LM1B(Model):
     """
     https://arxiv.org/pdf/1602.02410.pdf
     """
-    from lm_1b.lm_1b_eval import Encoder
 
-    encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
-                      pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
-                      ckpt=os.path.join(weights, 'ckpt-*'))
+    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b')):
+        from lm_1b.lm_1b_eval import Encoder
+        self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
+                                pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
+                                ckpt=os.path.join(weights, 'ckpt-*'))
 
-    def encode(sentences):
-        embeddings, word_ids = encoder(sentences)
+    def __call__(self, sentences):
+        embeddings, word_ids = self._encoder(sentences)
         return np.array([embedding[-1][0] for embedding in embeddings])  # only output last embedding, discard time
 
-    return encode
+
+class KeyedVectorModel(Model):
+    def __init__(self, weights_file, binary=False):
+        from gensim.models.keyedvectors import KeyedVectors
+        self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
+        self._index2word_set = set(self._model.index2word)
+        self._logger = logging.getLogger(self.__class__.__name__)
+
+    def _combine_vectors(self, feature_vectors):
+        return _mean_vector(feature_vectors)
+
+    def __call__(self, sentences):
+        return np.array([self._encode_sentence(sentence) for sentence in sentences])
+
+    def _encode_sentence(self, sentence):
+        words = sentence.split()
+        feature_vectors = []
+        for word in words:
+            if word in self._index2word_set:
+                feature_vectors.append(self._model[word])
+            else:
+                self._logger.warning("Word {} not present in model".format(word))
+        return self._combine_vectors(feature_vectors)
 
 
-def _mean_vector(feature_vectors, num_words):
-    assert len(feature_vectors) == num_words
+class Word2Vec(KeyedVectorModel):
+    """
+    https://arxiv.org/pdf/1310.4546.pdf
+    """
+
+    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin'):
+        weights_file = os.path.join(_ressources_dir, 'word2vec', weights_file)
+        super(Word2Vec, self).__init__(weights_file=weights_file, binary=True)
+
+
+class Glove(KeyedVectorModel):
+    """
+    http://www.aclweb.org/anthology/D14-1162
+    """
+
+    def __init__(self, weights='glove.840B.300d.txt'):
+        from gensim.scripts.glove2word2vec import glove2word2vec
+        weights_file = os.path.join(_ressources_dir, 'glove', weights)
+        word2vec_weightsfile = weights_file + '.word2vec'
+        if not os.path.isfile(word2vec_weightsfile):
+            glove2word2vec(weights_file, word2vec_weightsfile)
+        super(Glove, self).__init__(weights_file=word2vec_weightsfile)
+
+
+def _mean_vector(feature_vectors):
+    num_words = len(feature_vectors)
     assert num_words > 0
     if num_words == 1:
         return feature_vectors[0]
@@ -43,45 +98,9 @@ def _mean_vector(feature_vectors, num_words):
     return np.divide(feature_vectors, num_words)
 
 
-def _keyed_vector_model(weights, combine_vectors, binary=False):
-    model = KeyedVectors.load_word2vec_format(weights, binary=binary)
-    index2word_set = set(model.index2word)
-
-    def combined_feature_vector(sentence):
-        words = sentence.split()
-        feature_vectors = []
-        num_words = 0
-        for word in words:
-            if word in index2word_set:
-                num_words += 1
-                feature_vectors.append(model[word])
-        return combine_vectors(feature_vectors, num_words)
-
-    return combined_feature_vector
-
-
-def word2vec(weights='GoogleNews-vectors-negative300.bin', combine_vectors=_mean_vector):
-    """
-    https://arxiv.org/pdf/1310.4546.pdf
-    """
-    weights_file = os.path.join(_ressources_dir, 'word2vec', weights)
-    return _keyed_vector_model(weights_file, combine_vectors=combine_vectors, binary=True)
-
-
-def glove(weights='glove.840B.300d.txt', combine_vectors=_mean_vector):
-    """
-    http://www.aclweb.org/anthology/D14-1162
-    """
-    weights_file = os.path.join(_ressources_dir, 'glove', weights)
-    word2vec_weightsfile = weights_file + '.word2vec'
-    if not os.path.isfile(word2vec_weightsfile):
-        glove2word2vec(weights_file, word2vec_weightsfile)
-    return _keyed_vector_model(word2vec_weightsfile, combine_vectors=combine_vectors)
-
-
 model_mappings = {
-    'skip-thoughts': skip_thoughts,
-    'lm_1b': lm_1b,
-    'word2vec': word2vec,
-    'glove': glove
+    'skip-thoughts': SkipThoughts,
+    'lm_1b': LM1B,
+    'word2vec': Word2Vec,
+    'glove': Glove
 }
