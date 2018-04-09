@@ -6,7 +6,7 @@ import sys
 import mkgu
 import numpy as np
 
-from neural_nlp.data import data_mappings
+from neural_nlp.stimuli import mappings
 from neural_nlp.models.implementations import model_mappings
 from neural_nlp.utils import StorageCache
 
@@ -36,13 +36,14 @@ class ActivationsWorker(object):
     def __call__(self, dataset_name):
         if dataset_name not in self._cache:
             self._logger.debug('Computing activations for dataset {}'.format(dataset_name))
-            _data = data_mappings[dataset_name]()
+            _data = mappings[dataset_name]()
             activations = []
             for i, sentence in enumerate(_data, start=1):
                 if i % 10 == 0:
                     self._logger.debug("Sentence {}/{} ({:.0f}%)".format(i, len(_data), 100 * i / len(_data)))
                 sentence_activations = self._model([sentence])
                 activations.append(sentence_activations)
+            self._logger.debug("All sentences complete.")
             self._cache[dataset_name] = self._to_assembly(_data, np.concatenate(activations), dataset_name=dataset_name)
         return self._cache[dataset_name]
 
@@ -65,7 +66,7 @@ class ActivationsWorker(object):
 def main():
     parser = argparse.ArgumentParser('model activations')
     parser.add_argument('--model', type=str, required=True, choices=list(model_mappings.keys()))
-    parser.add_argument('--dataset', type=str, required=True, choices=list(data_mappings.keys()))
+    parser.add_argument('--dataset', type=str, required=True, choices=list(mappings.keys()))
     parser.add_argument('--output_directory', type=str, default=_Defaults.output_directory)
     parser.add_argument('--log_level', type=str, default='INFO')
     args = parser.parse_args()

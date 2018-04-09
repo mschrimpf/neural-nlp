@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-_data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'data')
+_data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'stimuli')
 
 
 def diverse_sentences1(filepath=os.path.join(_data_dir, 'diverse_sentences', 'stimuli_384sentences.txt')):
@@ -39,7 +39,7 @@ def naturalistic_stories(filepath=os.path.join(_data_dir, 'naturalistic_stories'
     return data['sentence'].values
 
 
-data_mappings = {
+mappings = {
     'diverse1': diverse_sentences1,
     'diverse2': diverse_sentences2,
     'naturalistic_stories': naturalistic_stories
