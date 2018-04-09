@@ -5,7 +5,7 @@ def test_diverse_sentences1():
     data = mappings['diverse1']()
     assert len(data) == 384
     assert data[0] == 'An accordion is a portable musical instrument with two keyboards.'
-    assert data[1] == 'A woman has different reproductive organs than a man.'
+    assert data[-1] == 'A woman has different reproductive organs than a man.'
 
 
 def test_diverse_sentences2():
@@ -16,9 +16,9 @@ def test_diverse_sentences2():
 
 
 def test_naturalistic_stories():
-    data = mappings['naturalistic_stories']()
-    assert len(data) == 454
+    data = mappings['naturalisticBoar']()
+    assert len(data) == 47
     assert data[0] == 'If you were to journey to the North of England, ' \
                       'you would come to a valley that is surrounded by moors as high as mountains.'
-    assert data[-1] == "The hope is that this research leads to better diagnostic tools " \
-                       "and better treatments for Tourette's."
+    assert data[-1] == "His fame was indeed assured, but it was not nearly as lasting " \
+                       "as that of the fearsome Bradford Boar."
