@@ -12,7 +12,7 @@ dependencies:
   - gensim
   - theano
   - pip:
-    - git+https://github.com/dicarlolab/mkgu
+    - git+https://github.com/mschrimpf/mkgu
     - pillow
     - llist
     - git+https://github.com/mschrimpf/skip-thoughts.git
