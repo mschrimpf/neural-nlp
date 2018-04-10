@@ -40,17 +40,21 @@ def load_rdms(story='Boar', roi_filter='from90to100'):
 
     # re-format timepoint_{left,right} to single dimension
     timepoint_dims = ['timepoint_left', 'timepoint_right']
-    coords = {'timepoint': data['timepoint_left'].values}
+    # for some reason, xarray re-packages timepoint as a MultiIndex if we pass all coords at once.
+    # to avoid that, we create the DataArray first and then add the additional coords.
+    dim_coords = {'timepoint': data['timepoint_left'].values}
+    nondim_coords = {}
     for name, value in data.coords.items():
         if name in timepoint_dims:
             continue
         if np.array_equal(value.dims, timepoint_dims):
             unique = np.unique(value.values)
             assert unique.size == 1
-            coords[name] = 'timepoint', np.broadcast_to(unique, coords['timepoint'].shape).copy()
+            value = 'timepoint', np.broadcast_to(unique, dim_coords['timepoint'].shape).copy()
             # need to copy due to https://github.com/pandas-dev/pandas/issues/15860
-        else:
-            coords[name] = value
+        (dim_coords if name in data.dims else nondim_coords)[name] = value
     dims = [dim if dim not in timepoint_dims else 'timepoint' for dim in data.dims]
-    data = NeuroidAssembly(data.values, coords=coords, dims=dims)
+    data = NeuroidAssembly(data.values, coords=dim_coords, dims=dims)
+    for name, value in nondim_coords.items():
+        data[name] = value
     return data

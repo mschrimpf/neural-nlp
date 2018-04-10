@@ -1,4 +1,5 @@
 from neural_nlp import neural_data
+import numpy as np
 
 
 class TestLoadRdms():
@@ -21,4 +22,5 @@ class TestLoadRdms():
         data = neural_data.load_rdms(story)
         assert len(data['subject']) == num_subjects
         assert len(data['timepoint']) == num_timepoints
+        np.testing.assert_array_equal(data['timepoint'], list(range(num_timepoints)))
         assert len(data['region']) == num_regions
