@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import re
 import xarray as xr
+from mkgu.assemblies import NeuroidAssembly
 
 neural_data_dir = os.path.join(os.path.dirname(__file__), '..', 'ressources', 'neural_data')
 _logger = logging.getLogger(__name__)
@@ -30,10 +31,26 @@ def load_rdms(story='Boar', roi_filter='from90to100'):
             'subject': list(range(num_subjects))},
                              dims=['region', 'subject', 'timepoint_left', 'timepoint_right'])
         stimuli_meta = lambda x: (['timepoint_left', 'timepoint_right'],
-                                  np.broadcast_to(1, [num_stimuli, num_stimuli]))
+                                  np.broadcast_to(x, [num_stimuli, num_stimuli]))
         _data['story'] = stimuli_meta(attributes['story'])
         _data['roi_low'] = stimuli_meta(int(attributes['roi_low']))
         _data['roi_high'] = stimuli_meta(int(attributes['roi_high']))
         data.append(_data)
     data = xr.concat(data, 'region')
+
+    # re-format timepoint_{left,right} to single dimension
+    timepoint_dims = ['timepoint_left', 'timepoint_right']
+    coords = {'timepoint': data['timepoint_left'].values}
+    for name, value in data.coords.items():
+        if name in timepoint_dims:
+            continue
+        if np.array_equal(value.dims, timepoint_dims):
+            unique = np.unique(value.values)
+            assert unique.size == 1
+            coords[name] = 'timepoint', np.broadcast_to(unique, coords['timepoint'].shape).copy()
+            # need to copy due to https://github.com/pandas-dev/pandas/issues/15860
+        else:
+            coords[name] = value
+    dims = [dim if dim not in timepoint_dims else 'timepoint' for dim in data.dims]
+    data = NeuroidAssembly(data.values, coords=coords, dims=dims)
     return data

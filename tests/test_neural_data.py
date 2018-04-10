@@ -20,5 +20,5 @@ class TestLoadRdms():
     def _test_story(self, story, num_timepoints, num_subjects, num_regions=44):
         data = neural_data.load_rdms(story)
         assert len(data['subject']) == num_subjects
-        assert len(data['timepoint_left']) == len(data['timepoint_left']) == num_timepoints
+        assert len(data['timepoint']) == num_timepoints
         assert len(data['region']) == num_regions
