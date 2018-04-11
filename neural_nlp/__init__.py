@@ -32,33 +32,33 @@ def run(model, dataset_name, model_weights=models._Defaults.model_weights):
     del neural_data['roi_high']
     neural_data = neural_data.mean(dim='subject')
 
-    _logger.info('Running spotlight search')
-    scores = run_spotlight_search(activations, neural_data)
-    spotlights = scores.argmax(dim='spotlight_start')
-    scores = scores.max(dim='spotlight_start')
-    scores['spotlight_start_max'] = 'region', spotlights
+    _logger.info('Running searchlight search')
+    scores = run_searchlight_search(activations, neural_data)
+    searchlights = scores.argmax(dim='searchlight_start')
+    scores = scores.max(dim='searchlight_start')
+    scores['searchlight_start_max'] = 'region', searchlights
     return scores
 
 
-def run_spotlight_search(model_rdms, target_rdms):
+def run_searchlight_search(model_rdms, target_rdms):
     """
-    Use size of the model RDMs to determine the size of the spotlight
+    Use size of the model RDMs to determine the size of the searchlight
     and shift over the target RDMs
     """
     similarity = RDMCorrelationCoefficient()
-    spotlight_size = len(model_rdms['stimulus'])
+    searchlight_size = len(model_rdms['stimulus'])
     scores = []
-    for spotlight_start in range(len(target_rdms['timepoint']) - spotlight_size):
-        spotlight_end = spotlight_start + spotlight_size
-        target_spotlight = target_rdms.sel(timepoint=list(range(spotlight_start, spotlight_end)))
+    for searchlight_start in range(len(target_rdms['timepoint']) - searchlight_size):
+        searchlight_end = searchlight_start + searchlight_size
+        target_searchlight = target_rdms.sel(timepoint=list(range(searchlight_start, searchlight_end)))
         # mock timepoint as a stimulus
-        target_spotlight = target_spotlight.rename({'timepoint': 'stimulus'})
-        score = similarity(model_rdms, target_spotlight, rdm_dim='stimulus')
-        spotlight_coords = {'spotlight_start': [spotlight_start],
-                            'spotlight_end': ('spotlight_start', [spotlight_end]),
-                            'spotlight_size': ('spotlight_start', [spotlight_size])}
-        spotlight = xr.DataArray(np.ones(1), coords=spotlight_coords, dims='spotlight_start')
-        score = score * spotlight
-        _logger.info("Spotlight {} - {}: {}".format(spotlight_start, spotlight_end, score.values))
+        target_searchlight = target_searchlight.rename({'timepoint': 'stimulus'})
+        score = similarity(model_rdms, target_searchlight, rdm_dim='stimulus')
+        searchlight_coords = {'searchlight_start': [searchlight_start],
+                              'searchlight_end': ('searchlight_start', [searchlight_end]),
+                              'searchlight_size': ('searchlight_start', [searchlight_size])}
+        searchlight = xr.DataArray(np.ones(1), coords=searchlight_coords, dims='searchlight_start')
+        score = score * searchlight
+        _logger.info("searchlight {} - {}: {}".format(searchlight_start, searchlight_end, score.values))
         scores.append(score)
-    return xr.concat(scores, 'spotlight_start')
+    return xr.concat(scores, 'searchlight_start')

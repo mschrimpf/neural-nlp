@@ -1,6 +1,6 @@
 import numpy as np
 
-from neural_nlp import neural_data, run, run_spotlight_search
+from neural_nlp import neural_data, run, run_searchlight_search
 
 
 class TestRun:
@@ -14,15 +14,15 @@ class TestRun:
 class TestSpotlightSearch:
     def test_beginning(self):
         data, model_mock = self._prepare_data(0, 5)
-        scores = run_spotlight_search(model_mock, data)
+        scores = run_searchlight_search(model_mock, data)
         scores = scores.mean(dim='region')
-        assert scores.argmax(dim='spotlight_start') == 0
+        assert scores.argmax(dim='searchlight_start') == 0
 
     def test_middle(self):
         data, model_mock = self._prepare_data(model_start=20, model_length=10)
-        scores = run_spotlight_search(model_mock, data)
+        scores = run_searchlight_search(model_mock, data)
         scores = scores.mean(dim='region')
-        assert scores.argmax(dim='spotlight_start') == 20
+        assert scores.argmax(dim='searchlight_start') == 20
 
     def _prepare_data(self, model_start, model_length):
         data = neural_data.load_rdms('Boar')
