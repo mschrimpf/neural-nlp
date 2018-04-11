@@ -7,6 +7,7 @@ class TestRun:
     def test_boar_skip_thoughts(self):
         region_scores = run(model='skip-thoughts', dataset_name='naturalisticBoar')
         assert 'region' in region_scores
+        assert 'spotlight_start_max' in region_scores
         np.testing.assert_array_equal(region_scores.shape, [44])
 
 

@@ -31,7 +31,10 @@ def run(model, dataset_name, model_weights=models._Defaults.model_weights):
 
     _logger.info('Running spotlight search')
     scores = run_spotlight_search(activations, neural_data)
-    return scores.max(dim='spotlight_start')
+    spotlights = scores.argmax(dim='spotlight_start')
+    scores = scores.max(dim='spotlight_start')
+    scores['spotlight_start_max'] = 'region', spotlights
+    return scores
 
 
 def run_spotlight_search(model_rdms, target_rdms):
