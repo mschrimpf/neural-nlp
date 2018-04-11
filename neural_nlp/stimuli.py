@@ -1,4 +1,5 @@
 import os
+
 import pandas as pd
 
 _data_dir = os.path.join(os.path.dirname(__file__), '..', 'ressources', 'stimuli')
@@ -52,5 +53,7 @@ def load_stimuli(stimulus_set_name):
 
 
 _mappings = {
-    **{'diverse{}'.format(name): DiverseSentences(filename) for name, filename in DiverseSentences.set_mapping.items()},
-    **{'naturalistic{}'.format(name): NaturalisticStories(name) for name in NaturalisticStories.set_mapping}}
+    **{'diverse.{}'.format(name): DiverseSentences(filename)
+       for name, filename in DiverseSentences.set_mapping.items()},
+    **{'naturalistic.{}'.format(name): NaturalisticStories(name)
+       for name in NaturalisticStories.set_mapping}}
