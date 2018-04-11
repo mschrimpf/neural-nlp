@@ -13,7 +13,7 @@ from neural_nlp.utils import store
 _logger = logging.getLogger(__name__)
 
 
-@store(storage_directory=os.path.join(os.path.dirname(__file__), '..', 'output'))
+@store()
 def run(model, stimulus_set):
     _logger.info('Computing activations')
     activations = get_activations(model_name=model, stimulus_set_name=stimulus_set)
