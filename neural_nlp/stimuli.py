@@ -47,6 +47,10 @@ class NaturalisticStories(object):
         return data['sentence'].values
 
 
-mappings = {
+def load_stimuli(stimulus_set_name):
+    return _mappings[stimulus_set_name]()
+
+
+_mappings = {
     **{'diverse{}'.format(name): DiverseSentences(filename) for name, filename in DiverseSentences.set_mapping.items()},
     **{'naturalistic{}'.format(name): NaturalisticStories(name) for name in NaturalisticStories.set_mapping}}

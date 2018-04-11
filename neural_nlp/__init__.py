@@ -6,22 +6,17 @@ import xarray as xr
 from mkgu.metrics.rdm import RDMCorrelationCoefficient, RDM
 
 from neural_nlp import models
-from neural_nlp.models import ActivationsWorker
+from neural_nlp.models import get_activations
 from neural_nlp.neural_data import load_rdms as load_neural_rdms
 from neural_nlp.utils import store
 
 _logger = logging.getLogger(__name__)
 
 
-class _Defaults(object):
-    regions = ('V4', 'IT')
-
-
 @store(storage_directory=os.path.join(os.path.dirname(__file__), '..', 'output'))
-def run(model, dataset_name, model_weights=models._Defaults.model_weights):
+def run(model, dataset_name):
     _logger.info('Computing activations')
-    activations_worker = ActivationsWorker(model_name=model, model_weights=model_weights)
-    activations = activations_worker(dataset_name=dataset_name)
+    activations = get_activations(model_name=model, stimulus_set_name=dataset_name)
     activations = RDM()(activations)
 
     _logger.info('Loading neural data')

@@ -1,19 +1,18 @@
 import numpy as np
 
-from neural_nlp.models.implementations import model_mappings
+from neural_nlp.models.implementations import load_model
 
 
 def test_word2vec():
-    model = model_mappings['word2vec']()
-    _test_model(model)
+    _test_model('word2vec')
 
 
 def test_glove():
-    model = model_mappings['glove']()
-    _test_model(model)
+    _test_model('glove')
 
 
-def _test_model(model):
+def _test_model(model_name):
+    model = load_model(model_name)
     encoding = model(['The quick brown fox jumps over the lazy dog'])
     assert isinstance(encoding, np.ndarray)
     print(encoding.shape)

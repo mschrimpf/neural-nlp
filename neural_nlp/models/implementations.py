@@ -1,13 +1,12 @@
 import logging
 import os
-from abc import ABCMeta
 
 import numpy as np
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
 
-class Model(object, abc=ABCMeta):
+class Model(object):
     pass
 
 
@@ -18,6 +17,7 @@ class SkipThoughts(Model):
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
         import skipthoughts
+        weights = weights + '/'
         model = skipthoughts.load_model(path_to_models=weights, path_to_tables=weights)
         self._encoder = skipthoughts.Encoder(model)
 
@@ -89,6 +89,13 @@ class Glove(KeyedVectorModel):
         super(Glove, self).__init__(weights_file=word2vec_weightsfile)
 
 
+class RecursiveNeuralTensorNetwork(Model):
+    """
+    http://www.aclweb.org/anthology/D13-1170
+    """
+    pass
+
+
 def _mean_vector(feature_vectors):
     num_words = len(feature_vectors)
     assert num_words > 0
@@ -98,7 +105,11 @@ def _mean_vector(feature_vectors):
     return np.divide(feature_vectors, num_words)
 
 
-model_mappings = {
+def load_model(model_name):
+    return _model_mappings[model_name]()
+
+
+_model_mappings = {
     'skip-thoughts': SkipThoughts,
     'lm_1b': LM1B,
     'word2vec': Word2Vec,
