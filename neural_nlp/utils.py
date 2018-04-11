@@ -27,7 +27,7 @@ def store(storage_directory=os.path.join(os.path.dirname(__file__), '..', 'outpu
         def wrapper(*args, **kwargs):
             call_args = inspect.getcallargs(function, *args, **kwargs)
             storage_path = os.path.join(storage_directory, function.__module__ + '.' + function.__name__,
-                                        '_'.join('{}={}'.format(key, value) for key, value in call_args.items())
+                                        ','.join('{}={}'.format(key, value) for key, value in call_args.items())
                                         + '.pkl')
             if os.path.isfile(storage_path):
                 return load_storage(storage_path)
