@@ -1,4 +1,13 @@
-from neural_nlp import neural_data, run_spotlight_search
+import numpy as np
+
+from neural_nlp import neural_data, run, run_spotlight_search
+
+
+class TestRun:
+    def test_boar_skip_thoughts(self):
+        region_scores = run(model='skip-thoughts', dataset_name='naturalisticBoar')
+        assert 'region' in region_scores
+        np.testing.assert_array_equal(region_scores.shape, [44])
 
 
 class TestSpotlightSearch:
