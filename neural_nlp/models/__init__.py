@@ -30,8 +30,10 @@ def get_activations(model_name, stimulus_set_name):
         if i % 10 == 0:
             _logger.debug("Sentence {}/{} ({:.0f}%)".format(i, len(stimuli), 100 * i / len(stimuli)))
         sentence_activations = model([sentence])
+        assert len(sentence_activations) == 1
         activations.append(sentence_activations)
     activations = np.concatenate(activations)
+    assert activations.shape[0] == len(stimuli)
 
     num_neurons = activations.shape[1]
     _logger.debug('Converting to {}x{} assembly'.format(num_neurons, len(stimuli)))

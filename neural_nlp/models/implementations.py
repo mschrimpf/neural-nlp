@@ -99,9 +99,11 @@ class RecursiveNeuralTensorNetwork(Model):
         cachepath = os.path.join(_ressources_dir, 'recursive-neural-tensor-network', weights + '.activations.csv')
         self._cache = pd.read_csv(cachepath)
         self._cache = self._cache[self._cache['node.type'] == 'ROOT']
+        self._cache.drop_duplicates(inplace=True)
 
     def __call__(self, sentences):
         result = self._cache[self._cache['sentence'].isin(sentences)]
+        assert len(result) == 1
         result = result[[column for column in result if column.startswith('activation')]]
         return result.values
 
