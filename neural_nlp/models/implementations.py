@@ -1,5 +1,6 @@
 import logging
 import os
+import pandas as pd
 
 import numpy as np
 
@@ -93,7 +94,16 @@ class RecursiveNeuralTensorNetwork(Model):
     """
     http://www.aclweb.org/anthology/D13-1170
     """
-    pass
+
+    def __init__(self, weights='sentiment'):
+        cachepath = os.path.join(_ressources_dir, 'recursive-neural-tensor-network', weights + '.activations.csv')
+        self._cache = pd.read_csv(cachepath)
+        self._cache = self._cache[self._cache['node.type'] == 'ROOT']
+
+    def __call__(self, sentences):
+        result = self._cache[self._cache['sentence'].isin(sentences)]
+        result = result[[column for column in result if column.startswith('activation')]]
+        return result.values
 
 
 def _mean_vector(feature_vectors):
@@ -113,5 +123,6 @@ _model_mappings = {
     'skip-thoughts': SkipThoughts,
     'lm_1b': LM1B,
     'word2vec': Word2Vec,
-    'glove': Glove
+    'glove': Glove,
+    'rntn': RecursiveNeuralTensorNetwork,
 }
