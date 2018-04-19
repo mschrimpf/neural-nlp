@@ -1,13 +1,10 @@
 import logging
-import os
 
-import numpy as np
-import xarray as xr
 from mkgu.metrics.rdm import RDMCorrelationCoefficient, RDM
 
 from neural_nlp import models
 from neural_nlp.models import get_activations
-from neural_nlp.neural_data import load_rdms as load_neural_rdms
+from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
 from neural_nlp.utils import store
 
 _logger = logging.getLogger(__name__)
@@ -16,44 +13,15 @@ _logger = logging.getLogger(__name__)
 @store()
 def run(model, stimulus_set):
     _logger.info('Computing activations')
-    activations = get_activations(model_name=model, stimulus_set_name=stimulus_set)
-    activations = RDM()(activations)
+    model_activations = get_activations(model_name=model, stimulus_set_name=stimulus_set)
+    model_activations = RDM()(model_activations)
 
     _logger.info('Loading neural data')
     neural_data = load_neural_rdms()
-    # xarray MultiIndexes everything otherwise
-    del neural_data['story']
-    del neural_data['roi_low']
-    del neural_data['roi_high']
     neural_data = neural_data.mean(dim='subject')
+    neural_data = neural_data.rename({'sentence': 'stimulus'})
 
-    _logger.info('Running searchlight search')
-    scores = run_searchlight_search(activations, neural_data)
-    searchlights = scores.argmax(dim='searchlight_start')
-    scores = scores.max(dim='searchlight_start')
-    scores['searchlight_start_max'] = 'region', searchlights
-    return scores
-
-
-def run_searchlight_search(model_rdms, target_rdms):
-    """
-    Use size of the model RDMs to determine the size of the searchlight
-    and shift over the target RDMs
-    """
+    _logger.info('Computing scores')
     similarity = RDMCorrelationCoefficient()
-    searchlight_size = len(model_rdms['stimulus'])
-    scores = []
-    for searchlight_start in range(len(target_rdms['timepoint']) - searchlight_size):
-        searchlight_end = searchlight_start + searchlight_size
-        target_searchlight = target_rdms.sel(timepoint=list(range(searchlight_start, searchlight_end)))
-        # mock timepoint as a stimulus
-        target_searchlight = target_searchlight.rename({'timepoint': 'stimulus'})
-        score = similarity(model_rdms, target_searchlight, rdm_dim='stimulus')
-        searchlight_coords = {'searchlight_start': [searchlight_start],
-                              'searchlight_end': ('searchlight_start', [searchlight_end]),
-                              'searchlight_size': ('searchlight_start', [searchlight_size])}
-        searchlight = xr.DataArray(np.ones(1), coords=searchlight_coords, dims='searchlight_start')
-        score = score * searchlight
-        _logger.info("searchlight {} - {}: {}".format(searchlight_start, searchlight_end, score.values))
-        scores.append(score)
-    return xr.concat(scores, 'searchlight_start')
+    scores = similarity(model_activations, neural_data, rdm_dim='stimulus')
+    return scores
