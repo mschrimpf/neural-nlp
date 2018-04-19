@@ -1,18 +1,44 @@
 import glob
 import logging
 import os
+import re
 
 import numpy as np
 import pandas as pd
-import re
 import xarray as xr
-from mkgu.assemblies import NeuroidAssembly
+from mkgu.assemblies import DataAssembly
+
+from neural_nlp.stimuli import NaturalisticStories
 
 neural_data_dir = os.path.join(os.path.dirname(__file__), '..', 'ressources', 'neural_data')
 _logger = logging.getLogger(__name__)
 
 
-def load_rdms(story='Boar', roi_filter='from90to100'):
+def load_rdm_sentences(story='Boar', roi_filter='from90to100', bold_shift_seconds=4):
+    timepoint_rdms = load_rdm_timepoints(story, roi_filter)
+    meta_data = load_sentences_meta(story)
+    del meta_data['fullSentence']
+    meta_data.dropna(inplace=True)
+    mapping_column = 'shiftBOLD_{}sec'.format(bold_shift_seconds)
+    timepoints = meta_data[mapping_column].values.astype(int)
+    # filter and annotate
+    assert all(timepoint in timepoint_rdms['timepoint'].values for timepoint in timepoints)
+    timepoint_rdms = timepoint_rdms.sel(timepoint=timepoints)
+    coords = {**dict(timepoint_rdms.coords.items()), **{'sentence': meta_data['reducedSentence'].values}}
+    coords['timepoint'] = ('sentence', coords['timepoint'])
+    dims = [dim if dim != 'timepoint' else 'sentence' for dim in timepoint_rdms.dims]
+    return DataAssembly(timepoint_rdms.values, coords=coords, dims=dims)
+
+
+def load_sentences_meta(story):
+    filepath = os.path.join(neural_data_dir, 'meta', 'story{}_{}_sentencesByTR.csv'.format(
+        NaturalisticStories.set_mapping[story], story))
+    _logger.debug("Loading meta {}".format(filepath))
+    meta_data = pd.read_csv(filepath)
+    return meta_data
+
+
+def load_rdm_timepoints(story='Boar', roi_filter='from90to100'):
     data = []
     for filepath in glob.glob(os.path.join(
             neural_data_dir, '{}{}*.csv'.format(story + '_', roi_filter))):
@@ -54,7 +80,7 @@ def load_rdms(story='Boar', roi_filter='from90to100'):
             # need to copy due to https://github.com/pandas-dev/pandas/issues/15860
         (dim_coords if name in data.dims else nondim_coords)[name] = value
     dims = [dim if dim not in timepoint_dims else 'timepoint' for dim in data.dims]
-    data = NeuroidAssembly(data.values, coords=dim_coords, dims=dims)
+    data = DataAssembly(data.values, coords=dim_coords, dims=dims)
     for name, value in nondim_coords.items():
         data[name] = value
     return data
