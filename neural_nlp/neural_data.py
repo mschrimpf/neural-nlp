@@ -24,9 +24,9 @@ def load_rdm_sentences(story='Boar', roi_filter='from90to100', bold_shift_second
     # filter and annotate
     assert all(timepoint in timepoint_rdms['timepoint'].values for timepoint in timepoints)
     timepoint_rdms = timepoint_rdms.sel(timepoint=timepoints)
-    coords = {**dict(timepoint_rdms.coords.items()), **{'sentence': meta_data['reducedSentence'].values}}
-    coords['timepoint'] = ('sentence', coords['timepoint'])
-    dims = [dim if dim != 'timepoint' else 'sentence' for dim in timepoint_rdms.dims]
+    coords = {**dict(timepoint_rdms.coords.items()), **{'stimulus': meta_data['reducedSentence'].values}}
+    coords['timepoint'] = ('stimulus', coords['timepoint'])
+    dims = [dim if dim != 'timepoint' else 'stimulus' for dim in timepoint_rdms.dims]
     return DataAssembly(timepoint_rdms.values, coords=coords, dims=dims)
 
 

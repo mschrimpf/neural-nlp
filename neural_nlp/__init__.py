@@ -19,7 +19,6 @@ def run(model, stimulus_set):
     _logger.info('Loading neural data')
     neural_data = load_neural_rdms()
     neural_data = neural_data.mean(dim='subject')
-    neural_data = neural_data.rename({'sentence': 'stimulus'})
 
     _logger.info('Computing scores')
     similarity = RDMCorrelationCoefficient()
