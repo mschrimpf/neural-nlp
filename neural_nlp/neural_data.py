@@ -25,9 +25,14 @@ def load_rdm_sentences(story='Boar', roi_filter='from90to100', bold_shift_second
     assert all(timepoint in timepoint_rdms['timepoint'].values for timepoint in timepoints)
     timepoint_rdms = timepoint_rdms.sel(timepoint=timepoints)
     coords = {**dict(timepoint_rdms.coords.items()), **{'stimulus': meta_data['reducedSentence'].values}}
-    coords['timepoint'] = ('stimulus', coords['timepoint'])
+    # for some reason, xarray re-packages timepoint as a MultiIndex if we pass all coords at once.
+    # to avoid that, we create the DataArray first and then add the additional coords.
+    timepoint_coord = ('stimulus', coords['timepoint'])
+    del coords['timepoint']
     dims = [dim if dim != 'timepoint' else 'stimulus' for dim in timepoint_rdms.dims]
-    return DataAssembly(timepoint_rdms.values, coords=coords, dims=dims)
+    data = DataAssembly(timepoint_rdms.values, coords=coords, dims=dims)
+    data['timepoint'] = timepoint_coord
+    return data
 
 
 def load_sentences_meta(story):
