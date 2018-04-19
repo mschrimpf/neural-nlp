@@ -49,6 +49,17 @@ class NaturalisticStories(object):
         return data['sentence'].values
 
 
+class NaturalisticStoriesNeural(object):
+    def __init__(self, stimulus_set_name, reduced=False):
+        self._stimulus_set_name = stimulus_set_name
+        self._reduced = reduced
+
+    def __call__(self):
+        from neural_nlp.neural_data import load_sentences_meta
+        sentences_meta = load_sentences_meta(self._stimulus_set_name)
+        return (sentences_meta['reducedSentence'] if self._reduced else sentences_meta['fullSentence']).dropna().values
+
+
 def load_stimuli(stimulus_set_name):
     return _mappings[stimulus_set_name]()
 
@@ -57,4 +68,8 @@ _mappings = {
     **{'diverse.{}'.format(name): DiverseSentences(filename)
        for name, filename in DiverseSentences.set_mapping.items()},
     **{'naturalistic.{}'.format(name): NaturalisticStories(name)
+       for name in NaturalisticStories.set_mapping},
+    **{'naturalistic-neural-full.{}'.format(name): NaturalisticStoriesNeural(name, reduced=False)
+       for name in NaturalisticStories.set_mapping},
+    **{'naturalistic-neural-reduced.{}'.format(name): NaturalisticStoriesNeural(name, reduced=True)
        for name in NaturalisticStories.set_mapping}}
