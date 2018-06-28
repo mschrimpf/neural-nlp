@@ -1,7 +1,13 @@
 
 # Setup
 
-## Models
+## Installation
+```bash
+conda env create -f environment.yml
+conda activate neural-nlp
+```
+
+## Models and weights
 
 ### Skip-Thoughts
 ```bash
