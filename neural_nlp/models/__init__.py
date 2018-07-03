@@ -1,14 +1,14 @@
+import argparse
 import logging
 import os
 import sys
 
-import argparse
 import numpy as np
-from mkgu.assemblies import NeuroidAssembly
+from caching import store
 
+from brainscore.assemblies import NeuroidAssembly
 from neural_nlp.models.implementations import _model_mappings, load_model
 from neural_nlp.stimuli import _mappings, load_stimuli
-from neural_nlp.utils import store
 
 _logger = logging.getLogger(__name__)
 
@@ -39,10 +39,10 @@ def get_activations(model_name, stimulus_set_name):
     _logger.debug('Converting to {}x{} assembly'.format(num_neurons, len(stimuli)))
     return NeuroidAssembly(activations.T,
                            coords={
-                               'stimulus': stimuli,
-                               'dataset.name': ('stimulus', [stimulus_set_name] * len(stimuli)),
-                               'neuroid': list(range(num_neurons)),
-                               'model.name': ('neuroid', [model_name] * num_neurons),
+                               'stimulus_sentence': ('stimulus', stimuli),
+                               'dataset_name': ('stimulus', [stimulus_set_name] * len(stimuli)),
+                               'neuroid_id': ('neuroid', list(range(num_neurons))),
+                               'model_name': ('neuroid', [model_name] * num_neurons),
                            },
                            dims=['neuroid', 'stimulus'])
 

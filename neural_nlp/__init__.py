@@ -1,13 +1,31 @@
 import logging
+import os
 
-from mkgu.metrics.rdm import RDMCorrelationCoefficient, RDM
+import caching
+from caching import store
 
+from brainscore.assemblies import DataAssembly
+from brainscore.benchmarks import SplitBenchmark
+from brainscore.metrics import NonparametricWrapper, Metric
+from brainscore.metrics.ceiling import SplitNoCeiling
+from brainscore.metrics.rdm import RDMSimilarity, RDM
 from neural_nlp import models
 from neural_nlp.models import get_activations
 from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
-from neural_nlp.utils import store
+
+caching.store.configure_storagedir(os.path.join(os.path.dirname(__file__), '..', 'output'))
 
 _logger = logging.getLogger(__name__)
+
+
+class SimilarityWrapper(Metric):
+    def __init__(self, metric, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._metric = metric
+
+    def __call__(self, source_assembly, target_assembly):
+        result = self._metric(source_assembly, target_assembly)
+        return DataAssembly(result)
 
 
 @store()
@@ -17,10 +35,19 @@ def run(model, stimulus_set):
     model_activations = RDM()(model_activations)
 
     _logger.info('Loading neural data')
-    neural_data = load_neural_rdms()
+    story = stimulus_set.split('.')[-1]
+    neural_data = load_neural_rdms(story=story)
     neural_data = neural_data.mean(dim='subject')
+    similarity = NonparametricWrapper(SimilarityWrapper(RDMSimilarity()))
+    primary_dimensions = ('stimulus',)
+    benchmark = SplitBenchmark(target_assembly=neural_data, metric=similarity,
+                               ceiling=SplitNoCeiling(), target_splits=['region'],
+                               target_splits_kwargs=dict(non_dividing_dims=primary_dimensions))
 
-    _logger.info('Computing scores')
-    similarity = RDMCorrelationCoefficient()
-    scores = similarity(model_activations, neural_data, rdm_dim='stimulus')
+    _logger.info('Computing score')
+    scores = benchmark(model_activations, transformation_kwargs=dict(
+        alignment_kwargs=dict(order_dimensions=primary_dimensions, alignment_dim='stimulus_sentence'),
+        cartesian_product_kwargs=dict(non_dividing_dims=primary_dimensions),
+        cross_validation_kwargs=dict(dim='stimulus_sentence', stratification_coord=None)
+    ))
     return scores

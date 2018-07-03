@@ -6,7 +6,9 @@ import re
 import numpy as np
 import pandas as pd
 import xarray as xr
-from mkgu.assemblies import DataAssembly
+from caching import cache
+
+from brainscore.assemblies import DataAssembly
 
 from neural_nlp.stimuli import NaturalisticStories
 
@@ -22,16 +24,17 @@ def load_rdm_sentences(story='Boar', roi_filter='from90to100', bold_shift_second
     mapping_column = 'shiftBOLD_{}sec'.format(bold_shift_seconds)
     timepoints = meta_data[mapping_column].values.astype(int)
     # filter and annotate
-    assert all(timepoint in timepoint_rdms['timepoint'].values for timepoint in timepoints)
-    timepoint_rdms = timepoint_rdms.sel(timepoint=timepoints)
-    coords = {**dict(timepoint_rdms.coords.items()), **{'stimulus': meta_data['reducedSentence'].values}}
-    # for some reason, xarray re-packages timepoint as a MultiIndex if we pass all coords at once.
-    # to avoid that, we create the DataArray first and then add the additional coords.
-    timepoint_coord = ('stimulus', coords['timepoint'])
-    del coords['timepoint']
-    dims = [dim if dim != 'timepoint' else 'stimulus' for dim in timepoint_rdms.dims]
-    data = DataAssembly(timepoint_rdms.values, coords=coords, dims=dims)
-    data['timepoint'] = timepoint_coord
+    assert all(timepoint in timepoint_rdms['timepoint_left'].values for timepoint in timepoints)
+    timepoint_rdms = timepoint_rdms.sel(timepoint_left=timepoints, timepoint_right=timepoints)
+    # re-interpret timepoints as stimuli
+    coords = {}
+    for coord_name, coord_value in timepoint_rdms.coords.items():
+        dims = timepoint_rdms.coords[coord_name].dims
+        dims = [dim if not dim.startswith('timepoint') else 'stimulus' for dim in dims]
+        coords[coord_name] = dims, coord_value.values
+    coords = {**coords, **{'stimulus_sentence': ('stimulus', meta_data['reducedSentence'].values)}}
+    dims = [dim if not dim.startswith('timepoint') else 'stimulus' for dim in timepoint_rdms.dims]
+    data = DataAssembly(timepoint_rdms, coords=coords, dims=dims)
     return data
 
 
@@ -43,49 +46,32 @@ def load_sentences_meta(story):
     return meta_data
 
 
+@cache()
 def load_rdm_timepoints(story='Boar', roi_filter='from90to100'):
     data = []
-    for filepath in glob.glob(os.path.join(
-            neural_data_dir, '{}{}*.csv'.format(story + '_', roi_filter))):
-        _logger.debug("Loading file {}".format(filepath))
+    data_paths = glob.glob(os.path.join(neural_data_dir, '{}{}*.csv'.format(story + '_', roi_filter)))
+    for i, filepath in enumerate(data_paths):
+        _logger.debug("Loading file {} ({}/{})".format(filepath, i, len(data_paths)))
         attributes = re.match('^.*/(?P<story>.*)_from(?P<roi_low>[0-9]+)to(?P<roi_high>[0-9]+)'
                               '(_(?P<subjects>[0-9]+)Subjects)?\.mat_r(?P<region>[0-9]+).csv', filepath)
-        _data = pd.read_csv(filepath, header=None)
-        num_stimuli = len(_data.columns)
-        assert len(_data) % num_stimuli == 0
-        num_subjects = len(_data) // num_stimuli
-        _data = np.stack([_data.iloc[(subject * num_stimuli):((subject + 1) * num_stimuli)]
-                          for subject in range(num_subjects)])
-        _data = xr.DataArray([_data], coords={
+        # load values (pandas is much faster than np.loadtxt https://stackoverflow.com/a/18260092/2225200)
+        region_data = pd.read_csv(filepath, header=None).values
+        assert len(region_data.shape) == 2  # (subjects x stimuli) x stimuli
+        num_stimuli = region_data.shape[1]
+        assert len(region_data) % num_stimuli == 0
+        num_subjects = len(region_data) // num_stimuli
+        region_data = np.stack([region_data[(subject * num_stimuli):((subject + 1) * num_stimuli)]
+                                for subject in range(num_subjects)])  # subjects x time x time
+        region_data = [region_data]  # region x subjects x time x time
+        region_data = xr.DataArray(region_data, coords={
             'timepoint_left': list(range(num_stimuli)), 'timepoint_right': list(range(num_stimuli)),
             'region': [int(attributes['region'])],
             'subject': list(range(num_subjects))},
-                             dims=['region', 'subject', 'timepoint_left', 'timepoint_right'])
-        stimuli_meta = lambda x: (['timepoint_left', 'timepoint_right'],
-                                  np.broadcast_to(x, [num_stimuli, num_stimuli]))
-        _data['story'] = stimuli_meta(attributes['story'])
-        _data['roi_low'] = stimuli_meta(int(attributes['roi_low']))
-        _data['roi_high'] = stimuli_meta(int(attributes['roi_high']))
-        data.append(_data)
+                                   dims=['region', 'subject', 'timepoint_left', 'timepoint_right'])
+        stimuli_meta = lambda x: (('timepoint_left', 'timepoint_right'), np.broadcast_to(x, [num_stimuli, num_stimuli]))
+        region_data['story'] = stimuli_meta(attributes['story'])
+        region_data['roi_low'] = stimuli_meta(int(attributes['roi_low']))
+        region_data['roi_high'] = stimuli_meta(int(attributes['roi_high']))
+        data.append(region_data)
     data = xr.concat(data, 'region')
-
-    # re-format timepoint_{left,right} to single dimension
-    timepoint_dims = ['timepoint_left', 'timepoint_right']
-    # for some reason, xarray re-packages timepoint as a MultiIndex if we pass all coords at once.
-    # to avoid that, we create the DataArray first and then add the additional coords.
-    dim_coords = {'timepoint': data['timepoint_left'].values}
-    nondim_coords = {}
-    for name, value in data.coords.items():
-        if name in timepoint_dims:
-            continue
-        if np.array_equal(value.dims, timepoint_dims):
-            unique = np.unique(value.values)
-            assert unique.size == 1
-            value = 'timepoint', np.broadcast_to(unique, dim_coords['timepoint'].shape).copy()
-            # need to copy due to https://github.com/pandas-dev/pandas/issues/15860
-        (dim_coords if name in data.dims else nondim_coords)[name] = value
-    dims = [dim if dim not in timepoint_dims else 'timepoint' for dim in data.dims]
-    data = DataAssembly(data.values, coords=dim_coords, dims=dims)
-    for name, value in nondim_coords.items():
-        data[name] = value
     return data

@@ -12,7 +12,8 @@ dependencies:
   - gensim
   - theano
   - pip:
-    - git+https://github.com/mschrimpf/mkgu
+    - git+https://github.com/mschrimpf/brain-score.git
+    - git+https://github.com/mschrimpf/caching
     - pillow
     - llist
     - git+https://github.com/mschrimpf/skip-thoughts.git
