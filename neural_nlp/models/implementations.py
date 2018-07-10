@@ -42,6 +42,18 @@ class LM1B(Model):
         return np.array([embedding[-1][0] for embedding in embeddings])  # only output last embedding, discard time
 
 
+class decaNLP(Model):
+    """
+    https://arxiv.org/pdf/1806.08730.pdf
+    """
+    
+    def __init__(self, weights=os.path.join(_ressources_dir, 'decaNLP')):
+        # TODO
+    
+    def __call__(self, sentences):
+        return run(args, field, splits, self.model)
+        
+     
 class KeyedVectorModel(Model):
     def __init__(self, weights_file, binary=False):
         from gensim.models.keyedvectors import KeyedVectors
@@ -127,4 +139,5 @@ _model_mappings = {
     'word2vec': Word2Vec,
     'glove': Glove,
     'rntn': RecursiveNeuralTensorNetwork,
+    'decaNLP': decaNLP,
 }
