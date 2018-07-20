@@ -42,6 +42,33 @@ class LM1B(Model):
         return np.array([embedding[-1][0] for embedding in embeddings])  # only output last embedding, discard time
 
 
+class openNMT(Model):
+    """
+    """
+    
+    def __init__(self, weights=os.path.join(_ressources_dir, 'openNMT')):
+        # weights gives path to model?
+        from openNMT.onmt.opts import add_md_help_argument, translate_opts
+        from openNMT.onmt.translate.translator import build_translator
+        import argparse
+        parser = argparse.ArgumentParser(description='translate.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        add_md_help_argument(parser)
+        translate_opts(parser)
+        
+        self.opt = parser.parse_args()
+        self.translator = build_translator(self.opt, report_score=True)
+    
+    def __call__(self, sentences):
+        # TODO: clears document when opened. correct pathname. tokenize
+        with open(self.opt.src, "w+") as file:
+            file.write(sentences)
+        return np.array(self.translator.get_encodings(src_path=self.opt.src,
+                         tgt_path=self.opt.tgt,
+                         src_dir=self.opt.src_dir,
+                         batch_size=self.opt.batch_size,
+                         attn_debug=self.opt.attn_debug))
+        
+     
 class KeyedVectorModel(Model):
     def __init__(self, weights_file, binary=False):
         from gensim.models.keyedvectors import KeyedVectors
@@ -127,4 +154,5 @@ _model_mappings = {
     'word2vec': Word2Vec,
     'glove': Glove,
     'rntn': RecursiveNeuralTensorNetwork,
+    'openNMT': openNMT,
 }
