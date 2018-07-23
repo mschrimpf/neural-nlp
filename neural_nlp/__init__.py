@@ -2,7 +2,7 @@ import logging
 import os
 
 import caching
-from caching import store
+from caching import store_xarray
 
 from brainscore.assemblies import DataAssembly
 from brainscore.benchmarks import SplitBenchmark
@@ -10,7 +10,7 @@ from brainscore.metrics import NonparametricWrapper, Metric
 from brainscore.metrics.ceiling import SplitNoCeiling
 from brainscore.metrics.rdm import RDMSimilarity, RDM
 from neural_nlp import models
-from neural_nlp.models import get_activations
+from neural_nlp.models import get_activations, model_layers
 from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
 
 caching.store.configure_storagedir(os.path.join(os.path.dirname(__file__), '..', 'output'))
@@ -28,10 +28,15 @@ class SimilarityWrapper(Metric):
         return DataAssembly(result)
 
 
-@store()
-def run(model, stimulus_set):
+def run(model, stimulus_set, layers=None):
+    layers = layers or model_layers[model]
+    return _run(model=model, layers=layers, stimulus_set=stimulus_set)
+
+
+@store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
+def _run(model, layers, stimulus_set):
     _logger.info('Computing activations')
-    model_activations = get_activations(model_name=model, stimulus_set_name=stimulus_set)
+    model_activations = get_activations(model_name=model, layers=layers, stimulus_set_name=stimulus_set)
     model_activations = RDM()(model_activations)
 
     _logger.info('Loading neural data')
