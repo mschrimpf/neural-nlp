@@ -48,13 +48,13 @@ class openNMT(Model):
     https://arxiv.org/pdf/1706.03762.pdf
     """
     
-    def __init__(self, weights=os.path.join(_ressources_dir, 'openNMT')):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')):
         from onmt.opts import add_md_help_argument, translate_opts
         from onmt.translate.translator import build_translator
         import argparse
         parser = argparse.ArgumentParser(description='translate.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         add_md_help_argument(parser)
-        translate_opts(parser)
+        translate_opts(parser, weights)
         
         self.opt = parser.parse_args()
         self.translator = build_translator(self.opt, report_score=True)
