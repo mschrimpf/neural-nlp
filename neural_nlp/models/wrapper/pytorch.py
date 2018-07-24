@@ -1,14 +1,10 @@
 import logging
-from PIL import Image
 from collections import OrderedDict
 
-import numpy as np
 import torch
 from torch.autograd import Variable
-from torchvision.models.alexnet import alexnet
-from torchvision.transforms import transforms
 
-from candidate_models.models.implementations import DeepModel, Defaults
+from . import DeepModel
 
 _logger = logging.getLogger(__name__)
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -17,37 +13,16 @@ SUBMODULE_SEPARATOR = '.'
 
 
 class PytorchModel(DeepModel):
-    def __init__(self, model_name, weights=Defaults.weights,
-                 batch_size=Defaults.batch_size, image_size=Defaults.image_size):
-        super().__init__(batch_size=batch_size, image_size=image_size)
-        constructor = model_constructors[model_name]
-        assert weights in ['imagenet', None]
-        self._model = constructor(pretrained=weights == 'imagenet')
+    def __init__(self):
+        super().__init__()
+        self._model = self._load_model()
         if torch.cuda.is_available():
             self._model.cuda()
 
-    def _load_image(self, image_filepath):
-        with Image.open(image_filepath) as image:
-            if image.mode.upper() != 'L':  # not binary
-                # work around to https://github.com/python-pillow/Pillow/issues/1144,
-                # see https://stackoverflow.com/a/30376272/2225200
-                return image.copy()
-            else:  # make sure potential binary images are in RGB
-                image = Image.new("RGB", image.size)
-                image.paste(image)
-                return image
+    def _load_model(self):
+        raise NotImplementedError()
 
-    def _preprocess_images(self, images, image_size):
-        images = [self._preprocess_image(image, image_size) for image in images]
-        return np.concatenate(images)
-
-    def _preprocess_image(self, image, image_size):
-        if isinstance(image, np.ndarray):
-            image = Image.fromarray(np.uint8(image * 255))
-        image = torchvision_preprocess_input(image_size)(image)
-        return image
-
-    def _get_activations(self, images, layer_names):
+    def _get_activations(self, sentences, layer_names):
         layer_results = OrderedDict()
 
         def walk_pytorch_module(module, layer_name):
@@ -62,26 +37,25 @@ class PytorchModel(DeepModel):
             layer = walk_pytorch_module(self._model, layer_name)
             layer.register_forward_hook(
                 lambda _layer, _input, output, name=layer_name: store_layer_output(name, output))
-        images = [torch.from_numpy(image) for image in images]
-        images = Variable(torch.stack(images))
+        sentences = Variable(sentences)
         if torch.cuda.is_available():
-            images.cuda()
-        self._model(images)
+            sentences.cuda()
+        self._model(sentences)
         return layer_results
 
     def __repr__(self):
         return repr(self._model)
 
+    def _collect_layers(self, module):
+        layers = []
+        for submodule_name, submodule in module._modules.items():
+            if not submodule._modules:
+                sublayers = [submodule_name]
+            else:
+                sublayers = self._collect_layers(submodule)
+                sublayers = [submodule_name + SUBMODULE_SEPARATOR + layer for layer in sublayers]
+            layers += sublayers
+        return layers
 
-def torchvision_preprocess_input(image_size, normalize_mean=[0.485, 0.456, 0.406], normalize_std=[0.229, 0.224, 0.225]):
-    return transforms.Compose([
-        transforms.Resize(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=normalize_mean, std=normalize_std),
-        lambda img: img.unsqueeze(0)
-    ])
-
-
-model_constructors = {
-    'alexnet': alexnet,  # https://arxiv.org/abs/1404.5997
-}
+    def available_layers(self):
+        return self._collect_layers(self._model)
