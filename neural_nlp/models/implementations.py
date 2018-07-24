@@ -14,19 +14,30 @@ class Model(object):
         raise NotImplementedError()
 
 
-class SkipThoughts(Model):
+class SkipThoughts(DeepModel):
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
+        super().__init__()
         import skipthoughts
         weights = weights + '/'
         model = skipthoughts.load_model(path_to_models=weights, path_to_tables=weights)
         self._encoder = skipthoughts.Encoder(model)
 
-    def __call__(self, sentences):
-        return self._encoder.encode(sentences)
+    def _get_activations(self, sentences, layer_names):
+        np.testing.assert_array_equal(layer_names, ['encoder'])
+        encoding = self._encoder.encode(sentences)
+        return {'encoder': encoding}
+
+    @classmethod
+    def available_layers(cls):
+        return ['encoder']
+
+    @classmethod
+    def default_layers(cls):
+        return cls.available_layers()
 
 
 class LM1B(DeepModel):
@@ -88,7 +99,12 @@ class LM1B(DeepModel):
         return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
-class KeyedVectorModel(Model):
+class KeyedVectorModel(DeepModel):
+    """
+    Lookup-table-like models where each word has an embedding.
+    To retrieve the sentence activation, we take the mean of the word embeddings.
+    """
+
     def __init__(self, weights_file, binary=False):
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
@@ -97,6 +113,11 @@ class KeyedVectorModel(Model):
 
     def _combine_vectors(self, feature_vectors):
         return _mean_vector(feature_vectors)
+
+    def _get_activations(self, sentences, layer_names):
+        np.testing.assert_array_equal(layer_names, ['projection'])
+        encoding = np.array([self._encode_sentence(sentence) for sentence in sentences])
+        return {'projection': encoding}
 
     def __call__(self, sentences):
         return np.array([self._encode_sentence(sentence) for sentence in sentences])
@@ -110,6 +131,14 @@ class KeyedVectorModel(Model):
             else:
                 self._logger.warning("Word {} not present in model".format(word))
         return self._combine_vectors(feature_vectors)
+
+    @classmethod
+    def available_layers(cls):
+        return ['projection']
+
+    @classmethod
+    def default_layers(cls):
+        return cls.available_layers()
 
 
 class Word2Vec(KeyedVectorModel):
@@ -176,5 +205,8 @@ _model_mappings = {
 }
 
 model_layers = {
-    'lm_1b': LM1B.default_layers()
+    'skip-thoughts': SkipThoughts.default_layers(),
+    'lm_1b': LM1B.default_layers(),
+    'word2vec': Word2Vec.default_layers(),
+    'glove': Glove.default_layers(),
 }
