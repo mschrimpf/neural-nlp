@@ -97,10 +97,10 @@ class DeepModel(object):
         layers = np.reshape(layers, [np.prod(activations.shape[1:])])
         model_assembly = NeuroidAssembly(
             activations,
-            coords={'sentence': sentences,
+            coords={'stimulus_sentence': ('stimulus', sentences),
                     'neuroid_id': ('neuroid', list(range(activations.shape[1]))),
                     'layer': ('neuroid', layers)},
-            dims=['sentence', 'neuroid']
+            dims=['stimulus', 'neuroid']
         )
         return model_assembly
 
