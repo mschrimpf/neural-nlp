@@ -3,6 +3,7 @@ import os
 import pandas as pd
 
 import numpy as np
+import tempfile
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
@@ -44,12 +45,12 @@ class LM1B(Model):
 
 class openNMT(Model):
     """
+    https://arxiv.org/pdf/1706.03762.pdf
     """
     
     def __init__(self, weights=os.path.join(_ressources_dir, 'openNMT')):
-        # weights gives path to model?
-        from openNMT.onmt.opts import add_md_help_argument, translate_opts
-        from openNMT.onmt.translate.translator import build_translator
+        from onmt.opts import add_md_help_argument, translate_opts
+        from onmt.translate.translator import build_translator
         import argparse
         parser = argparse.ArgumentParser(description='translate.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         add_md_help_argument(parser)
@@ -59,10 +60,11 @@ class openNMT(Model):
         self.translator = build_translator(self.opt, report_score=True)
     
     def __call__(self, sentences):
-        # TODO: clears document when opened. correct pathname. tokenize
-        with open(self.opt.src, "w+") as file:
-            file.write(sentences)
-        return np.array(self.translator.get_encodings(src_path=self.opt.src,
+        with tempfile.NamedTemporaryFile(mode='w+') as file:
+            file.writelines(sentences)
+            file.write('\n')
+            file.flush()
+            return np.array(self.translator.get_encodings(src_path=file.name,
                          tgt_path=self.opt.tgt,
                          src_dir=self.opt.src_dir,
                          batch_size=self.opt.batch_size,
