@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from neural_nlp.models.wrapper import DeepModel
+import tempfile
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
@@ -99,12 +100,39 @@ class LM1B(DeepModel):
         return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
+class openNMT(Model):
+    """
+    https://arxiv.org/pdf/1706.03762.pdf
+    """
+
+    def __init__(self, weights=os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')):
+        from onmt.opts import add_md_help_argument, translate_opts
+        from onmt.translate.translator import build_translator
+        import argparse
+        parser = argparse.ArgumentParser(description='translate.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        add_md_help_argument(parser)
+        translate_opts(parser, weights)
+
+        self.opt = parser.parse_args()
+        self.translator = build_translator(self.opt, report_score=True)
+
+    def __call__(self, sentences):
+        with tempfile.NamedTemporaryFile(mode='w+') as file:
+            file.writelines(sentences)
+            file.write('\n')
+            file.flush()
+            return np.array(self.translator.get_encodings(src_path=file.name,
+                         tgt_path=self.opt.tgt,
+                         src_dir=self.opt.src_dir,
+                         batch_size=self.opt.batch_size,
+                         attn_debug=self.opt.attn_debug))
+
+
 class KeyedVectorModel(DeepModel):
     """
     Lookup-table-like models where each word has an embedding.
     To retrieve the sentence activation, we take the mean of the word embeddings.
     """
-
     def __init__(self, weights_file, binary=False):
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
@@ -202,6 +230,7 @@ _model_mappings = {
     'word2vec': Word2Vec,
     'glove': Glove,
     'rntn': RecursiveNeuralTensorNetwork,
+    'openNMT': openNMT,
 }
 
 model_layers = {

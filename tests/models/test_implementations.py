@@ -27,6 +27,10 @@ def test_rntn():
                                  'you would come to a valley that is surrounded by moors as high as')
 
 
+def test_decaNLP():
+    _test_model('decaNLP')
+    
+    
 def _test_model(model_name, sentence='The quick brown fox jumps over the lazy dog'):
     model = load_model(model_name)
     encoding = model([sentence])
