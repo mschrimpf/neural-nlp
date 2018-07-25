@@ -37,11 +37,14 @@ class PytorchModel(DeepModel):
             layer = walk_pytorch_module(self._model, layer_name)
             layer.register_forward_hook(
                 lambda _layer, _input, output, name=layer_name: store_layer_output(name, output))
+        self._run_model(sentences)
+        return layer_results
+
+    def _run_model(self, sentences):
         sentences = Variable(sentences)
         if torch.cuda.is_available():
             sentences.cuda()
         self._model(sentences)
-        return layer_results
 
     def __repr__(self):
         return repr(self._model)

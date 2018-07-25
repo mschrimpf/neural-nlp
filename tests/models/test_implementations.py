@@ -14,6 +14,16 @@ def test_lm1b():
     assert 1 == activations['sentence'].shape[0]
 
 
+def test_transformer():
+    sentence = 'The quick brown fox jumps over the lazy dog'
+    model = load_model('transformer')
+    activations = model.get_activations([sentence], model.default_layers())
+    assert isinstance(activations, NeuroidAssembly)
+    assert 2 == len(activations.shape)
+    assert 2 * 6 == len(np.unique(activations['layer']))
+    assert 1 == activations['stimulus_sentence'].shape[0]
+
+
 def test_word2vec():
     _test_model('word2vec')
 

@@ -1,11 +1,12 @@
 import logging
 import os
+import tempfile
 
 import numpy as np
 import pandas as pd
 
 from neural_nlp.models.wrapper import DeepModel
-import tempfile
+from neural_nlp.models.wrapper.pytorch import PytorchModel
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
@@ -100,32 +101,66 @@ class LM1B(DeepModel):
         return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
-class openNMT(Model):
+class Transformer(PytorchModel):
     """
     https://arxiv.org/pdf/1706.03762.pdf
     """
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')):
         from onmt.opts import add_md_help_argument, translate_opts
-        from onmt.translate.translator import build_translator
         import argparse
-        parser = argparse.ArgumentParser(description='translate.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser = argparse.ArgumentParser(description='translate.py',
+                                         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         add_md_help_argument(parser)
         translate_opts(parser, weights)
 
-        self.opt = parser.parse_args()
-        self.translator = build_translator(self.opt, report_score=True)
+        self._opt = parser.parse_args([])
 
-    def __call__(self, sentences):
+        super().__init__()
+
+    def _load_model(self):
+        from onmt.translate.translator import build_translator
+        self._translator = build_translator(self._opt, report_score=True)
+        return self._translator.model
+
+    def _run_model(self, sentences):
         with tempfile.NamedTemporaryFile(mode='w+') as file:
             file.writelines(sentences)
             file.write('\n')
             file.flush()
-            return np.array(self.translator.get_encodings(src_path=file.name,
-                         tgt_path=self.opt.tgt,
-                         src_dir=self.opt.src_dir,
-                         batch_size=self.opt.batch_size,
-                         attn_debug=self.opt.attn_debug))
+            encodings = self._translator.get_encodings(src_path=file.name, tgt_path=self._opt.tgt,
+                                                       src_dir=self._opt.src_dir, batch_size=self._opt.batch_size,
+                                                       attn_debug=self._opt.attn_debug)
+            return np.array(encodings)
+
+    @classmethod
+    def default_layers(cls):
+        """
+        For each of the 6 encoder blocks, we're using two layers,
+        one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
+
+        The encoder is implemented as follows:
+        ```
+        input_norm = self.layer_norm(inputs)
+        context, _ = self.self_attn(input_norm, input_norm, input_norm, mask=mask)
+        out = self.dropout(context) + inputs
+        return self.feed_forward(out)
+        ```
+        `feed_forward` is implemented as follows:
+        ```
+        inter = self.dropout_1(self.relu(self.w_1(self.layer_norm(x))))
+        output = self.dropout_2(self.w_2(inter))
+        return output + x
+        ```
+        We thus use `feed_forward.layer_norm` as the layer immediately following the Multi-Head Attention
+        and `feed_forward.dropout_2` as the last layer of the Feed Forward block.
+        Note however that the attended input has not yet been added back to the feed forward output with
+        `feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
+        """
+        layers = [f'encoder.transformer.{i}.{layer}'
+                  for i in range(6)
+                  for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
+        return layers
 
 
 class KeyedVectorModel(DeepModel):
@@ -133,7 +168,9 @@ class KeyedVectorModel(DeepModel):
     Lookup-table-like models where each word has an embedding.
     To retrieve the sentence activation, we take the mean of the word embeddings.
     """
+
     def __init__(self, weights_file, binary=False):
+        super().__init__()
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
         self._index2word_set = set(self._model.index2word)
@@ -230,7 +267,7 @@ _model_mappings = {
     'word2vec': Word2Vec,
     'glove': Glove,
     'rntn': RecursiveNeuralTensorNetwork,
-    'openNMT': openNMT,
+    'transformer': Transformer,
 }
 
 model_layers = {
@@ -238,4 +275,5 @@ model_layers = {
     'lm_1b': LM1B.default_layers(),
     'word2vec': Word2Vec.default_layers(),
     'glove': Glove.default_layers(),
+    'transformer': Transformer.default_layers(),
 }
