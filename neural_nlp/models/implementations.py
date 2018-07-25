@@ -1,53 +1,110 @@
 import logging
 import os
-import pandas as pd
 
 import numpy as np
+import pandas as pd
+
+from neural_nlp.models.wrapper import DeepModel
 import tempfile
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
 
 class Model(object):
-    pass
+    def __call__(self, sentences):
+        raise NotImplementedError()
 
 
-class SkipThoughts(Model):
+class SkipThoughts(DeepModel):
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
+        super().__init__()
         import skipthoughts
         weights = weights + '/'
         model = skipthoughts.load_model(path_to_models=weights, path_to_tables=weights)
         self._encoder = skipthoughts.Encoder(model)
 
-    def __call__(self, sentences):
-        return self._encoder.encode(sentences)
+    def _get_activations(self, sentences, layer_names):
+        np.testing.assert_array_equal(layer_names, ['encoder'])
+        encoding = self._encoder.encode(sentences)
+        return {'encoder': encoding}
+
+    @classmethod
+    def available_layers(cls):
+        return ['encoder']
+
+    @classmethod
+    def default_layers(cls):
+        return cls.available_layers()
 
 
-class LM1B(Model):
+class LM1B(DeepModel):
     """
     https://arxiv.org/pdf/1602.02410.pdf
     """
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b')):
+        super().__init__()
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
                                 ckpt=os.path.join(weights, 'ckpt-*'))
 
-    def __call__(self, sentences):
-        embeddings, word_ids = self._encoder(sentences)
-        return np.array([embedding[-1][0] for embedding in embeddings])  # only output last embedding, discard time
+    def _get_activations(self, sentences, layer_names):
+        from lm_1b import lm_1b_eval
+        from six.moves import xrange
+        # the following is copied from lm_1b.lm_1b_eval.Encoder.__call__.
+        # only the `sess.run` call needs to be changed but there's no way to access it outside the code
+        self._encoder.sess.run(self._encoder.t['states_init'])
+        targets = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
+        weights = np.ones([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.float32)
+        sentences_embeddings, sentences_word_ids = [], []
+        for sentence in sentences:
+            if sentence.find('<S>') != 0:
+                sentence = '<S> ' + sentence
+            word_ids = [self._encoder.vocab.word_to_id(w) for w in sentence.split()]
+            char_ids = [self._encoder.vocab.word_to_char_ids(w) for w in sentence.split()]
+            inputs = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
+            char_ids_inputs = np.zeros(
+                [lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS, self._encoder.vocab.max_word_length], np.int32)
+            embeddings = []
+            for i in xrange(len(word_ids)):
+                inputs[0, 0] = word_ids[i]
+                char_ids_inputs[0, 0, :] = char_ids[i]
+
+                # Add 'lstm/lstm_0/control_dependency' if you want to dump previous layer
+                # LSTM.
+                lstm_emb = self._encoder.sess.run([self._encoder.t[name] for name in layer_names],
+                                                  feed_dict={self._encoder.t['char_inputs_in']: char_ids_inputs,
+                                                             self._encoder.t['inputs_in']: inputs,
+                                                             self._encoder.t['targets_in']: targets,
+                                                             self._encoder.t['target_weights_in']: weights})
+                embeddings.append(lstm_emb)
+            sentences_embeddings.append(embeddings)
+            sentences_word_ids.append(word_ids)
+        # `sentences_embeddings` shape is now: sentences x words x layers x *layer_shapes
+        layer_activations = {}
+        for i, layer in enumerate(layer_names):
+            # only output last embedding (last word), discard time course
+            layer_activations[layer] = np.array([embedding[-1][i] for embedding in sentences_embeddings])
+        return layer_activations
+
+    def available_layers(self, filter_inputs=True):
+        return [tensor_name for tensor_name in self._encoder.t if not filter_inputs or not tensor_name.endswith('_in')]
+
+    @classmethod
+    def default_layers(cls):
+        return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
 class openNMT(Model):
     """
     https://arxiv.org/pdf/1706.03762.pdf
     """
-    
+
     def __init__(self, weights=os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')):
         from onmt.opts import add_md_help_argument, translate_opts
         from onmt.translate.translator import build_translator
@@ -55,10 +112,10 @@ class openNMT(Model):
         parser = argparse.ArgumentParser(description='translate.py', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         add_md_help_argument(parser)
         translate_opts(parser, weights)
-        
+
         self.opt = parser.parse_args()
         self.translator = build_translator(self.opt, report_score=True)
-    
+
     def __call__(self, sentences):
         with tempfile.NamedTemporaryFile(mode='w+') as file:
             file.writelines(sentences)
@@ -69,9 +126,13 @@ class openNMT(Model):
                          src_dir=self.opt.src_dir,
                          batch_size=self.opt.batch_size,
                          attn_debug=self.opt.attn_debug))
-        
-     
-class KeyedVectorModel(Model):
+
+
+class KeyedVectorModel(DeepModel):
+    """
+    Lookup-table-like models where each word has an embedding.
+    To retrieve the sentence activation, we take the mean of the word embeddings.
+    """
     def __init__(self, weights_file, binary=False):
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
@@ -80,6 +141,11 @@ class KeyedVectorModel(Model):
 
     def _combine_vectors(self, feature_vectors):
         return _mean_vector(feature_vectors)
+
+    def _get_activations(self, sentences, layer_names):
+        np.testing.assert_array_equal(layer_names, ['projection'])
+        encoding = np.array([self._encode_sentence(sentence) for sentence in sentences])
+        return {'projection': encoding}
 
     def __call__(self, sentences):
         return np.array([self._encode_sentence(sentence) for sentence in sentences])
@@ -93,6 +159,14 @@ class KeyedVectorModel(Model):
             else:
                 self._logger.warning("Word {} not present in model".format(word))
         return self._combine_vectors(feature_vectors)
+
+    @classmethod
+    def available_layers(cls):
+        return ['projection']
+
+    @classmethod
+    def default_layers(cls):
+        return cls.available_layers()
 
 
 class Word2Vec(KeyedVectorModel):
@@ -157,4 +231,11 @@ _model_mappings = {
     'glove': Glove,
     'rntn': RecursiveNeuralTensorNetwork,
     'openNMT': openNMT,
+}
+
+model_layers = {
+    'skip-thoughts': SkipThoughts.default_layers(),
+    'lm_1b': LM1B.default_layers(),
+    'word2vec': Word2Vec.default_layers(),
+    'glove': Glove.default_layers(),
 }

@@ -20,7 +20,7 @@ class TestLoadRdmSentences(object):
 
     def _test_story(self, story, num_sentences, num_subjects, num_regions=44):
         data = neural_data.load_rdm_sentences(story)
-        assert len(data['sentence']) == num_sentences
+        assert len(data['stimulus']) == num_sentences
         assert len(data['subject']) == num_subjects
         assert len(data['region']) == num_regions
 
