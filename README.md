@@ -64,6 +64,7 @@ See https://github.com/tensorflow/models/tree/master/research/lm_1b.
 ```bash
 mkdir -p ressources/models/transformer && cd "$_"
 wget https://s3.amazonaws.com/opennmt-models/transformer-ende-wmt-pyOnmt.tar.gz
+tar -xzvf transformer-ende-wmt-pyOnmt.tar.gz && rm transformer-ende-wmt-pyOnmt.tar.gz
 cd ../../../
 ```
 See https://github.com/OpenNMT/OpenNMT-py
