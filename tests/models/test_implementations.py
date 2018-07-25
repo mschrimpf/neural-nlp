@@ -1,35 +1,21 @@
 import numpy as np
+import pytest
 
 from brainscore.assemblies import NeuroidAssembly
 from neural_nlp.models.implementations import load_model
 
 
-def test_lm1b():
-    sentence = 'The quick brown fox jumps over the lazy dog'
-    model = load_model('lm_1b')
-    activations = model.get_activations([sentence], model.default_layers())
-    assert isinstance(activations, NeuroidAssembly)
-    assert 2 == len(activations.shape)
-    assert 2 == len(np.unique(activations['layer']))
-    assert 1 == activations['sentence'].shape[0]
-
-
-def test_transformer():
-    sentence = 'The quick brown fox jumps over the lazy dog'
-    model = load_model('transformer')
-    activations = model.get_activations([sentence], model.default_layers())
-    assert isinstance(activations, NeuroidAssembly)
-    assert 2 == len(activations.shape)
-    assert 2 * 6 == len(np.unique(activations['layer']))
-    assert 1 == activations['stimulus_sentence'].shape[0]
-
-
-def test_word2vec():
-    _test_model('word2vec')
-
-
-def test_glove():
-    _test_model('glove')
+class TestActivations:
+    @pytest.mark.parametrize("model, num_layers",
+                             [('word2vec', 1), ('glove', 1), ('lm_1b', 2), ('transformer', 2 * 6)])
+    def test_story_model(self, model, num_layers):
+        sentence = 'The quick brown fox jumps over the lazy dog'
+        model = load_model(model)
+        activations = model.get_activations([sentence], model.default_layers())
+        assert isinstance(activations, NeuroidAssembly)
+        assert 2 == len(activations.shape)
+        assert num_layers == len(np.unique(activations['layer']))
+        assert 1 == activations['stimulus_sentence'].shape[0]
 
 
 def test_rntn():
@@ -39,8 +25,8 @@ def test_rntn():
 
 def test_decaNLP():
     _test_model('decaNLP')
-    
-    
+
+
 def _test_model(model_name, sentence='The quick brown fox jumps over the lazy dog'):
     model = load_model(model_name)
     encoding = model([sentence])
