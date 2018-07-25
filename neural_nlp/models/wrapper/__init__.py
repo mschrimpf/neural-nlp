@@ -98,6 +98,7 @@ class DeepModel(object):
         model_assembly = NeuroidAssembly(
             activations,
             coords={'stimulus_sentence': ('stimulus', sentences),
+                    'stimulus_num': ('stimulus', list(range(len(sentences)))),
                     'neuroid_id': ('neuroid', list(range(activations.shape[1]))),
                     'layer': ('neuroid', layers)},
             dims=['stimulus', 'neuroid']
@@ -113,8 +114,9 @@ class DeepModel(object):
         for layer in too_small_layers:
             self._logger.warning("Padding layer {} with zeros since its activations are too small ({})".format(
                 layer, layer_activations[layer].shape))
-            layer_activations[layer] = [np.pad(a, (0, num_components - a.size), 'constant', constant_values=(0,))
-                                        for a in layer_activations[layer]]
+            layer_activations[layer] = np.array(
+                [np.pad(a, (0, num_components - a.size), 'constant', constant_values=(0,))
+                 for a in layer_activations[layer]])
 
     def _change_layer_activations(self, layer_activations, change_function, pass_name=False):
         return OrderedDict((layer, change_function(values) if not pass_name else change_function(layer, values))
