@@ -60,6 +60,14 @@ cd ../../../
 ```
 See https://github.com/tensorflow/models/tree/master/research/lm_1b.
 
+### Transformer
+```bash
+mkdir -p ressources/models/transformer && cd "$_"
+wget https://s3.amazonaws.com/opennmt-models/transformer-ende-wmt-pyOnmt.tar.gz
+cd ../../../
+```
+See https://github.com/OpenNMT/OpenNMT-py
+
 ### Word2Vec
 ```bash
 mkdir -p ressources/models/word2vec && cd "$_"
