@@ -11,7 +11,6 @@ dependencies:
   - nltk
   - gensim
   - theano
-  - onmt
   - pip:
     - git+https://github.com/mschrimpf/brain-score.git
     - git+https://github.com/mschrimpf/caching
@@ -20,3 +19,4 @@ dependencies:
     - git+https://github.com/mschrimpf/skip-thoughts.git
     - git+https://github.com/mschrimpf/lm_1b.git
     - nbsvm
+    - git+https://github.com/williamrainer/OpenNMT-py.git
