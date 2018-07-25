@@ -11,6 +11,7 @@ dependencies:
   - nltk
   - gensim
   - theano
+  - onmt
   - pip:
     - git+https://github.com/mschrimpf/brain-score.git
     - git+https://github.com/mschrimpf/caching
