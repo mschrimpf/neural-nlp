@@ -4,7 +4,7 @@ import os
 import caching
 from caching import store_xarray
 
-from brainscore.assemblies import DataAssembly, NeuroidAssembly, walk_coords
+from brainscore.assemblies import DataAssembly
 from brainscore.benchmarks import SplitBenchmark
 from brainscore.metrics import NonparametricWrapper
 from brainscore.metrics.ceiling import SplitNoCeiling
@@ -34,13 +34,6 @@ def run(model, stimulus_set, layers=None):
 def _run(model, layers, stimulus_set):
     _logger.info('Computing activations')
     model_activations = get_activations(model_name=model, layers=layers, stimulus_set_name=stimulus_set)
-    # workaround to xarray collapsing single-coord dim (stimulus_sentence -> stimulus)
-    model_activations = NeuroidAssembly(model_activations,
-                                        coords=dict([(coord, (dims, values)) if coord != 'stimulus'
-                                                     else ('stimulus_sentence', values)
-                                                     for (coord, dims, values) in walk_coords(model_activations)]),
-                                        dims=[dim if dim != 'stimulus' else 'stimulus_sentence'
-                                              for dim in model_activations.dims]).stack(stimulus=('stimulus_sentence',))
 
     _logger.info('Loading neural data')
     story = stimulus_set.split('.')[-1]
