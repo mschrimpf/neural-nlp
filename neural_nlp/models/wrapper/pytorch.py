@@ -15,9 +15,10 @@ SUBMODULE_SEPARATOR = '.'
 class PytorchModel(DeepModel):
     def __init__(self):
         super().__init__()
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._logger.debug(f"Using device {self._device}")
         self._model = self._load_model()
-        if torch.cuda.is_available():
-            self._model.cuda()
+        self._model = self._model.to(self._device)
 
     def _load_model(self):
         raise NotImplementedError()
@@ -42,8 +43,7 @@ class PytorchModel(DeepModel):
 
     def _run_model(self, sentences):
         sentences = Variable(sentences)
-        if torch.cuda.is_available():
-            sentences.cuda()
+        sentences = sentences.to(self._device)
         self._model(sentences)
 
     def __repr__(self):
