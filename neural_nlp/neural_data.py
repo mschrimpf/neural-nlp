@@ -6,7 +6,7 @@ import re
 import numpy as np
 import pandas as pd
 import xarray as xr
-from caching import cache
+from result_caching import cache
 
 from brainscore.assemblies import DataAssembly
 

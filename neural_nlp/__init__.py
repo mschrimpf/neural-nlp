@@ -1,8 +1,5 @@
 import logging
-import os
-
-import caching
-from caching import store_xarray
+from result_caching import store_xarray
 
 from brainscore.assemblies import DataAssembly
 from brainscore.benchmarks import SplitBenchmark
@@ -12,8 +9,6 @@ from brainscore.metrics.rdm import RDMMetric
 from neural_nlp import models
 from neural_nlp.models import get_activations, model_layers
 from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
-
-caching.store.configure_storagedir(os.path.join(os.path.dirname(__file__), '..', 'output'))
 
 _logger = logging.getLogger(__name__)
 

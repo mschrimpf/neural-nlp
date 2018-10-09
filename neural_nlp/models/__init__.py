@@ -2,7 +2,7 @@ import argparse
 import logging
 import sys
 
-from caching import store_xarray
+from result_caching import store_xarray
 
 from brainscore.assemblies import merge_data_arrays
 from neural_nlp.models.implementations import _model_mappings, load_model, model_layers

@@ -13,10 +13,10 @@ dependencies:
   - theano
   - pip:
     - git+https://github.com/mschrimpf/brain-score.git
-    - git+https://github.com/mschrimpf/caching
+    - git+https://github.com/mschrimpf/result_caching
     - pillow
     - llist
     - git+https://github.com/mschrimpf/skip-thoughts.git
     - git+https://github.com/mschrimpf/lm_1b.git
     - nbsvm
-    - git+https://github.com/williamrainer/OpenNMT-py.git
+    - git+https://github.com/williamrainer/OpenNMT-py.git  # TODO: replace pip torchtext with  pip install git+https://github.com/pytorch/text.gitCollecting git+https://github.com/pytorch/text.git
