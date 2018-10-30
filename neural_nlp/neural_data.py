@@ -6,7 +6,7 @@ import re
 import numpy as np
 import pandas as pd
 import xarray as xr
-from result_caching import cache
+from result_caching import cache, store
 
 from brainscore.assemblies import DataAssembly
 
@@ -16,6 +16,7 @@ neural_data_dir = os.path.join(os.path.dirname(__file__), '..', 'ressources', 'n
 _logger = logging.getLogger(__name__)
 
 
+@store()
 def load_rdm_sentences(story='Boar', roi_filter='from90to100', bold_shift_seconds=4):
     timepoint_rdms = load_rdm_timepoints(story, roi_filter)
     meta_data = load_sentences_meta(story)

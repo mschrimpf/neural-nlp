@@ -1,11 +1,10 @@
 import logging
-from result_caching import store_xarray
 
 from brainscore.assemblies import DataAssembly
-from brainscore.benchmarks import SplitBenchmark
-from brainscore.metrics import NonparametricWrapper
-from brainscore.metrics.ceiling import SplitNoCeiling
-from brainscore.metrics.rdm import RDMMetric
+from brainscore.metrics.rdm import RDM, RDMSimilarity
+from brainscore.metrics.transformations import CartesianProduct
+from result_caching import store_xarray
+
 from neural_nlp import models
 from neural_nlp.models import get_activations, model_layers
 from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
@@ -13,11 +12,28 @@ from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
 _logger = logging.getLogger(__name__)
 
 
-class SourceRDMSimilarity(RDMMetric):
-    def __call__(self, source_assembly, target_rdm):
-        source_rdm = self._rdm(source_assembly)
-        result = self._similarity(source_rdm, target_rdm)
-        return DataAssembly(result)
+class MultiRegionBenchmark:
+    def __init__(self, target_assembly):
+        self._target_assembly = target_assembly
+        self._metric = HalfRDMSimilarity()
+        self._cross_region = CartesianProduct(dividers=['region'])
+
+    def __call__(self, source_assembly):
+        score = self._cross_region(self._target_assembly,
+                                   apply=lambda region_assembly: self._metric(source_assembly, region_assembly))
+        return score
+
+
+class HalfRDMSimilarity:
+    def __init__(self, stimulus_coord='stimulus_sentence'):
+        self._rdm = RDM()
+        self._similarity = RDMSimilarity(comparison_coord=stimulus_coord)
+
+    def __call__(self, model_activations, target_rdm):
+        model_activations = align(model_activations, target_rdm, on='stimulus_sentence')
+        model_rdm = self._rdm(model_activations)
+        similarity = self._similarity(model_rdm, target_rdm)
+        return DataAssembly(similarity)
 
 
 def run(model, stimulus_set, layers=None):
@@ -25,7 +41,7 @@ def run(model, stimulus_set, layers=None):
     return _run(model=model, layers=layers, stimulus_set=stimulus_set)
 
 
-@store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'}, sub_fields=True)
+@store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
 def _run(model, layers, stimulus_set):
     _logger.info('Computing activations')
     model_activations = get_activations(model_name=model, layers=layers, stimulus_set_name=stimulus_set)
@@ -34,17 +50,19 @@ def _run(model, layers, stimulus_set):
     story = stimulus_set.split('.')[-1]
     neural_data = load_neural_rdms(story=story)
     neural_data = neural_data.mean(dim='subject')
-    metric = NonparametricWrapper(SourceRDMSimilarity())
-    primary_dimension, primary_coord = 'stimulus', 'stimulus_sentence'
-    benchmark = SplitBenchmark(target_assembly=neural_data, metric=metric,
-                               ceiling=SplitNoCeiling(), target_splits=['region'],
-                               target_splits_kwargs=dict(non_dividing_dims=[primary_dimension]))
 
-    _logger.info('Computing score')
-    scores = benchmark(model_activations, transformation_kwargs=dict(
-        alignment_kwargs=dict(order_dimensions=[primary_dimension], alignment_dim=primary_coord),
-        cartesian_product_kwargs=dict(non_dividing_dims=[primary_dimension, 'neuroid'],
-                                      dividing_coord_names_source=['layer']),
-        cross_validation_kwargs=dict(dim=primary_coord, stratification_coord=None)
-    ))
+    _logger.info('Running benchmark')
+    benchmark = MultiRegionBenchmark(target_assembly=neural_data)
+    cross_layer = CartesianProduct(dividers=['layer'])
+    scores = cross_layer(model_activations, apply=benchmark)
     return scores
+
+
+def align(source, target, on):
+    source_values, target_values = source[on].values.tolist(), target[on].values
+    indices = [source_values.index(value) for value in target_values]
+    assert len(source[on].dims) == 1, "multi-dimensional coordinates not implemented"
+    dim = source[on].dims[0]
+    dim_indices = {_dim: slice(None) if _dim != dim else indices for _dim in source.dims}
+    aligned = source.isel(**dim_indices)
+    return aligned
