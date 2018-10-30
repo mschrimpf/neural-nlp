@@ -53,8 +53,10 @@ def load_rdm_timepoints(story='Boar', roi_filter='from90to100'):
     data_paths = glob.glob(os.path.join(neural_data_dir, '{}{}*.csv'.format(story + '_', roi_filter)))
     for i, filepath in enumerate(data_paths):
         _logger.debug("Loading file {} ({}/{})".format(filepath, i, len(data_paths)))
-        attributes = re.match('^.*/(?P<story>.*)_from(?P<roi_low>[0-9]+)to(?P<roi_high>[0-9]+)'
-                              '(_(?P<subjects>[0-9]+)Subjects)?\.mat_r(?P<region>[0-9]+).csv', filepath)
+        basename = os.path.basename(filepath)
+        attributes = re.match('^(?P<story>.*)_from(?P<roi_low>[0-9]+)to(?P<roi_high>[0-9]+)'
+                              '(_(?P<subjects>[0-9]+)Subjects)?\.mat_r(?P<region>[0-9]+).csv', basename)
+        assert attributes is not None, f"file {basename} did not match regex"
         # load values (pandas is much faster than np.loadtxt https://stackoverflow.com/a/18260092/2225200)
         region_data = pd.read_csv(filepath, header=None).values
         assert len(region_data.shape) == 2  # (subjects x stimuli) x stimuli
