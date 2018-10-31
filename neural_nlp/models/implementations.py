@@ -4,6 +4,7 @@ import tempfile
 
 import numpy as np
 import pandas as pd
+from numpy.random import RandomState
 
 from neural_nlp.models.wrapper import DeepModel
 from neural_nlp.models.wrapper.pytorch import PytorchModel
@@ -14,6 +15,26 @@ _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressource
 class Model(object):
     def __call__(self, sentences):
         raise NotImplementedError()
+
+
+class GaussianRandom(DeepModel):
+    _layer_name = 'random'
+
+    def __init__(self, num_samples=1000):
+        """
+        :param num_samples: how many samples to draw for each sentence
+        """
+        self._rng = RandomState()
+        self._num_samples = num_samples
+        super(GaussianRandom, self).__init__()
+
+    def _get_activations(self, sentences, layer_names):
+        assert layer_names == [self._layer_name]
+        return {self._layer_name: self._rng.standard_normal((len(sentences), self._num_samples))}
+
+    @classmethod
+    def available_layers(cls):
+        return [cls._layer_name]
 
 
 class SkipThoughts(DeepModel):
@@ -262,6 +283,7 @@ def load_model(model_name):
 
 
 _model_mappings = {
+    'random-gaussian': GaussianRandom,
     'skip-thoughts': SkipThoughts,
     'lm_1b': LM1B,
     'word2vec': Word2Vec,
@@ -271,6 +293,7 @@ _model_mappings = {
 }
 
 model_layers = {
+    'random-gaussian': GaussianRandom.available_layers(),
     'skip-thoughts': SkipThoughts.default_layers(),
     'lm_1b': LM1B.default_layers(),
     'word2vec': Word2Vec.default_layers(),
