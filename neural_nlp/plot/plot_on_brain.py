@@ -1,8 +1,9 @@
+import os
 from collections import defaultdict
 
 import fire
 import numpy as np
-import os
+from brainscore.metrics import Score
 from scipy.io import savemat
 
 from neural_nlp import STORIES, run_stories
@@ -21,27 +22,56 @@ def plot_preferences(model, use_matlab_engine=False, stories=STORIES):
     plot which layer most prefers a region
     """
     scores = run_stories(model=model, stories=stories)
+    reference_scores = run_stories(model='random-gaussian', stories=stories).squeeze('layer')
 
     # average across stories
-    scores = scores.mean('story')
+    scores = scores.mean('story', _apply_raw=True)
+    reference_scores = reference_scores.mean('story', _apply_raw=True)
+
+    # filter significant layers
+    region_significant_layers = defaultdict(list)
+    for region_short, region_name in REGION_FIELDS.items():
+        region_ids = REGION_ORDERINGS[region_name]
+
+        for layer in scores['layer'].values:
+            layer_values = scores.sel(layer=layer, region=region_ids)
+            significant = {region: is_significant(scores=layer_values.sel(region=region).raw.values,
+                                                  reference_scores=reference_scores.sel(region=region).raw.values)
+                           for region in region_ids}
+            for region_id, significant in significant.items():
+                if significant:
+                    region_significant_layers[region_id].append(layer)
+
+    # find best layers
+    def best_layer(group):
+        relevant_layers = region_significant_layers[group['region'].values.tolist()]
+        if len(relevant_layers) == 0:
+            return Score([np.nan, np.nan],
+                         coords={'aggregation': ['center', 'error'], 'layer': None, 'region': group['region']},
+                         dims=['aggregation'])
+        argmax = group.sel(aggregation='center', layer=relevant_layers).argmax('layer')
+        return group.isel(layer=argmax.values)
+
+    max_scores = scores.groupby('region').apply(best_layer)
 
     # order & write out
     _matlab_engine = None
     config = {'minMax': [0., 1.],
-              'theMap': 'winter',
+              'theMap': f"parula({len(scores['layer'])})",
               'colorWeight': 0.25,
               'measureName': 'layer-preference'}
     performance_data = defaultdict(list)
-    for field, long_field in REGION_FIELDS.items():
-        def best_layer(group):
-            argmax = group.sel(aggregation='center').argmax('layer')
-            return group[:, argmax.values]
-
-        max_score = scores.groupby('region').apply(best_layer)
-        region_layers = [scores['layer'][(scores == max_score).sel(aggregation='center', region=region)].values[0]
-                         for region in REGION_ORDERINGS[long_field]]
-        positions = [relative_position(layer, scores['layer'].values.tolist()) for layer in region_layers]
-        performance_data[field] = positions
+    for region_short, region_name in REGION_FIELDS.items():
+        values = []
+        for region_id in REGION_ORDERINGS[region_name]:
+            max_score = (scores.sel(region=region_id) == max_scores.sel(region=region_id)).sel(aggregation='center')
+            if not any(max_score):
+                values.append(-1)
+            else:
+                layer = scores['layer'][max_score].values[0]
+                position = relative_position(layer, scores['layer'].values.tolist())
+                values.append(position)
+        performance_data[region_short] = values
 
     savepath = f'{model}.mat'
     savemat(savepath, {'perfData': performance_data, 'config': config})  # buffer for matlab
@@ -82,7 +112,7 @@ def plot_layerwise(model, use_matlab_engine=False, stories=STORIES):
             values[np.invert(significant)] = -1
             performance_data[region_short] = values.tolist()
 
-        savepath = f'{model}-{layer}.mat'
+        savepath = f"{model}-{layer.replace('/', '_')}.mat"
         savemat(savepath, {'perfData': performance_data, 'config': config})  # buffer for matlab
         if use_matlab_engine:
             if _matlab_engine is None:
