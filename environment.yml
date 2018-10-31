@@ -11,8 +11,9 @@ dependencies:
   - nltk
   - gensim
   - theano
+  - pytest
   - pip:
-    - git+https://github.com/mschrimpf/brain-score.git@aeae86b
+    - git+https://github.com/mschrimpf/brain-score.git@c5ad0b8
     - git+https://github.com/mschrimpf/result_caching.git@b310e99
     - pillow
     - llist

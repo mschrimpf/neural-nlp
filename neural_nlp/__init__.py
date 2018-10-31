@@ -1,5 +1,6 @@
 import logging
 from brainscore.assemblies import DataAssembly, walk_coords
+from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation
 from result_caching import store_xarray
@@ -14,28 +15,13 @@ STORIES = [f'naturalistic-neural-reduced.{story}' for story in STORIES]
 _logger = logging.getLogger(__name__)
 
 
-class MultiRegionBenchmark:
-    def __init__(self, target_assembly):
-        self._target_assembly = target_assembly
-        self._metric = HalfRDMSimilarity()
-        self._cross_region = CartesianProduct(dividers=['region'])
-
-    def __call__(self, source_assembly):
-        score = self._cross_region(self._target_assembly,
-                                   apply=lambda region_assembly: self._metric(source_assembly, region_assembly))
-        return score
-
-
-class HalfRDMSimilarity:
-    def __init__(self, stimulus_coord='stimulus_sentence'):
-        self._rdm = RDM()
-        self._similarity = RDMSimilarity(comparison_coord=stimulus_coord)
-
-    def __call__(self, model_activations, target_rdm):
-        model_activations = align(model_activations, target_rdm, on='stimulus_sentence')
-        model_rdm = self._rdm(model_activations)
-        similarity = self._similarity(model_rdm, target_rdm)
-        return DataAssembly(similarity)
+def run_stories(model, stories=STORIES, layers=None):
+    scores = [run(model, story, layers=layers) for story in stories]
+    scores = [score.expand_dims('story') for score in scores]
+    for score, story in zip(scores, stories):
+        score['story'] = [story]
+    scores = Score.merge(*scores)
+    return scores
 
 
 def run(model, stimulus_set, layers=None):

@@ -91,14 +91,19 @@ for nInd = 1:nNets
                 maskInds = setdiff(unique(masks(:)),0);                          
                 for mInd = maskInds'
                     %% Convert current performance value into RGB
-                    clrMapPrcnt = (perfData.(netNames{nInd})(mInd)-config.minMax(1))/(config.minMax(2)-config.minMax(1));  % relative location (%) of current performance value along the config.minMax scale
-                    clrMapRowInterp = clrMapPrcnt*nColors;                                         % row index in clrMap to be interpolated (e.g., 2.7 will interpolate between rows 2 and 3)
-                    clrMapRow1 = max(floor(clrMapRowInterp),1);
-                    clrMapRow2 = min(ceil(clrMapRowInterp),nColors);
-                    if clrMapRow1 < clrMapRow2
-                        clrMapRGB = interp1([clrMapRow1, clrMapRow2], clrMap([clrMapRow1, clrMapRow2],:), clrMapRowInterp); % linear interpolation
+                    value = perfData.(netNames{nInd})(mInd)-config.minMax(1);
+                    if value == -1 % not significant
+                        clrMapRGB = [192,192,192]; % gray
                     else
-                        clrMapRGB = clrMap(clrMapRow1,:);
+                        clrMapPrcnt = value/(config.minMax(2)-config.minMax(1));  % relative location (%) of current performance value along the config.minMax scale
+                        clrMapRowInterp = clrMapPrcnt*nColors;                                         % row index in clrMap to be interpolated (e.g., 2.7 will interpolate between rows 2 and 3)
+                        clrMapRow1 = max(floor(clrMapRowInterp),1);
+                        clrMapRow2 = min(ceil(clrMapRowInterp),nColors);
+                        if clrMapRow1 < clrMapRow2
+                            clrMapRGB = interp1([clrMapRow1, clrMapRow2], clrMap([clrMapRow1, clrMapRow2],:), clrMapRowInterp); % linear interpolation
+                        else
+                            clrMapRGB = clrMap(clrMapRow1,:);
+                        end
                     end
                     
                     %% Fill in the location on the brain image corresponding to the current mask with the color corresponding to the performance value %%
