@@ -1,3 +1,4 @@
+import itertools
 import os
 from collections import defaultdict
 
@@ -33,14 +34,11 @@ def plot_preferences(model, use_matlab_engine=False, stories=STORIES):
     for region_short, region_name in REGION_FIELDS.items():
         region_ids = REGION_ORDERINGS[region_name]
 
-        for layer in scores['layer'].values:
-            layer_values = scores.sel(layer=layer, region=region_ids)
-            significant = {region: is_significant(scores=layer_values.sel(region=region).raw.values,
-                                                  reference_scores=reference_scores.sel(region=region).raw.values)
-                           for region in region_ids}
-            for region_id, significant in significant.items():
-                if significant:
-                    region_significant_layers[region_id].append(layer)
+        for layer, region_id in itertools.product(scores['layer'].values, region_ids):
+            significant = is_significant(scores=scores.sel(layer=layer, region=region_id).raw.values,
+                                         reference_scores=reference_scores.sel(region=region_id).raw.values)
+            if significant:
+                region_significant_layers[region_id].append(layer)
 
     # find best layers
     def best_layer(group):
@@ -50,7 +48,9 @@ def plot_preferences(model, use_matlab_engine=False, stories=STORIES):
                          coords={'aggregation': ['center', 'error'], 'layer': None, 'region': group['region']},
                          dims=['aggregation'])
         argmax = group.sel(aggregation='center', layer=relevant_layers).argmax('layer')
-        return group.isel(layer=argmax.values)
+        result = group.isel(layer=argmax.values)
+        del result.attrs['raw']
+        return result
 
     max_scores = scores.groupby('region').apply(best_layer)
 
@@ -73,7 +73,7 @@ def plot_preferences(model, use_matlab_engine=False, stories=STORIES):
                 values.append(position)
         performance_data[region_short] = values
 
-    savepath = f'{model}.mat'
+    savepath = f'{model}-layer_preferences.mat'
     savemat(savepath, {'perfData': performance_data, 'config': config})  # buffer for matlab
     if use_matlab_engine:
         import matlab.engine
@@ -120,6 +120,62 @@ def plot_layerwise(model, use_matlab_engine=False, stories=STORIES):
                 _matlab_engine = matlab.engine.start_matlab()
                 _matlab_engine.addpath(os.path.join(os.path.dirname(__file__), '..', '..'))
             _matlab_engine.plotPerformanceOnBrain(savepath)
+
+
+def plot_max(model, use_matlab_engine=False, stories=STORIES):
+    """
+    plot max scores over layers
+    """
+    scores = run_stories(model=model, stories=stories)
+    reference_scores = run_stories(model='random-gaussian', stories=stories).squeeze('layer')
+
+    # average across stories
+    scores = scores.mean('story', _apply_raw=True)
+    reference_scores = reference_scores.mean('story', _apply_raw=True)
+
+    # filter significant layers
+    region_significant_layers = defaultdict(list)
+    for region_short, region_name in REGION_FIELDS.items():
+        region_ids = REGION_ORDERINGS[region_name]
+
+        for layer, region_id in itertools.product(scores['layer'].values, region_ids):
+            significant = is_significant(scores=scores.sel(layer=layer, region=region_id).raw.values,
+                                         reference_scores=reference_scores.sel(region=region_id).raw.values)
+            if significant:
+                region_significant_layers[region_id].append(layer)
+
+    # pick best layer
+    def best_layer(group):
+        region = group['region'].values.tolist()
+        relevant_layers = region_significant_layers[region]
+        if len(relevant_layers) == 0:
+            return Score(-1, coords={'region': region, 'aggregation': 'center'}, dims=[])
+        del group.attrs['raw']  # not needed, complicates merging
+        result = group.sel(aggregation='center', layer=relevant_layers).max('layer')
+        return result
+
+    max_scores = scores.groupby('region').apply(best_layer)
+
+    # order & write out
+    _matlab_engine = None
+    config = {'minMax': [0., max_scores.max().values.tolist()],
+              'theMap': 'jet',
+              'colorWeight': 0.25,
+              'measureName': 'pearson'}
+    performance_data = {}
+    for region_short, region_name in REGION_FIELDS.items():
+        region_ids = REGION_ORDERINGS[region_name]
+        values = max_scores.sel(region=region_ids).values
+        performance_data[region_short] = values.tolist()
+
+    savepath = f"{model}-max.mat"
+    savemat(savepath, {'perfData': performance_data, 'config': config})  # buffer for matlab
+    if use_matlab_engine:
+        if _matlab_engine is None:
+            import matlab.engine
+            _matlab_engine = matlab.engine.start_matlab()
+            _matlab_engine.addpath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        _matlab_engine.plotPerformanceOnBrain(savepath)
 
 
 def relative_position(elem, collection):
