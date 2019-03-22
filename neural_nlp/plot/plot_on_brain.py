@@ -18,9 +18,44 @@ REGION_ORDERINGS = {
 REGION_FIELDS = {'lang': 'language', 'md': 'multiple_demand', 'dmn': 'default_mode_network'}
 
 
+def plot_region_test(use_matlab_engine=True):
+    # order & write out
+    _matlab_engine = None
+    config = {'minMax': [0., 1.],
+              'theMap': f"parula({len(REGION_ORDERINGS['language'])})",
+              'colorWeight': 0.25,
+              'measureName': 'test'}
+    performance_data = defaultdict(list)
+    for region_short, region_name in REGION_FIELDS.items():
+        class Scaler:
+            def __init__(self, num):
+                self.num = num - 1
+                self.i = 0
+
+            def __call__(self):
+                result = self.i / self.num
+                self.i += 1
+                return result
+
+        num_regions = len(REGION_ORDERINGS[region_name])
+        filter = list(range(5, 8))
+        scaler = Scaler(len(filter))
+        values = [scaler() if value in filter else -1 for value in range(num_regions)]
+        performance_data[region_short] = values
+
+    savepath = 'region_test.mat'
+    savemat(savepath, {'perfData': performance_data, 'config': config})  # buffer for matlab
+    if use_matlab_engine:
+        import matlab.engine
+        if _matlab_engine is None:
+            _matlab_engine = matlab.engine.start_matlab()
+            _matlab_engine.addpath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        _matlab_engine.plotPerformanceOnBrain(savepath)
+
+
 def plot_preferences(model, use_matlab_engine=False, stories=STORIES):
     """
-    plot which layer most prefers a region
+    plot which layer is most similar to a region
     """
     scores = run_stories(model=model, stories=stories)
     reference_scores = run_stories(model='random-gaussian', stories=stories).squeeze('layer')
@@ -47,7 +82,8 @@ def plot_preferences(model, use_matlab_engine=False, stories=STORIES):
             return Score([np.nan, np.nan],
                          coords={'aggregation': ['center', 'error'], 'layer': None, 'region': group['region']},
                          dims=['aggregation'])
-        argmax = group.sel(aggregation='center', layer=relevant_layers).argmax('layer')
+        group = group.sel(layer=relevant_layers)
+        argmax = group.sel(aggregation='center').argmax('layer')
         result = group.isel(layer=argmax.values)
         del result.attrs['raw']
         return result
