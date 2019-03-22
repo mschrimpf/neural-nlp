@@ -8,7 +8,7 @@ from brainscore.metrics import Score
 from scipy.io import savemat
 
 from neural_nlp import STORIES, run_stories
-from neural_nlp.plot.stats import is_significant
+from neural_nlp.analyze.stats import is_significant
 
 REGION_ORDERINGS = {
     'language': [32, 40, 22, 34, 35, 6, 3, 16, 11, 30, 33, 7],
