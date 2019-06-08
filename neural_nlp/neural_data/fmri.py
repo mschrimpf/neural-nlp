@@ -12,7 +12,7 @@ from brainscore.assemblies import DataAssembly
 
 from neural_nlp.stimuli import NaturalisticStories
 
-neural_data_dir = os.path.join(os.path.dirname(__file__), '..', 'ressources', 'neural_data')
+neural_data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'neural_data')
 _logger = logging.getLogger(__name__)
 
 
