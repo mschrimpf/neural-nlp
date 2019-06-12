@@ -1,9 +1,9 @@
 import logging
 
-from brainio_base.assemblies import DataAssembly, walk_coords
-from brainscore.metrics.rdm import RDM, RDMSimilarity
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation
+import numpy as np
 
+from brainscore.metrics.regression import pls_regression, pearsonr_correlation, CrossRegressedCorrelation
+from brainscore.metrics.transformations import CartesianProduct, apply_aggregate
 from neural_nlp import models
 from neural_nlp.models import get_activations, model_layers
 from neural_nlp.neural_data.fmri import load_rdm_sentences as load_neural_rdms, load_voxels
@@ -36,9 +36,19 @@ class NaturalisticStoriesBenchmark:
         neural_data = neural_data[{'presentation': [story != 'Elvis' for story in neural_data['story'].values]}]
         neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
             [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
+        # exclude subjects that have not seen all stories
+        subjects = np.isnan(neural_data).any('presentation').groupby('subject').apply(
+            lambda subject_neuroids: subject_neuroids.any())
+        subjects = subjects['subject'].values[~subjects.values]
+        neural_data = neural_data[{'neuroid': [subject in subjects for subject in neural_data['subject'].values]}]
+        assert not np.isnan(neural_data).any()
         self._target_assembly = neural_data
-        self._metric = RDMSimilarityCrossValidated()
-        self._cross_region = CartesianProduct(dividers=['region'])
+
+        self._metric = CrossRegressedCorrelation(
+            regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
+            correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
+        self._cross_subject = CartesianProduct(dividers=['subject'])
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -46,39 +56,23 @@ class NaturalisticStoriesBenchmark:
         # since we're presenting all stimuli, including the inter-recording ones, we need to filter
         model_activations = model_activations[
             {'presentation': [sentence in self._target_assembly['stimulus_sentence'].values
-                          for sentence in
-                          model_activations['stimulus_sentence'].values]}]
+                              for sentence in
+                              model_activations['stimulus_sentence'].values]}]
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
         _logger.info('Scoring layers')
         cross_layer = CartesianProduct(dividers=['layer'])
-        scores = cross_layer(model_activations, apply=self._apply)
+        scores = cross_layer(model_activations, apply=self._apply_layer)
         return scores
 
-    def _apply(self, source_assembly):
-        score = self._cross_region(self._target_assembly,
-                                   apply=lambda region_assembly: self._metric(source_assembly, region_assembly))
+    def _apply_layer(self, source_assembly):
+        subject_scores = self._cross_subject(self._target_assembly, apply=
+        lambda subject_assembly: self._apply_subject(source_assembly, subject_assembly))
+        score = apply_aggregate(lambda scores: scores.median('subject'), subject_scores)
         return score
 
-
-class RDMSimilarityCrossValidated:
-    # adapted from
-    # https://github.com/dicarlolab/brain-score/blob/3d59d7a841fca63a5d346e599143f547560b5082/brainscore/metrics/rdm.py#L8
-
-    class LeaveOneOutWrapper:
-        def __init__(self, metric):
-            self._metric = metric
-
-        def __call__(self, train_source, train_target, test_source, test_target):
-            # compare assemblies for a single split. we ignore the 10% train ("leave-one-out") and only use test.
-            score = self._metric(test_source, test_target)
-            return DataAssembly(score)
-
-    def __init__(self, stimulus_coord='stimulus_sentence'):
-        self._rdm = RDM()
-        self._similarity = RDMSimilarity(comparison_coord=stimulus_coord)
-        self._cross_validation = CrossValidation(test_size=.9,  # leave 10% out
-                                                 split_coord=stimulus_coord, stratification_coord=None)
+    def _apply_subject(self, source_assembly, subject_assembly):
+        return self._metric(source_assembly, subject_assembly)
 
     def __call__(self, model_activations, target_rdm):
         model_activations = align(model_activations, target_rdm, on='stimulus_sentence')
