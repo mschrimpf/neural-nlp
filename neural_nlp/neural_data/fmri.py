@@ -1,5 +1,6 @@
 import glob
 import logging
+import operator
 import os
 import warnings
 from collections import namedtuple
@@ -16,6 +17,7 @@ from tqdm import tqdm
 from xarray import DataArray
 
 from neural_nlp.stimuli import NaturalisticStories, StimulusSet
+from neural_nlp.utils import ordered_set
 from result_caching import cache, store, store_netcdf
 
 neural_data_dir = (Path(os.path.dirname(__file__)) / '..' / '..' / 'ressources' / 'neural_data' / 'fmri').absolute()
@@ -23,13 +25,14 @@ _logger = logging.getLogger(__name__)
 
 
 def load_voxels():
-    annotated_data = load_voxel_data()
-    annotated_data = DataAssembly(annotated_data)
+    assembly = load_voxel_data()
+    assembly = DataAssembly(assembly)
     stimulus_set = NaturalisticStories()()
-    stimulus_set = _align_stimuli_recordings(stimulus_set, annotated_data)
-    annotated_data.attrs['stimulus_set'] = stimulus_set
-    annotated_data.attrs['stimulus_set_name'] = stimulus_set.name
-    return annotated_data
+    stimulus_set, assembly = _align_stimuli_recordings(stimulus_set, assembly)
+    assert set(assembly['stimulus_sentence'].values).issubset(set(stimulus_set['sentence']))
+    assembly.attrs['stimulus_set'] = stimulus_set
+    assembly.attrs['stimulus_set_name'] = stimulus_set.name
+    return assembly
 
 
 @store_netcdf()
@@ -41,11 +44,16 @@ def load_voxel_data(bold_shift_seconds=4):
 
 def _merge_voxel_meta(data, bold_shift_seconds):
     annotated_data_list = []
-    for story in set(data['story'].values):
+    for story in ordered_set(data['story'].values.tolist()):
         try:
             meta_data = load_sentences_meta(story)
             del meta_data['fullSentence']
             meta_data.dropna(inplace=True)
+            # quickfix incorrect meta
+            if story == 'KingOfBirds':
+                meta_data['reducedSentence'][meta_data['reducedSentence'] == 'He wanted to shout "I am king!"'] \
+                    = "He wanted to shout, 'I am king'"
+            # end quickfix
             mapping_column = 'shiftBOLD_{}sec'.format(bold_shift_seconds)
             timepoints = meta_data[mapping_column].values.astype(int)
             # filter
@@ -75,20 +83,25 @@ def compare_ignore(sentence):
 
 def _align_stimuli_recordings(stimulus_set, assembly):
     aligned_stimulus_set = []
+    partial_sentences = assembly['stimulus_sentence'].values
+    partial_sentences = [compare_ignore(sentence) for sentence in partial_sentences]
+    assembly_stimset = {}
+    stimuli_idx = 0
 
-    stories = sorted(set(assembly['story'].values), key=assembly['story'].values.tolist().index)  # ordered set
+    stories = ordered_set(assembly['story'].values.tolist())
     for story in tqdm(sorted(stories), desc='align stimuli', total=len(stories)):
-        partial_sentences = assembly.sel(story=story)['stimulus_sentence'].values
-        partial_sentences = [compare_ignore(sentence) for sentence in partial_sentences]
+        story_partial_sentences = {sentence: i for i, (sentence, sentence_story) in enumerate(zip(
+            partial_sentences, assembly['story'].values)) if sentence_story == story}
         sentence_part = None
 
         def append_row(row):
-            nonlocal sentence_part
+            nonlocal sentence_part, stimuli_idx
             row = row._replace(sentence=row.sentence.strip())
             row_ctr = namedtuple(type(row).__name__, row._fields + ('sentence_part',))
             row = row_ctr(**{**row._asdict(), **dict(sentence_part=sentence_part)})
             aligned_stimulus_set.append(row)
             sentence_part += 1
+            stimuli_idx += 1
 
         story_stimuli = stimulus_set[stimulus_set['story'] == story]
         for row in story_stimuli.itertuples(index=False, name='Stimulus'):
@@ -96,15 +109,18 @@ def _align_stimuli_recordings(stimulus_set, assembly):
             full_sentence = row.sentence
             # TODO: the following entirely discards ",' etc.
             full_sentence = compare_ignore(full_sentence)
-            partial_sentence = [partial_sentence for partial_sentence in partial_sentences
-                                if partial_sentence in full_sentence]
-            if len(partial_sentence) == 0:
+            partial_sentence_idx = [index for partial_sentence, index in story_partial_sentences.items()
+                                    if partial_sentence in full_sentence]
+            if len(partial_sentence_idx) == 0:
                 warnings.warn(f"Sentence {full_sentence} not found in partial sentences")
                 row = row._replace(sentence=full_sentence)
                 append_row(row)
                 continue
-            assert len(partial_sentence) == 1
-            partial_sentence = partial_sentence[0]
+            assert len(partial_sentence_idx) == 1
+            partial_sentence_idx = partial_sentence_idx[0]
+            assert partial_sentence_idx not in assembly_stimset
+            assembly_stimset[partial_sentence_idx] = stimuli_idx
+            partial_sentence = partial_sentences[partial_sentence_idx]
             index = full_sentence.find(partial_sentence)
             assert index >= 0
 
@@ -127,11 +143,22 @@ def _align_stimuli_recordings(stimulus_set, assembly):
         aligned_story = " ".join(row.sentence for row in aligned_stimulus_set if row.story == story)
         stimulus_set_story = " ".join(row.sentence for row in story_stimuli.itertuples())
         assert aligned_story == compare_ignore(stimulus_set_story)
+    # build StimulusSet
     aligned_stimulus_set = StimulusSet(aligned_stimulus_set)
     aligned_stimulus_set['stimulus_id'] = [".".join([str(value) for value in values]) for values in zip(*[
         aligned_stimulus_set[coord].values for coord in ['story', 'sentence_num', 'sentence_part']])]
     aligned_stimulus_set.name = f"{stimulus_set.name}-aligned"
-    return aligned_stimulus_set
+
+    # align assembly
+    alignment = [stimset_idx for assembly_idx, stimset_idx in (
+        sorted(assembly_stimset.items(), key=operator.itemgetter(0)))]
+    assembly_coords = {**{coord: (dims, values) for coord, dims, values in walk_coords(assembly)},
+                       **{'stimulus_id': ('stimulus', aligned_stimulus_set['stimulus_id'].values[alignment]),
+                          'meta_sentence': ('stimulus', assembly['stimulus_sentence'].values),
+                          'stimulus_sentence': ('stimulus', aligned_stimulus_set['sentence'].values[alignment])}}
+    assembly = type(assembly)(assembly.values, coords=assembly_coords, dims=assembly.dims)
+
+    return aligned_stimulus_set, assembly
 
 
 def load_voxel_timepoints():
