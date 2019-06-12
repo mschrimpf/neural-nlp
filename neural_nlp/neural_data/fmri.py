@@ -2,6 +2,7 @@ import glob
 import logging
 import os
 import warnings
+from collections import namedtuple
 
 import fire
 import numpy as np
@@ -68,27 +69,30 @@ def _merge_voxel_meta(data, bold_shift_seconds):
     return annotated_data
 
 
-def _align_stimuli_recordings(stimulus_set, assembly):
-    def compare_ignore(sentence):
-        return sentence.replace(',', '').replace('"', '').replace('\'', '')
+def compare_ignore(sentence):
+    return sentence.replace(',', '').replace('"', '').replace('\'', '')
 
+
+def _align_stimuli_recordings(stimulus_set, assembly):
     aligned_stimulus_set = []
 
-    stories = set(assembly['story'].values)
+    stories = sorted(set(assembly['story'].values), key=assembly['story'].values.tolist().index)  # ordered set
     for story in tqdm(sorted(stories), desc='align stimuli', total=len(stories)):
         partial_sentences = assembly.sel(story=story)['stimulus_sentence'].values
         partial_sentences = [compare_ignore(sentence) for sentence in partial_sentences]
-        sentence_num = 0
+        sentence_part = None
 
         def append_row(row):
-            nonlocal sentence_num
-            row = row._replace(sentence_num=sentence_num)
+            nonlocal sentence_part
             row = row._replace(sentence=row.sentence.strip())
+            row_ctr = namedtuple(type(row).__name__, row._fields + ('sentence_part',))
+            row = row_ctr(**{**row._asdict(), **dict(sentence_part=sentence_part)})
             aligned_stimulus_set.append(row)
-            sentence_num += 1
+            sentence_part += 1
 
         story_stimuli = stimulus_set[stimulus_set['story'] == story]
         for row in story_stimuli.itertuples(index=False, name='Stimulus'):
+            sentence_part = 0
             full_sentence = row.sentence
             # TODO: the following entirely discards ",' etc.
             full_sentence = compare_ignore(full_sentence)
@@ -124,6 +128,8 @@ def _align_stimuli_recordings(stimulus_set, assembly):
         stimulus_set_story = " ".join(row.sentence for row in story_stimuli.itertuples())
         assert aligned_story == compare_ignore(stimulus_set_story)
     aligned_stimulus_set = StimulusSet(aligned_stimulus_set)
+    aligned_stimulus_set['stimulus_id'] = [".".join([str(value) for value in values]) for values in zip(*[
+        aligned_stimulus_set[coord].values for coord in ['story', 'sentence_num', 'sentence_part']])]
     aligned_stimulus_set.name = f"{stimulus_set.name}-aligned"
     return aligned_stimulus_set
 
