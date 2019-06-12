@@ -1,43 +1,37 @@
 import logging
-from brainscore.assemblies import DataAssembly, walk_coords
-from brainscore.metrics import Score
+
+from brainio_base.assemblies import DataAssembly, walk_coords
 from brainscore.metrics.rdm import RDM, RDMSimilarity
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation
-from result_caching import store_xarray
 
 from neural_nlp import models
 from neural_nlp.models import get_activations, model_layers
-from neural_nlp.neural_data import load_rdm_sentences as load_neural_rdms
-
-STORIES = ('Boar', 'KingOfBirds', 'Elvis', 'HighSchool')
-STORIES = [f'naturalistic-neural-reduced.{story}' for story in STORIES]
+from neural_nlp.neural_data.fmri import load_rdm_sentences as load_neural_rdms, load_voxels
+from result_caching import store_xarray
 
 _logger = logging.getLogger(__name__)
 
 
-def run_stories(model, stories=STORIES, layers=None):
-    scores = [run(model, story, layers=layers) for story in stories]
-    scores = [score.expand_dims('story') for score in scores]
-    for score, story in zip(scores, stories):
-        score['story'] = [story]
-    scores = Score.merge(*scores)
-    return scores
-
-
-def run(model, stimulus_set, layers=None):
+def run(model, layers=None):
     layers = layers or model_layers[model]
-    return _run(model=model, layers=layers, stimulus_set=stimulus_set)
+    return _run(model=model, layers=layers)
 
 
 @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
-def _run(model, layers, stimulus_set):
-    _logger.info('Computing activations')
-    model_activations = get_activations(model_name=model, layers=layers, stimulus_set_name=stimulus_set)
-
+def _run(model, layers):
     _logger.info('Loading neural data')
-    story = stimulus_set.split('.')[-1]
-    neural_data = load_neural_rdms(story=story)
-    neural_data = neural_data.mean(dim='subject')
+    neural_data = load_voxels()
+    # leave-out ELvis story
+    neural_data = neural_data[{'stimulus': [story != 'Elvis' for story in neural_data['story'].values]}]
+    neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
+        [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
+
+    _logger.info('Computing activations')
+    model_activations = get_activations(model_identifier=model, layers=layers, stimuli=neural_data.attrs['stimulus_set'])
+    # since we're presenting all stimuli, including the inter-recording ones, we need to sub-filter
+    model_activations = model_activations[{'stimulus': [sentence in neural_data['stimulus_sentence'].values
+                                                        for sentence in model_activations['stimulus_sentence'].values]}]
+    assert set(model_activations['stimulus_id'].values) == set(neural_data['stimulus_id'].values)
 
     _logger.info('Running benchmark')
     benchmark = MultiRegionBenchmark(target_assembly=neural_data)
