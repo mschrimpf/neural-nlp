@@ -1,9 +1,9 @@
-from collections import OrderedDict
+# from https://github.com/brain-score/model-tools
 
-import itertools
 import logging
 
 import functools
+import itertools
 import numpy as np
 from brainio_base.assemblies import NeuroidAssembly, walk_coords, merge_data_arrays
 from brainscore.utils import fullname
@@ -53,14 +53,14 @@ class ActivationsExtractorHelper:
             story_sentences = story_stimuli['sentence'].values
             single_story_activations = self.from_sentences(sentences=story_sentences, layers=layers,
                                                            stimuli_identifier=f"{stimuli_identifier}-{story}")
-            single_story_activations['stimulus_id'] = 'stimulus', story_stimuli['stimulus_id'].values
+            single_story_activations['stimulus_id'] = 'presentation', story_stimuli['stimulus_id'].values
             story_activations.append(single_story_activations)
         activations = merge_data_arrays(story_activations)
         # merging does not maintain stimulus order. the following orders again
         idx = [activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
                itertools.chain.from_iterable(s['stimulus_id'].values for s in story_activations)]
         assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
-        activations = activations[{'stimulus': idx}]
+        activations = activations[{'presentation': idx}]
         activations = attach_stimulus_set_meta(activations, stimulus_set)
         return activations
 
@@ -144,13 +144,13 @@ class ActivationsExtractorHelper:
         activations = flatten(layer_activations)  # collapse for single neuroid dim
         layer_assembly = NeuroidAssembly(
             activations,
-            coords={'stimulus_sentence': ('stimulus', sentences),
-                    'sentence_num': ('stimulus', list(range(len(sentences)))),
+            coords={'stimulus_sentence': ('presentation', sentences),
+                    'sentence_num': ('presentation', list(range(len(sentences)))),
                     'neuroid_num': ('neuroid', list(range(activations.shape[1]))),
                     'model': ('neuroid', [self.identifier] * activations.shape[1]),
                     'layer': ('neuroid', [layer] * activations.shape[1]),
                     },
-            dims=['stimulus', 'neuroid']
+            dims=['presentation', 'neuroid']
         )
         neuroid_id = [".".join([f"{value}" for value in values]) for values in zip(*[
             layer_assembly[coord].values for coord in ['model', 'layer', 'neuroid_num']])]
@@ -170,7 +170,7 @@ def attach_stimulus_set_meta(assembly, stimulus_set):
     for column in stimulus_set.columns:
         if hasattr(assembly, column):
             continue
-        assembly[column] = 'stimulus', stimulus_set[column].values
+        assembly[column] = 'presentation', stimulus_set[column].values
     return assembly
 
 

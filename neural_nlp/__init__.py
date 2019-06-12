@@ -33,7 +33,7 @@ class NaturalisticStoriesBenchmark:
         _logger.info('Loading neural data')
         neural_data = load_voxels()
         # leave-out ELvis story
-        neural_data = neural_data[{'stimulus': [story != 'Elvis' for story in neural_data['story'].values]}]
+        neural_data = neural_data[{'presentation': [story != 'Elvis' for story in neural_data['story'].values]}]
         neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
             [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
         self._target_assembly = neural_data
@@ -45,7 +45,7 @@ class NaturalisticStoriesBenchmark:
         model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
         # since we're presenting all stimuli, including the inter-recording ones, we need to filter
         model_activations = model_activations[
-            {'stimulus': [sentence in self._target_assembly['stimulus_sentence'].values
+            {'presentation': [sentence in self._target_assembly['stimulus_sentence'].values
                           for sentence in
                           model_activations['stimulus_sentence'].values]}]
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)

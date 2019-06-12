@@ -42,6 +42,31 @@ def load_voxel_data(bold_shift_seconds=4):
     return annotated_data
 
 
+def load_voxel_timepoints():
+    data_dir = neural_data_dir / 'StoriesData_Dec2018' / 'DataAveragedInEachLangROI'
+    files = list(data_dir.glob('*.mat'))
+    _logger.info(f"Found {len(files)} voxel files")
+    data_list = []
+    for filepath in tqdm(files, desc='files'):
+        f = scipy.io.loadmat(filepath)
+        stories_data = f['data']['stories'][0, 0]
+        stories = list(stories_data.dtype.fields)
+        for story in stories:
+            story_data = stories_data[story][0, 0]
+            story_data = DataArray(story_data, coords={
+                'voxel_num': ('neuroid', np.arange(0, story_data.shape[0])),
+                'region': ('neuroid', ['language'] * story_data.shape[0]),
+                'timepoint_value': ('timepoint', np.arange(0, story_data.shape[1])),
+                'story': ('timepoint', [story] * story_data.shape[1]),
+            }, dims=['neuroid', 'timepoint'])
+            story_data = story_data.expand_dims('identifier')
+            story_data['identifier'] = [filepath.stem]
+            gather_indexes(story_data)
+            data_list.append(story_data)
+    data = merge_data_arrays(data_list)
+    return data
+
+
 def _merge_voxel_meta(data, bold_shift_seconds):
     annotated_data_list = []
     for story in ordered_set(data['story'].values.tolist()):
@@ -63,11 +88,11 @@ def _merge_voxel_meta(data, bold_shift_seconds):
             # re-interpret timepoints as stimuli
             coords = {}
             for coord_name, dims, coord_value in walk_coords(story_data):
-                dims = [dim if not dim.startswith('timepoint') else 'stimulus' for dim in dims]
+                dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in dims]
                 coords[coord_name] = dims, coord_value
-            coords = {**coords, **{'stimulus_sentence': ('stimulus', meta_data['reducedSentence'].values),
-                                   'story': ('stimulus', [story] * len(meta_data))}}
-            dims = [dim if not dim.startswith('timepoint') else 'stimulus' for dim in story_data.dims]
+            coords = {**coords, **{'stimulus_sentence': ('presentation', meta_data['reducedSentence'].values),
+                                   'story': ('presentation', [story] * len(meta_data))}}
+            dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in story_data.dims]
             annotated_data = xr.DataArray(story_data, coords=coords, dims=dims)
             gather_indexes(annotated_data)
             annotated_data_list.append(annotated_data)
@@ -153,36 +178,12 @@ def _align_stimuli_recordings(stimulus_set, assembly):
     alignment = [stimset_idx for assembly_idx, stimset_idx in (
         sorted(assembly_stimset.items(), key=operator.itemgetter(0)))]
     assembly_coords = {**{coord: (dims, values) for coord, dims, values in walk_coords(assembly)},
-                       **{'stimulus_id': ('stimulus', aligned_stimulus_set['stimulus_id'].values[alignment]),
-                          'meta_sentence': ('stimulus', assembly['stimulus_sentence'].values),
-                          'stimulus_sentence': ('stimulus', aligned_stimulus_set['sentence'].values[alignment])}}
+                       **{'stimulus_id': ('presentation', aligned_stimulus_set['stimulus_id'].values[alignment]),
+                          'meta_sentence': ('presentation', assembly['stimulus_sentence'].values),
+                          'stimulus_sentence': ('presentation', aligned_stimulus_set['sentence'].values[alignment])}}
     assembly = type(assembly)(assembly.values, coords=assembly_coords, dims=assembly.dims)
 
     return aligned_stimulus_set, assembly
-
-
-def load_voxel_timepoints():
-    data_dir = neural_data_dir / 'StoriesData_Dec2018' / 'DataAveragedInEachLangROI'
-    files = list(data_dir.glob('*.mat'))
-    _logger.info(f"Found {len(files)} voxel files")
-    data_list = []
-    for filepath in tqdm(files, desc='files', position=0):
-        f = scipy.io.loadmat(filepath)
-        stories_data = f['data']['stories'][0, 0]
-        stories = list(stories_data.dtype.fields)
-        for story in stories:
-            story_data = stories_data[story][0, 0]
-            story_data = DataArray(story_data, coords={
-                'voxel_num': np.arange(0, story_data.shape[0]),
-                'timepoint_value': ('timepoint', np.arange(0, story_data.shape[1])),
-                'story': ('timepoint', [story] * story_data.shape[1]),
-            }, dims=['voxel_num', 'timepoint'])
-            story_data = story_data.expand_dims('identifier')
-            story_data['identifier'] = [filepath.stem]
-            gather_indexes(story_data)
-            data_list.append(story_data)
-    data = merge_data_arrays(data_list)
-    return data
 
 
 @store()
