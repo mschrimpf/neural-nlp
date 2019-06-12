@@ -4,9 +4,10 @@ import tempfile
 
 import numpy as np
 import pandas as pd
+from brainscore.utils import LazyLoad
 from numpy.random import RandomState
 
-from neural_nlp.models.wrapper import DeepModel
+from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.models.wrapper.pytorch import PytorchModel
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
@@ -17,7 +18,7 @@ class Model(object):
         raise NotImplementedError()
 
 
-class GaussianRandom(DeepModel):
+class GaussianRandom:
     _layer_name = 'random'
 
     def __init__(self, num_samples=1000):
@@ -37,7 +38,7 @@ class GaussianRandom(DeepModel):
         return [cls._layer_name]
 
 
-class SkipThoughts(DeepModel):
+class SkipThoughts:
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
@@ -46,11 +47,17 @@ class SkipThoughts(DeepModel):
         super().__init__()
         import skipthoughts
         weights = weights + '/'
-        model = skipthoughts.load_model(path_to_models=weights, path_to_tables=weights)
-        self._encoder = skipthoughts.Encoder(model)
+        model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
+        self._encoder = LazyLoad(lambda: skipthoughts.Encoder(model))
+        self._extractor = ActivationsExtractorHelper(identifier='skip-thoughts', get_activations=self._get_activations,
+                                                     reset=lambda: None)  # TODO: no idea how to reset state in theano.
+        self._extractor.insert_attrs(self)
 
-    def _get_activations(self, sentences, layer_names):
-        np.testing.assert_array_equal(layer_names, ['encoder'])
+    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
+        return self._extractor(*args, **kwargs)
+
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, ['encoder'])
         encoding = self._encoder.encode(sentences)
         return {'encoder': encoding}
 
@@ -63,7 +70,7 @@ class SkipThoughts(DeepModel):
         return cls.available_layers()
 
 
-class LM1B(DeepModel):
+class LM1B:
     """
     https://arxiv.org/pdf/1602.02410.pdf
     """
@@ -122,7 +129,7 @@ class LM1B(DeepModel):
         return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
-class Transformer(PytorchModel):
+class Transformer:
     """
     https://arxiv.org/pdf/1706.03762.pdf
     """
@@ -184,7 +191,7 @@ class Transformer(PytorchModel):
         return layers
 
 
-class KeyedVectorModel(DeepModel):
+class KeyedVectorModel:
     """
     Lookup-table-like models where each word has an embedding.
     To retrieve the sentence activation, we take the mean of the word embeddings.
@@ -263,7 +270,10 @@ class RecursiveNeuralTensorNetwork(Model):
         self._cache.drop_duplicates(inplace=True)
 
     def __call__(self, sentences):
-        result = self._cache[self._cache['sentence'].isin(sentences)]
+        result = self._cache[self._cache['sentence'].isin(sentences)
+                             | self._cache['sentence'].isin([sentence + '.' for sentence in sentences])]
+        if len(result) != 1:
+            print(sentences)
         assert len(result) == 1
         result = result[[column for column in result if column.startswith('activation')]]
         return result.values
@@ -279,7 +289,7 @@ def _mean_vector(feature_vectors):
 
 
 def load_model(model_name):
-    return _model_mappings[model_name]()
+    return LazyLoad(_model_mappings[model_name])
 
 
 _model_mappings = {
