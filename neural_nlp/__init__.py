@@ -73,22 +73,3 @@ class NaturalisticStoriesBenchmark:
 
     def _apply_subject(self, source_assembly, subject_assembly):
         return self._metric(source_assembly, subject_assembly)
-
-    def __call__(self, model_activations, target_rdm):
-        model_activations = align(model_activations, target_rdm, on='stimulus_sentence')
-        model_rdm = self._rdm(model_activations)
-        leave_one_out = self.LeaveOneOutWrapper(self._similarity)
-        # multi-dimensional coords with repeated dimensions not yet supported in CrossValidation
-        drop_coords = [coord for coord, dims, value in walk_coords(target_rdm) if dims == ('stimulus', 'stimulus')]
-        target_rdm = target_rdm.drop(drop_coords)
-        return self._cross_validation(model_rdm, target_rdm, apply=leave_one_out)
-
-
-def align(source, target, on):
-    source_values, target_values = source[on].values.tolist(), target[on].values
-    indices = [source_values.index(value) for value in target_values]
-    assert len(source[on].dims) == 1, "multi-dimensional coordinates not implemented"
-    dim = source[on].dims[0]
-    dim_indices = {_dim: slice(None) if _dim != dim else indices for _dim in source.dims}
-    aligned = source.isel(**dim_indices)
-    return aligned
