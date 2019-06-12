@@ -19,34 +19,43 @@ def run(model, layers=None):
 
 @store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
 def _run(model, layers):
-    _logger.info('Loading neural data')
-    neural_data = load_voxels()
-    # leave-out ELvis story
-    neural_data = neural_data[{'stimulus': [story != 'Elvis' for story in neural_data['story'].values]}]
-    neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
-        [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
-
-    _logger.info('Computing activations')
-    model_activations = get_activations(model_identifier=model, layers=layers, stimuli=neural_data.attrs['stimulus_set'])
-    # since we're presenting all stimuli, including the inter-recording ones, we need to sub-filter
-    model_activations = model_activations[{'stimulus': [sentence in neural_data['stimulus_sentence'].values
-                                                        for sentence in model_activations['stimulus_sentence'].values]}]
-    assert set(model_activations['stimulus_id'].values) == set(neural_data['stimulus_id'].values)
+    def candidate(stimuli):
+        return get_activations(model_identifier=model, layers=layers, stimuli=stimuli)
 
     _logger.info('Running benchmark')
-    benchmark = MultiRegionBenchmark(target_assembly=neural_data)
-    cross_layer = CartesianProduct(dividers=['layer'])
-    scores = cross_layer(model_activations, apply=benchmark)
+    benchmark = NaturalisticStoriesBenchmark()
+    scores = benchmark(candidate)
     return scores
 
 
-class MultiRegionBenchmark:
-    def __init__(self, target_assembly):
-        self._target_assembly = target_assembly
+class NaturalisticStoriesBenchmark:
+    def __init__(self):
+        _logger.info('Loading neural data')
+        neural_data = load_voxels()
+        # leave-out ELvis story
+        neural_data = neural_data[{'stimulus': [story != 'Elvis' for story in neural_data['story'].values]}]
+        neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
+            [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
+        self._target_assembly = neural_data
         self._metric = RDMSimilarityCrossValidated()
         self._cross_region = CartesianProduct(dividers=['region'])
 
-    def __call__(self, source_assembly):
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
+        # since we're presenting all stimuli, including the inter-recording ones, we need to filter
+        model_activations = model_activations[
+            {'stimulus': [sentence in self._target_assembly['stimulus_sentence'].values
+                          for sentence in
+                          model_activations['stimulus_sentence'].values]}]
+        assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
+
+        _logger.info('Scoring layers')
+        cross_layer = CartesianProduct(dividers=['layer'])
+        scores = cross_layer(model_activations, apply=self._apply)
+        return scores
+
+    def _apply(self, source_assembly):
         score = self._cross_region(self._target_assembly,
                                    apply=lambda region_assembly: self._metric(source_assembly, region_assembly))
         return score
