@@ -56,14 +56,15 @@ def load_voxel_timepoints():
             story_data = DataArray(story_data, coords={
                 'voxel_num': ('neuroid', np.arange(0, story_data.shape[0])),
                 'region': ('neuroid', ['language'] * story_data.shape[0]),
+                'subject': ('neuroid', [filepath.stem] * story_data.shape[0]),
                 'timepoint_value': ('timepoint', np.arange(0, story_data.shape[1])),
                 'story': ('timepoint', [story] * story_data.shape[1]),
             }, dims=['neuroid', 'timepoint'])
-            story_data = story_data.expand_dims('identifier')
-            story_data['identifier'] = [filepath.stem]
             gather_indexes(story_data)
             data_list.append(story_data)
     data = merge_data_arrays(data_list)
+    data['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+        data[coord].values for coord in ['subject', 'region', 'voxel_num']])]
     return data
 
 
