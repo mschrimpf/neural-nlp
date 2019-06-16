@@ -39,8 +39,18 @@ def load_voxels():
 @store_netcdf()
 def load_voxel_data(bold_shift_seconds=4):
     data = load_voxel_timepoints()
-    annotated_data = _merge_voxel_meta(data, bold_shift_seconds)
+    meta = load_time_meta()
+    annotated_data = _merge_voxel_meta(data, meta, bold_shift_seconds)
     return annotated_data
+
+
+@store_netcdf()
+def load_filtered_voxel_timepoints():
+    data = load_voxel_timepoints()
+    data = data.sel(threshold='from90to100')
+    gather_indexes(data)
+    data = data.sel(subject_nStories=8)
+    return data
 
 
 fROIs = {
@@ -107,6 +117,50 @@ fROIs['DMN_spatWM'] = fROIs['DMN_langloc']
 
 @store_netcdf()
 def load_voxel_timepoints():
+    def _dim_coord_values(assembly):
+        dim_coord_values = defaultdict(dict)
+        for coord, dims, values in walk_coords(assembly):
+            assert len(dims) == 1
+            dim = dims[0]
+            dim_coord_values[dim][coord] = values.tolist()
+        return dim_coord_values
+
+    def _dim_index(dim_coord_values):
+        dim_values = {}
+        for dim, coord_values in dim_coord_values.items():
+            values = [dict(zip(coord_values, t)) for t in zip(*coord_values.values())]
+            values = ["__".join(str(value) for value in row_dict.values()) for row_dict in values]
+            dim_values[dim] = values
+        return dim_values
+
+    # 1st pass: find unique coords
+    dim_coord_values = defaultdict(lambda: defaultdict(list))
+    for num_data, story_data in enumerate(_iterate_voxel_timepoints(), start=1):
+        story_dim_values = _dim_coord_values(story_data)
+        for dim, dict_values in story_dim_values.items():
+            for coord, values in dict_values.items():
+                dim_coord_values[dim][coord] += values
+
+    dim_index = _dim_index(dim_coord_values)
+    dim_index = {dim: np.unique(values, return_index=True) for dim, values in dim_index.items()}
+    coords = {coord: (dim, np.array(values)[dim_index[dim][1]])
+              for dim, coord_values in dim_coord_values.items() for coord, values in coord_values.items()}
+
+    # 2nd pass: fill coords with data
+    data = np.empty([len(values) for (values, index) in dim_index.values()])
+    data[:] = np.nan
+    for story_data in tqdm(_iterate_voxel_timepoints(), total=num_data, desc='fill data'):
+        story_dim_index = _dim_index(_dim_coord_values(story_data))
+        indices = {dim: np.searchsorted(dim_index[dim][0], story_dim_index[dim]) for dim in dim_index}
+        indices = [indices[dim] for dim in story_data.dims]
+        data[np.ix_(*indices)] = story_data.values
+    data = DataArray(data, coords=coords, dims=['threshold', 'neuroid', 'timepoint'])
+    data['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+        data[coord].values for coord in ['subject_UID', 'region', 'fROI_area', 'voxel_num']])]
+    return data
+
+
+def _iterate_voxel_timepoints():
     data_dir = neural_data_dir / 'StoriesData_Dec2018'
     meta_filepath = data_dir / 'subjectsWithStoryData_andPreprocessedTimeseries_20190118.mat'
     meta = scipy.io.loadmat(meta_filepath)
@@ -119,13 +173,12 @@ def load_voxel_timepoints():
     nonexistent_files = [file for file in files if not file.exists()]
     assert not nonexistent_files, f"Files {nonexistent_files} do not exist"
     file_subject_meta = [dict(zip(subject_meta, t)) for t in zip(*subject_meta.values())]
-    data_list = []
     for subject_meta, filepath in tqdm(zip(file_subject_meta, files), total=len(file_subject_meta), desc='files'):
         f = scipy.io.loadmat(filepath)
-        data = f['data']
-        regions = list(data.dtype.fields)
-        for region in tqdm(regions, desc='regions'):
-            region_data = data[region][0, 0][0, 0]
+        file_data = f['data']
+        regions = list(file_data.dtype.fields)
+        for region in regions:
+            region_data = file_data[region][0, 0][0, 0]
             thresholds = list(region_data.dtype.fields)
             for threshold in thresholds:
                 threshold_data = region_data[threshold].squeeze()
@@ -142,31 +195,29 @@ def load_voxel_timepoints():
                     for story in stories:
                         story_data = timeseries[story].tolist()
                         subject_story_index = subject_meta['stories'].index(story)
+                        num_neuroids, num_timepoints = story_data.shape[0], story_data.shape[1]
+
                         story_data = DataArray([story_data], coords={**{
                             'threshold': [threshold],
-                            'voxel_num': ('neuroid', np.arange(0, story_data.shape[0])),
-                            'region': ('neuroid', [region] * story_data.shape[0]),
-                            'fROI_area': ('neuroid', [fROI_name] * story_data.shape[0]),
-                            'fROI_index': ('neuroid', [fROI_index] * story_data.shape[0]),
-                            'timepoint_value': ('timepoint', np.arange(0, story_data.shape[1])),
-                            'story': ('timepoint', [story] * story_data.shape[1]),
-                        }, **{f"subject_{key}": ('neuroid', [value] * story_data.shape[0])
-                              for key, value in subject_meta.items() if key not in
-                              ['stories', 'storiesComprehensionScores', 'storiesComprehensionUnanswered']
-                              },  # **{f"story_comprehension_score": (('neuroid', 'timepoint'), np.tile(
+                            'voxel_num': ('neuroid', np.arange(0, num_neuroids)),
+                            'region': ('neuroid', [region] * num_neuroids),
+                            'fROI_area': ('neuroid', [fROI_name] * num_neuroids),
+                            'fROI_index': ('neuroid', [fROI_index] * num_neuroids),
+                            'timepoint_value': ('timepoint', np.arange(0, num_timepoints)),
+                            'story': ('timepoint', [story] * num_timepoints),
+                        }, **{
+                            f"subject_{key}": ('neuroid', [value] * num_neuroids)
+                            for key, value in subject_meta.items()
+                            if key not in ['stories', 'storiesComprehensionScores', 'storiesComprehensionUnanswered']
+                        },  # **{
+                                                                     # f"story_comprehension_score": (('neuroid', 'timepoint'), np.tile(
                                                                      # subject_meta['storiesComprehensionScores'][subject_story_index], story_data.shape)),
                                                                      #         f"story_comprehension_unanswered": (('neuroid', 'timepoint'), np.tile(bool(
                                                                      #             subject_meta['storiesComprehensionUnanswered'][subject_story_index])
                                                                      #                                                           , story_data.shape))
                                                                      #         }
-                                                                     },
-                                               dims=['threshold', 'neuroid', 'timepoint'])
-                        gather_indexes(story_data)
-                        data_list.append(story_data)
-    data = merge_data_arrays(data_list)
-    data['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
-        data[coord].values for coord in ['subject_UID', 'region', 'fROI_area', 'voxel_num']])]
-    return data
+                                                                     }, dims=['threshold', 'neuroid', 'timepoint'])
+                        yield story_data
 
 
 def load_time_meta():
