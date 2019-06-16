@@ -3,7 +3,7 @@ import logging
 import operator
 import os
 import warnings
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import fire
 import numpy as np
@@ -12,6 +12,7 @@ import re
 import scipy.io
 import xarray as xr
 from brainio_base.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords
+from nltk_contrib.textgrid import TextGrid
 from pathlib import Path
 from tqdm import tqdm
 from xarray import DataArray
@@ -42,30 +43,165 @@ def load_voxel_data(bold_shift_seconds=4):
     return annotated_data
 
 
+fROIs = {
+    'language': [
+        '01_LH_PostTemp',
+        '02_LH_AntTemp',
+        '03_LH_IFG',
+        '04_LH_IFGorb',
+        '05_LH_MFG',
+        '06_LH_AngG',
+        '07_RH_PostTemp',
+        '08_RH_AntTemp',
+        '09_RH_IFG',
+        '10_RH_IFGorb',
+        '11_RH_MFG',
+        '12_RH_AngG',
+    ],
+    'MD_langloc': [
+        '01_LH_postParietal',
+        '02_LH_midParietal',
+        '03_LH_antParietal',
+        '04_LH_supFrontal',
+        '05_LH_Precentral_A_PrecG',
+        '06_LH_Precental_B_IFGop',
+        '07_LH_midFrontal',
+        '08_LH_midFrontalOrb',
+        '09_LH_insula',
+        '10_LH_medialFrontal',
+        '11_RH_postParietal',
+        '12_RH_midParietal',
+        '13_RH_antParietal',
+        '14_RH_supFrontal',
+        '15_RH_Precentral_A_PrecG',
+        '16_RH_Precental_B_IFGop',
+        '17_RH_midFrontal',
+        '18_RH_midFrontalOrb',
+        '19_RH_insula',
+        '20_RH_medialFrontal',
+    ],
+    'DMN_langloc': [
+        '01_LH_FrontalMed.img',
+        '02_LH_PostCing.img',
+        '03_LH_TPJ.img',
+        '04_LH_MidCing.img',
+        '05_LH_STGorInsula.img',
+        '06_LH_AntTemp.img',
+        '07_RH_FrontalMed.img',
+        '08_RH_PostCing.img',
+        '09_RH_TPJ.img',
+        '10_RH_MidCing.img',
+        '11_RH_STGorInsula.img',
+        '12_RH_AntTemp.img',
+    ],
+    'auditory': [
+        '01_LH_TE11.img',
+        '02_LH_TE12.img',
+        '03_RH_TE11.img',
+        '04_RH_TE12.img',
+    ]
+}
+fROIs['MD_spatWM'] = fROIs['MD_langloc']
+fROIs['DMN_spatWM'] = fROIs['DMN_langloc']
+
+
+@store_netcdf()
 def load_voxel_timepoints():
-    data_dir = neural_data_dir / 'StoriesData_Dec2018' / 'DataAveragedInEachLangROI'
-    files = list(data_dir.glob('*.mat'))
-    _logger.info(f"Found {len(files)} voxel files")
+    data_dir = neural_data_dir / 'StoriesData_Dec2018'
+    meta_filepath = data_dir / 'subjectsWithStoryData_andPreprocessedTimeseries_20190118.mat'
+    meta = scipy.io.loadmat(meta_filepath)
+    meta = meta['ssStruct']
+    subject_meta = {key: [value.squeeze().tolist() for value in meta[key][0]] for key in list(meta.dtype.fields)}
+    subject_meta['stories'] = [[story.squeeze().tolist() for story in stories] for stories in subject_meta['stories']]
+
+    files = [data_dir / f"{uid}_{session_id}_preprocessed.mat" for uid, session_id in
+             zip(subject_meta['UID'], subject_meta['SessionID'])]
+    nonexistent_files = [file for file in files if not file.exists()]
+    assert not nonexistent_files, f"Files {nonexistent_files} do not exist"
+    file_subject_meta = [dict(zip(subject_meta, t)) for t in zip(*subject_meta.values())]
     data_list = []
-    for filepath in tqdm(files, desc='files'):
+    for subject_meta, filepath in tqdm(zip(file_subject_meta, files), total=len(file_subject_meta), desc='files'):
         f = scipy.io.loadmat(filepath)
-        stories_data = f['data']['stories'][0, 0]
-        stories = list(stories_data.dtype.fields)
-        for story in stories:
-            story_data = stories_data[story][0, 0]
-            story_data = DataArray(story_data, coords={
-                'voxel_num': ('neuroid', np.arange(0, story_data.shape[0])),
-                'region': ('neuroid', ['language'] * story_data.shape[0]),
-                'subject': ('neuroid', [filepath.stem] * story_data.shape[0]),
-                'timepoint_value': ('timepoint', np.arange(0, story_data.shape[1])),
-                'story': ('timepoint', [story] * story_data.shape[1]),
-            }, dims=['neuroid', 'timepoint'])
-            gather_indexes(story_data)
-            data_list.append(story_data)
+        data = f['data']
+        regions = list(data.dtype.fields)
+        for region in tqdm(regions, desc='regions'):
+            region_data = data[region][0, 0][0, 0]
+            thresholds = list(region_data.dtype.fields)
+            for threshold in thresholds:
+                threshold_data = region_data[threshold].squeeze()
+                num_fROIs = threshold_data.shape[0]
+                for fROI_index in range(num_fROIs):
+                    fROI_name = fROIs[region][fROI_index]
+                    timeseries = threshold_data[fROI_index]['timeseries'].squeeze()
+                    if timeseries.dtype.fields is None:
+                        assert np.isnan(timeseries)
+                        warnings.warn(f"NaN timeseries: {filepath}, region {region}, threshold {threshold}, "
+                                      f"fROI {fROI_name}/{fROI_index}")
+                        continue
+                    stories = list(timeseries.dtype.fields)
+                    for story in stories:
+                        story_data = timeseries[story].tolist()
+                        subject_story_index = subject_meta['stories'].index(story)
+                        story_data = DataArray([story_data], coords={**{
+                            'threshold': [threshold],
+                            'voxel_num': ('neuroid', np.arange(0, story_data.shape[0])),
+                            'region': ('neuroid', [region] * story_data.shape[0]),
+                            'fROI_area': ('neuroid', [fROI_name] * story_data.shape[0]),
+                            'fROI_index': ('neuroid', [fROI_index] * story_data.shape[0]),
+                            'timepoint_value': ('timepoint', np.arange(0, story_data.shape[1])),
+                            'story': ('timepoint', [story] * story_data.shape[1]),
+                        }, **{f"subject_{key}": ('neuroid', [value] * story_data.shape[0])
+                              for key, value in subject_meta.items() if key not in
+                              ['stories', 'storiesComprehensionScores', 'storiesComprehensionUnanswered']
+                              },  # **{f"story_comprehension_score": (('neuroid', 'timepoint'), np.tile(
+                                                                     # subject_meta['storiesComprehensionScores'][subject_story_index], story_data.shape)),
+                                                                     #         f"story_comprehension_unanswered": (('neuroid', 'timepoint'), np.tile(bool(
+                                                                     #             subject_meta['storiesComprehensionUnanswered'][subject_story_index])
+                                                                     #                                                           , story_data.shape))
+                                                                     #         }
+                                                                     },
+                                               dims=['threshold', 'neuroid', 'timepoint'])
+                        gather_indexes(story_data)
+                        data_list.append(story_data)
     data = merge_data_arrays(data_list)
     data['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
-        data[coord].values for coord in ['subject', 'region', 'voxel_num']])]
+        data[coord].values for coord in ['subject_UID', 'region', 'fROI_area', 'voxel_num']])]
     return data
+
+
+def load_time_meta():
+    data_dir = neural_data_dir / 'StoriesData_Dec2018' / 'stories_textgridsbyJeanne'
+    files = data_dir.glob("*TextGrid*")
+    time_to_words = []
+    for file in files:
+        textgrid = TextGrid.load(file)
+        words = [tier for tier in textgrid.tiers if tier.nameid == 'words'][0]
+        rows = defaultdict(list)
+        for (time_start, time_end, word) in words.simple_transcript:
+            rows['time_start'].append(float(time_start))
+            rows['time_end'].append(float(time_end))
+            rows['word'].append(word)
+        rows = DataArray(rows['word'],
+                         coords={'filepath': ('time_bin', [file.name] * len(rows['word'])),
+                                 'time_start': ('time_bin', rows['time_start']),
+                                 'time_end': ('time_bin', rows['time_end']),
+                                 },
+                         dims=['time_bin'])
+        gather_indexes(rows)
+        time_to_words.append(rows)
+    time_to_words = merge_data_arrays(time_to_words)
+    return time_to_words
+
+
+story_meta = DataArray(['Boar', 'Aqua', 'MatchstickSeller', 'KingOfBirds', 'Elvis', 'MrSticky',
+                        'HighSchool', 'Roswell', 'Tulips', 'Tourette', 'Boar'], coords={
+    'number': ('story', list(range(1, 11)) + [1]),
+    'reader': ('story', ['Ted', 'Ted', 'Nancy', 'Nancy', 'Ted', 'Nancy', 'Nancy', 'Ted', 'Ted', 'Nancy', 'Terri']),
+    'time_with_fixation': ('story', [338, 318, 394, 396, 302, 410, 348, 394, 388, 422, 338]),
+    'time_without_fixation': ('story', [5 * 60 + 6, 4 * 60 + 46, 6 * 60 + 2, 6 * 60 + 4, 4 * 60 + 30,
+                                        6 * 60 + 18, 5 * 60 + 16, 6 * 60 + 2, 5 * 60 + 56, 6 * 60 + 30, 5 * 60 + 6]),
+    'recording_timepoints': ('story', [169, 159, 197, 198, 151, 205, 174, 197, 194, 211, 169])
+}, dims=['story'])
 
 
 def _merge_voxel_meta(data, bold_shift_seconds):
