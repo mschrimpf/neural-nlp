@@ -11,7 +11,7 @@ import pandas as pd
 import re
 import scipy.io
 import xarray as xr
-from brainio_base.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords
+from brainio_base.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords, array_is_element
 from nltk_contrib.textgrid import TextGrid
 from pathlib import Path
 from tqdm import tqdm
@@ -38,7 +38,8 @@ def load_voxels():
 
 @store_netcdf()
 def load_voxel_data(bold_shift_seconds=4):
-    data = load_voxel_timepoints()
+    data = load_filtered_voxel_timepoints()
+    gather_indexes(data)
     meta = load_time_meta()
     annotated_data = _merge_voxel_meta(data, meta, bold_shift_seconds)
     return annotated_data
@@ -135,7 +136,7 @@ def load_voxel_timepoints():
 
     # 1st pass: find unique coords
     dim_coord_values = defaultdict(lambda: defaultdict(list))
-    for num_data, story_data in enumerate(_iterate_voxel_timepoints(), start=1):
+    for story_data in _iterate_voxel_timepoints(desc='pass 1: coords'):
         story_dim_values = _dim_coord_values(story_data)
         for dim, dict_values in story_dim_values.items():
             for coord, values in dict_values.items():
@@ -149,7 +150,7 @@ def load_voxel_timepoints():
     # 2nd pass: fill coords with data
     data = np.empty([len(values) for (values, index) in dim_index.values()])
     data[:] = np.nan
-    for story_data in tqdm(_iterate_voxel_timepoints(), total=num_data, desc='fill data'):
+    for story_data in _iterate_voxel_timepoints(desc='pass 2: data'):
         story_dim_index = _dim_index(_dim_coord_values(story_data))
         indices = {dim: np.searchsorted(dim_index[dim][0], story_dim_index[dim]) for dim in dim_index}
         indices = [indices[dim] for dim in story_data.dims]
@@ -160,7 +161,8 @@ def load_voxel_timepoints():
     return data
 
 
-def _iterate_voxel_timepoints():
+def _iterate_voxel_timepoints(desc='files'):
+    fixation_offset = 8
     data_dir = neural_data_dir / 'StoriesData_Dec2018'
     meta_filepath = data_dir / 'subjectsWithStoryData_andPreprocessedTimeseries_20190118.mat'
     meta = scipy.io.loadmat(meta_filepath)
@@ -173,7 +175,7 @@ def _iterate_voxel_timepoints():
     nonexistent_files = [file for file in files if not file.exists()]
     assert not nonexistent_files, f"Files {nonexistent_files} do not exist"
     file_subject_meta = [dict(zip(subject_meta, t)) for t in zip(*subject_meta.values())]
-    for subject_meta, filepath in tqdm(zip(file_subject_meta, files), total=len(file_subject_meta), desc='files'):
+    for subject_meta, filepath in tqdm(zip(file_subject_meta, files), total=len(file_subject_meta), desc=desc):
         f = scipy.io.loadmat(filepath)
         file_data = f['data']
         regions = list(file_data.dtype.fields)
@@ -203,7 +205,8 @@ def _iterate_voxel_timepoints():
                             'region': ('neuroid', [region] * num_neuroids),
                             'fROI_area': ('neuroid', [fROI_name] * num_neuroids),
                             'fROI_index': ('neuroid', [fROI_index] * num_neuroids),
-                            'timepoint_value': ('timepoint', np.arange(0, num_timepoints)),
+                            'timepoint_value': ('timepoint', np.arange(
+                                2 - fixation_offset, 2 + num_timepoints * 2 - fixation_offset, 2)),  # 2s snapshots
                             'story': ('timepoint', [story] * num_timepoints),
                         }, **{
                             f"subject_{key}": ('neuroid', [value] * num_neuroids)
@@ -232,8 +235,12 @@ def load_time_meta():
             rows['time_start'].append(float(time_start))
             rows['time_end'].append(float(time_end))
             rows['word'].append(word)
+        story_index = int(file.stem)
+        story = stories_meta.sel(number=story_index).values
+        story = next(iter(set(story)))  # Boar was read twice
         rows = DataArray(rows['word'],
                          coords={'filepath': ('time_bin', [file.name] * len(rows['word'])),
+                                 'story': ('time_bin', [story] * len(rows['word'])),
                                  'time_start': ('time_bin', rows['time_start']),
                                  'time_end': ('time_bin', rows['time_end']),
                                  },
@@ -244,8 +251,10 @@ def load_time_meta():
     return time_to_words
 
 
-story_meta = DataArray(['Boar', 'Aqua', 'MatchstickSeller', 'KingOfBirds', 'Elvis', 'MrSticky',
-                        'HighSchool', 'Roswell', 'Tulips', 'Tourette', 'Boar'], coords={
+stories_meta = ['Boar', 'Aqua', 'MatchstickSeller', 'KingOfBirds', 'Elvis', 'MrSticky',
+                'HighSchool', 'Roswell', 'Tulips', 'Tourette', 'Boar']
+stories_meta = DataArray(stories_meta, coords={
+    'story_name': ('story', stories_meta),
     'number': ('story', list(range(1, 11)) + [1]),
     'reader': ('story', ['Ted', 'Ted', 'Nancy', 'Nancy', 'Ted', 'Nancy', 'Nancy', 'Ted', 'Ted', 'Nancy', 'Terri']),
     'time_with_fixation': ('story', [338, 318, 394, 396, 302, 410, 348, 394, 388, 422, 338]),
@@ -253,40 +262,64 @@ story_meta = DataArray(['Boar', 'Aqua', 'MatchstickSeller', 'KingOfBirds', 'Elvi
                                         6 * 60 + 18, 5 * 60 + 16, 6 * 60 + 2, 5 * 60 + 56, 6 * 60 + 30, 5 * 60 + 6]),
     'recording_timepoints': ('story', [169, 159, 197, 198, 151, 205, 174, 197, 194, 211, 169])
 }, dims=['story'])
+stories_meta['story_index'] = 'story', [".".join([str(value) for value in values]) for values in zip(*[
+    stories_meta[coord].values for coord in ['story_name', 'reader']])]
+gather_indexes(stories_meta)
 
 
-def _merge_voxel_meta(data, bold_shift_seconds):
-    annotated_data_list = []
-    for story in ordered_set(data['story'].values.tolist()):
-        try:
-            meta_data = load_sentences_meta(story)
-            del meta_data['fullSentence']
-            meta_data.dropna(inplace=True)
-            # quickfix incorrect meta
-            if story == 'KingOfBirds':
-                meta_data['reducedSentence'][meta_data['reducedSentence'] == 'He wanted to shout "I am king!"'] \
-                    = "He wanted to shout, 'I am king'"
-            # end quickfix
-            mapping_column = 'shiftBOLD_{}sec'.format(bold_shift_seconds)
-            timepoints = meta_data[mapping_column].values.astype(int)
-            # filter
-            story_data = data.sel(story=story)
-            assert all(timepoint in story_data['timepoint_value'].values for timepoint in timepoints)
-            story_data = story_data.sel(timepoint_value=timepoints)
-            # re-interpret timepoints as stimuli
-            coords = {}
-            for coord_name, dims, coord_value in walk_coords(story_data):
-                dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in dims]
-                coords[coord_name] = dims, coord_value
-            coords = {**coords, **{'stimulus_sentence': ('presentation', meta_data['reducedSentence'].values),
-                                   'story': ('presentation', [story] * len(meta_data))}}
-            dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in story_data.dims]
-            annotated_data = xr.DataArray(story_data, coords=coords, dims=dims)
-            gather_indexes(annotated_data)
-            annotated_data_list.append(annotated_data)
-        except (FileNotFoundError, KeyError):
-            warnings.warn(f"no meta found for story {story}")
-    annotated_data = merge_data_arrays(annotated_data_list)
+def _merge_voxel_meta(data, meta, bold_shift_seconds):
+    data_missing = set(meta['story'].values) - set(data['story'].values)
+    if data_missing:
+        warnings.warn(f"Stories missing from the data: {data_missing}")
+    meta_missing = set(data['story'].values) - set(meta['story'].values)
+    if meta_missing:
+        warnings.warn(f"Stories missing from the meta: {meta_missing}")
+
+    ignored_words = [None, '', '<s>', '</s>']
+    annotated_data = []
+    for story in tqdm(ordered_set(data['story'].values), desc='merge meta'):
+        if story not in meta['story'].values:
+            continue
+        story_data = data.sel(story=story).stack(timepoint=['timepoint_value'])
+        story_meta = meta.sel(story=story)
+        story_meta = story_meta.sortby('time_end')
+        timepoints = list(sorted(story_data['timepoint_value'].values))
+        timepoints = [timepoint + bold_shift_seconds for timepoint in timepoints]
+        sentences = []
+        last_timepoint = -np.inf
+        for timepoint in timepoints:
+            if last_timepoint >= max(story_meta['time_end'].values):
+                break
+            if timepoint <= 0:
+                sentences.append(None)
+                continue  # ignore fixation period
+            timebin_meta = [last_timepoint < end <= timepoint for end in story_meta['time_end'].values]
+            timebin_meta = story_meta[{'time_bin': timebin_meta}]
+            sentence = ' '.join(word.strip() for word in timebin_meta.values if word not in ignored_words)
+            sentence = sentence.lower().strip()
+            sentences.append(sentence)
+            last_timepoint = timebin_meta['time_end'].values[-1]
+        sentence_index = [i for i, sentence in enumerate(sentences) if sentence]
+        sentences = np.array(sentences)[sentence_index]
+        annotated_sentence = ' '.join(sentence for sentence in sentences)
+        meta_sentence = ' '.join(word.strip() for word in story_meta.values if word not in ignored_words).lower().strip()
+        assert annotated_sentence == meta_sentence
+        # re-interpret timepoints as stimuli
+        coords = {}
+        for coord_name, dims, coord_value in walk_coords(story_data):
+            dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in dims]
+            # discard the timepoints for which the stimulus did not change (empty word)
+            coord_value = coord_value if not array_is_element(dims, 'presentation') else coord_value[sentence_index]
+            coords[coord_name] = dims, coord_value
+        coords = {**coords, **{'stimulus_sentence': ('presentation', sentences)}}
+        story_data = story_data[{dim: slice(None) if dim != 'timepoint' else sentence_index
+                                 for dim in story_data.dims}]
+        dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in story_data.dims]
+        story_data = xr.DataArray(story_data.values, coords=coords, dims=dims)
+        story_data['story'] = 'presentation', [story] * len(story_data['presentation'])
+        gather_indexes(story_data)
+        annotated_data.append(story_data)
+    annotated_data = merge_data_arrays(annotated_data)
     return annotated_data
 
 
