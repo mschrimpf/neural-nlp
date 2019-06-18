@@ -3,7 +3,7 @@ import logging
 import operator
 import os
 import warnings
-from collections import namedtuple, defaultdict
+from collections import namedtuple, defaultdict, OrderedDict
 
 import fire
 import numpy as np
@@ -18,7 +18,7 @@ from tqdm import tqdm
 from xarray import DataArray
 
 from neural_nlp.stimuli import NaturalisticStories, StimulusSet
-from neural_nlp.utils import ordered_set
+from neural_nlp.utils import ordered_set, is_sorted
 from result_caching import cache, store, store_netcdf
 
 neural_data_dir = (Path(os.path.dirname(__file__)) / '..' / '..' / 'ressources' / 'neural_data' / 'fmri').absolute()
@@ -280,10 +280,13 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
     for story in tqdm(ordered_set(data['story'].values), desc='merge meta'):
         if story not in meta['story'].values:
             continue
-        story_data = data.sel(story=story).stack(timepoint=['timepoint_value'])
         story_meta = meta.sel(story=story)
         story_meta = story_meta.sortby('time_end')
-        timepoints = list(sorted(story_data['timepoint_value'].values))
+
+        story_data = data.sel(story=story).stack(timepoint=['timepoint_value'])
+        story_data = story_data.sortby('timepoint_value')
+        timepoints = story_data['timepoint_value'].values.tolist()
+        assert is_sorted(timepoints)
         timepoints = [timepoint + bold_shift_seconds for timepoint in timepoints]
         sentences = []
         last_timepoint = -np.inf
@@ -302,7 +305,8 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
         sentence_index = [i for i, sentence in enumerate(sentences) if sentence]
         sentences = np.array(sentences)[sentence_index]
         annotated_sentence = ' '.join(sentence for sentence in sentences)
-        meta_sentence = ' '.join(word.strip() for word in story_meta.values if word not in ignored_words).lower().strip()
+        meta_sentence = ' '.join(
+            word.strip() for word in story_meta.values if word not in ignored_words).lower().strip()
         assert annotated_sentence == meta_sentence
         # re-interpret timepoints as stimuli
         coords = {}
@@ -324,7 +328,9 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
 
 
 def compare_ignore(sentence):
-    return sentence.replace(',', '').replace('"', '').replace('\'', '')
+    return sentence.replace(',', '').replace('"', '').replace('\'', '') \
+        .replace('.', '').replace('!', '').replace('?', '').replace('-', ' ') \
+        .lower()
 
 
 def _align_stimuli_recordings(stimulus_set, assembly):
@@ -336,8 +342,8 @@ def _align_stimuli_recordings(stimulus_set, assembly):
 
     stories = ordered_set(assembly['story'].values.tolist())
     for story in tqdm(sorted(stories), desc='align stimuli', total=len(stories)):
-        story_partial_sentences = {sentence: i for i, (sentence, sentence_story) in enumerate(zip(
-            partial_sentences, assembly['story'].values)) if sentence_story == story}
+        story_partial_sentences = OrderedDict((sentence, i) for i, (sentence, sentence_story) in enumerate(zip(
+            partial_sentences, assembly['story'].values)) if sentence_story == story)
         sentence_part = None
 
         def append_row(row):
@@ -350,6 +356,7 @@ def _align_stimuli_recordings(stimulus_set, assembly):
             stimuli_idx += 1
 
         story_stimuli = stimulus_set[stimulus_set['story'] == story]
+        assert ' '.join(story_partial_sentences) == compare_ignore(' '.join(story_stimuli['sentence']))
         for row in story_stimuli.itertuples(index=False, name='Stimulus'):
             sentence_part = 0
             full_sentence = row.sentence
