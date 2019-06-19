@@ -36,19 +36,16 @@ class NaturalisticStoriesBenchmark:
         neural_data = neural_data[{'presentation': [story != 'Elvis' for story in neural_data['story'].values]}]
         neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
             [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
-        # exclude subjects that have not seen all stories
-        subjects = np.isnan(neural_data).any('presentation').groupby('subject').apply(
-            lambda subject_neuroids: subject_neuroids.any())
-        subjects = subjects['subject'].values[~subjects.values]
-        neural_data = neural_data[{'neuroid': [subject in subjects for subject in neural_data['subject'].values]}]
-        assert not np.isnan(neural_data).any()
+        # note that even though all subjects in this dataset now have seen all stories,
+        # there could still be NaN neural data at this point, e.g. from non-collected MD
+        neural_data = neural_data.sel(region='language')  # for now
         self._target_assembly = neural_data
 
         self._metric = CrossRegressedCorrelation(
             regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
-        self._cross_subject = CartesianProduct(dividers=['subject'])
+        self._cross_subject = CartesianProduct(dividers=['subject_UID'])
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -68,8 +65,12 @@ class NaturalisticStoriesBenchmark:
     def _apply_layer(self, source_assembly):
         subject_scores = self._cross_subject(self._target_assembly, apply=
         lambda subject_assembly: self._apply_subject(source_assembly, subject_assembly))
-        score = apply_aggregate(lambda scores: scores.median('subject'), subject_scores)
+        score = apply_aggregate(lambda scores: scores.median('subject_UID'), subject_scores)
         return score
 
     def _apply_subject(self, source_assembly, subject_assembly):
+        neuroid_nan = np.isnan(subject_assembly).any('presentation')
+        nonnan_neuroids, = np.where(~neuroid_nan.values)
+        subject_assembly = subject_assembly[{'neuroid': nonnan_neuroids}]
+        assert not np.isnan(subject_assembly).any()
         return self._metric(source_assembly, subject_assembly)
