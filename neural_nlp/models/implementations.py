@@ -8,7 +8,7 @@ from brainscore.utils import LazyLoad
 from numpy.random import RandomState
 
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
-from neural_nlp.models.wrapper.pytorch import PytorchModel
+from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
@@ -129,66 +129,82 @@ class LM1B:
         return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
-class Transformer:
+def Transformer():
     """
     https://arxiv.org/pdf/1706.03762.pdf
     """
+    weights = os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')
+    from onmt.opts import add_md_help_argument, translate_opts
+    from onmt.translate.translator import build_translator
+    import argparse
+    parser = argparse.ArgumentParser(description='transformer-parser-base')
+    add_md_help_argument(parser)
+    translate_opts(parser, weights)
+    opt = parser.parse_args(['-batch_size', '1'])
+    translator = build_translator(opt, report_score=True)
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')):
-        from onmt.opts import add_md_help_argument, translate_opts
-        import argparse
-        parser = argparse.ArgumentParser(description='translate.py',
-                                         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        add_md_help_argument(parser)
-        translate_opts(parser, weights)
+    class TransformerContainer:
+        def __getattr__(self, name):
+            return getattr(translator.model, name)
 
-        self._opt = parser.parse_args([])
+        def __call__(self, sentences):
+            with tempfile.NamedTemporaryFile(mode='w+') as file:
+                # separating sentences with newline, combined with a batch size of 1
+                # will lead to one set of activations per sentence (albeit multiple words).
+                file.write('\n'.join(sentences) + '\n')
+                file.flush()
+                encodings = translator.get_encodings(src_path=file.name, tgt_path=opt.tgt,
+                                                     src_dir=opt.src_dir, batch_size=opt.batch_size,
+                                                     attn_debug=opt.attn_debug)
+                return encodings
 
-        super().__init__()
+    class TransformerWrapper(PytorchWrapper):
+        def register_hook(self, layer, layer_name, target_dict):
+            def hook_function(_layer, _input, output, name=layer_name):
+                numpy_output = PytorchWrapper._tensor_to_numpy(output)
+                target_dict[name].append(numpy_output)
 
-    def _load_model(self):
-        from onmt.translate.translator import build_translator
-        self._translator = build_translator(self._opt, report_score=True)
-        return self._translator.model
+            hook = layer.register_forward_hook(hook_function)
+            return hook
 
-    def _run_model(self, sentences):
-        with tempfile.NamedTemporaryFile(mode='w+') as file:
-            file.writelines(sentences)
-            file.write('\n')
-            file.flush()
-            encodings = self._translator.get_encodings(src_path=file.name, tgt_path=self._opt.tgt,
-                                                       src_dir=self._opt.src_dir, batch_size=self._opt.batch_size,
-                                                       attn_debug=self._opt.attn_debug)
-            return np.array(encodings)
+    model_container = TransformerContainer()
+    extractor = TransformerWrapper(identifier='transformer', model=model_container,
+                                   reset=lambda: None)  # transformer is feed-forward
 
-    @classmethod
-    def default_layers(cls):
-        """
-        For each of the 6 encoder blocks, we're using two layers,
-        one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
+    def combine_word_activations(layer_activations):
+        for layer, activations in layer_activations.items():
+            activations = [np.mean(a, axis=1) for a in activations]  # average across words within a sentence
+            layer_activations[layer] = np.concatenate(activations)
+        return layer_activations
 
-        The encoder is implemented as follows:
-        ```
-        input_norm = self.layer_norm(inputs)
-        context, _ = self.self_attn(input_norm, input_norm, input_norm, mask=mask)
-        out = self.dropout(context) + inputs
-        return self.feed_forward(out)
-        ```
-        `feed_forward` is implemented as follows:
-        ```
-        inter = self.dropout_1(self.relu(self.w_1(self.layer_norm(x))))
-        output = self.dropout_2(self.w_2(inter))
-        return output + x
-        ```
-        We thus use `feed_forward.layer_norm` as the layer immediately following the Multi-Head Attention
-        and `feed_forward.dropout_2` as the last layer of the Feed Forward block.
-        Note however that the attended input has not yet been added back to the feed forward output with
-        `feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
-        """
-        layers = [f'encoder.transformer.{i}.{layer}'
-                  for i in range(6)
-                  for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
-        return layers
+    extractor.register_activations_hook(combine_word_activations)
+    return extractor
+
+
+Transformer.default_layers = [f'encoder.transformer.{i}.{layer}'
+                              for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
+"""
+For each of the 6 encoder blocks, we're using two layers,
+one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
+
+The encoder is implemented as follows:
+```
+input_norm = self.layer_norm(inputs)
+context, _ = self.self_attn(input_norm, input_norm, input_norm, mask=mask)
+out = self.dropout(context) + inputs
+return self.feed_forward(out)
+```
+`feed_forward` is implemented as follows:
+```
+inter = self.dropout_1(self.relu(self.w_1(self.layer_norm(x))))
+output = self.dropout_2(self.w_2(inter))
+return output + x
+```
+We thus use `feed_forward.layer_norm` as the layer immediately following the Multi-Head Attention
+and `feed_forward.dropout_2` as the last layer of the Feed Forward block.
+Note however that the attended input has not yet been added back to the feed forward output with
+`feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
+"""
 
 
 class KeyedVectorModel:
@@ -308,5 +324,5 @@ model_layers = {
     'lm_1b': LM1B.default_layers(),
     'word2vec': Word2Vec.default_layers(),
     'glove': Glove.default_layers(),
-    'transformer': Transformer.default_layers(),
+    'transformer': Transformer.default_layers,
 }
