@@ -275,7 +275,7 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
     if meta_missing:
         warnings.warn(f"Stories missing from the meta: {meta_missing}")
 
-    ignored_words = [None, '', '<s>', '</s>']
+    ignored_words = [None, '', '<s>', '</s>', '<s']
     annotated_data = []
     for story in tqdm(ordered_set(data['story'].values), desc='merge meta'):
         if story not in meta['story'].values:
@@ -300,14 +300,22 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
             timebin_meta = story_meta[{'time_bin': timebin_meta}]
             sentence = ' '.join(word.strip() for word in timebin_meta.values if word not in ignored_words)
             sentence = sentence.lower().strip()
+            # quick-fixes
+            if story == 'Boar' and sentence == 'interactions the the':  # Boar duplicate
+                sentence = 'interactions the'
+            if story == 'KingOfBirds' and sentence == 'the fact that the larger':  # missing word in TextGrid
+                sentence = 'earth ' + sentence
+            if story == 'MrSticky' and sentence == 'worry don\'t worry i went extra slowly since it\'s':
+                sentence = 'don\'t worry i went extra slowly since it\'s'
             sentences.append(sentence)
             last_timepoint = timebin_meta['time_end'].values[-1]
         sentence_index = [i for i, sentence in enumerate(sentences) if sentence]
         sentences = np.array(sentences)[sentence_index]
-        annotated_sentence = ' '.join(sentence for sentence in sentences)
-        meta_sentence = ' '.join(
-            word.strip() for word in story_meta.values if word not in ignored_words).lower().strip()
-        assert annotated_sentence == meta_sentence
+        if story not in ['Boar', 'KingOfBirds', 'MrSticky']:  # ignore quick-fixes
+            annotated_sentence = ' '.join(sentences)
+            meta_sentence = ' '.join(word.strip() for word in story_meta.values if word not in ignored_words) \
+                .lower().strip()
+            assert annotated_sentence == meta_sentence
         # re-interpret timepoints as stimuli
         coords = {}
         for coord_name, dims, coord_value in walk_coords(story_data):
@@ -327,10 +335,15 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
     return annotated_data
 
 
+compare_characters = [',', '"', '\'', ':', '.', '!', '?', '(', ')']
+
+
 def compare_ignore(sentence):
-    return sentence.replace(',', '').replace('"', '').replace('\'', '') \
-        .replace('.', '').replace('!', '').replace('?', '').replace('-', ' ') \
-        .lower()
+    for compare_character in compare_characters:
+        sentence = sentence.replace(compare_character, '')
+    sentence = sentence.replace('-', ' ')
+    sentence = sentence.lower()
+    return sentence
 
 
 def _align_stimuli_recordings(stimulus_set, assembly):
