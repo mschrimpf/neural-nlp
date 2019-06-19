@@ -26,7 +26,7 @@ class ActivationsExtractorHelper:
         self.get_activations = get_activations
         self.reset = reset
         self._stimulus_set_hooks = {}
-        self._batch_activations_hooks = {}
+        self._activations_hooks = {}
 
     def __call__(self, stimuli, layers, stimuli_identifier=None):
         """
@@ -83,12 +83,12 @@ class ActivationsExtractorHelper:
         self._logger.info('Running sentences')
         self.reset()
         layer_activations = self.get_activations(sentences, layers=layers)
-        for hook in self._batch_activations_hooks.copy().values():
+        for hook in self._activations_hooks.copy().values():
             layer_activations = hook(layer_activations)
         self._logger.info('Packaging into assembly')
         return self._package(layer_activations, sentences)
 
-    def register_batch_activations_hook(self, hook):
+    def register_activations_hook(self, hook):
         r"""
         The hook will be called every time a batch of activations is retrieved.
         The hook should have the following signature::
@@ -96,8 +96,8 @@ class ActivationsExtractorHelper:
         The hook should return new batch_activations which will be used in place of the previous ones.
         """
 
-        handle = HookHandle(self._batch_activations_hooks)
-        self._batch_activations_hooks[handle.id] = hook
+        handle = HookHandle(self._activations_hooks)
+        self._activations_hooks[handle.id] = hook
         return handle
 
     def register_stimulus_set_hook(self, hook):
@@ -131,7 +131,7 @@ class ActivationsExtractorHelper:
                 neuroid_coords[coord][1] = np.concatenate((neuroid_coords[coord][1], layer_assembly[coord].values))
             assert layer_assemblies[0].dims == layer_assembly.dims
             for dim in set(layer_assembly.dims) - {'neuroid'}:
-                for coord in layer_assembly[dim].coords:
+                for coord, dims, values in walk_coords(layer_assembly[dim]):
                     assert (layer_assembly[coord].values == nonneuroid_coords[coord][1]).all()
         neuroid_coords = {coord: (dims_values[0], dims_values[1])  # re-package as tuple instead of list for xarray
                           for coord, dims_values in neuroid_coords.items()}
@@ -160,7 +160,7 @@ class ActivationsExtractorHelper:
     def insert_attrs(self, wrapper):
         wrapper.from_stimulus_set = self.from_stimulus_set
         wrapper.from_sentences = self.from_sentences
-        wrapper.register_batch_activations_hook = self.register_batch_activations_hook
+        wrapper.register_activations_hook = self.register_activations_hook
         wrapper.register_stimulus_set_hook = self.register_stimulus_set_hook
 
 
