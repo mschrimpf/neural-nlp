@@ -351,64 +351,57 @@ def _align_stimuli_recordings(stimulus_set, assembly):
     partial_sentences = assembly['stimulus_sentence'].values
     partial_sentences = [compare_ignore(sentence) for sentence in partial_sentences]
     assembly_stimset = {}
-    stimuli_idx = 0
+    stimulus_set_index = 0
 
     stories = ordered_set(assembly['story'].values.tolist())
     for story in tqdm(sorted(stories), desc='align stimuli', total=len(stories)):
-        story_partial_sentences = OrderedDict((sentence, i) for i, (sentence, sentence_story) in enumerate(zip(
-            partial_sentences, assembly['story'].values)) if sentence_story == story)
-        sentence_part = None
-
-        def append_row(row):
-            nonlocal sentence_part, stimuli_idx
-            row = row._replace(sentence=row.sentence.strip())
-            row_ctr = namedtuple(type(row).__name__, row._fields + ('sentence_part',))
-            row = row_ctr(**{**row._asdict(), **dict(sentence_part=sentence_part)})
-            aligned_stimulus_set.append(row)
-            sentence_part += 1
-            stimuli_idx += 1
+        story_partial_sentences = [(sentence, i) for i, (sentence, sentence_story) in enumerate(zip(
+            partial_sentences, assembly['story'].values)) if sentence_story == story]
 
         story_stimuli = stimulus_set[stimulus_set['story'] == story]
-        assert ' '.join(story_partial_sentences) == compare_ignore(' '.join(story_stimuli['sentence']))
-        for row in story_stimuli.itertuples(index=False, name='Stimulus'):
-            sentence_part = 0
-            full_sentence = row.sentence
-            # TODO: the following entirely discards ",' etc.
-            full_sentence = compare_ignore(full_sentence)
-            partial_sentence_idx = [index for partial_sentence, index in story_partial_sentences.items()
-                                    if partial_sentence in full_sentence]
-            if len(partial_sentence_idx) == 0:
-                warnings.warn(f"Sentence {full_sentence} not found in partial sentences")
-                row = row._replace(sentence=full_sentence)
-                append_row(row)
-                continue
-            assert len(partial_sentence_idx) == 1
-            partial_sentence_idx = partial_sentence_idx[0]
-            assert partial_sentence_idx not in assembly_stimset
-            assembly_stimset[partial_sentence_idx] = stimuli_idx
-            partial_sentence = partial_sentences[partial_sentence_idx]
-            index = full_sentence.find(partial_sentence)
-            assert index >= 0
-
-            # before part
-            if index > 0:
-                row = row._replace(sentence=full_sentence[0, index])
-                append_row(row)
-            # part itself
-            only_missing_punctuation = index + len(partial_sentence) < len(full_sentence) and \
-                                       full_sentence[index + len(partial_sentence):] in NaturalisticStories.sentence_end
-            if only_missing_punctuation:
-                partial_sentence += full_sentence[index + len(partial_sentence):]
-            row = row._replace(sentence=partial_sentence)
-            append_row(row)
-            # after part
-            if index + len(partial_sentence) < len(full_sentence) and not only_missing_punctuation:
-                row = row._replace(sentence=full_sentence[index + len(partial_sentence):])
-                append_row(row)
+        stimuli_story = ' '.join(story_stimuli['sentence'])
+        stimuli_story_sentence_starts = [0] + [len(sentence) + 1 for sentence in story_stimuli['sentence']]
+        stimuli_story_sentence_starts = np.cumsum(stimuli_story_sentence_starts)
+        assert ' '.join(s for s, i in story_partial_sentences) == compare_ignore(stimuli_story)
+        stimulus_index = 0
+        Stimulus = namedtuple('Stimulus', ['story', 'sentence', 'sentence_num', 'sentence_part'])
+        sentence_parts = defaultdict(lambda: 0)
+        for partial_sentence, assembly_index in story_partial_sentences:
+            full_partial_sentence = ''
+            partial_sentence_index = 0
+            while partial_sentence_index < len(partial_sentence) \
+                    or stimulus_index < len(stimuli_story) \
+                    and stimuli_story[stimulus_index] in compare_characters + [' ']:
+                if partial_sentence_index < len(partial_sentence) \
+                        and partial_sentence[partial_sentence_index].lower() \
+                        == stimuli_story[stimulus_index].lower():
+                    full_partial_sentence += stimuli_story[stimulus_index]
+                    stimulus_index += 1
+                    partial_sentence_index += 1
+                elif stimuli_story[stimulus_index] in compare_characters + [' ']:
+                    # this case leads to a potential issue: Beginning quotations ' are always appended to
+                    # the current instead of the next sentence. For now, I'm hoping this won't lead to issues.
+                    full_partial_sentence += stimuli_story[stimulus_index]
+                    stimulus_index += 1
+                elif stimuli_story[stimulus_index] == '-':
+                    full_partial_sentence += '-'
+                    stimulus_index += 1
+                    if partial_sentence[partial_sentence_index] == ' ':
+                        partial_sentence_index += 1
+                else:
+                    raise NotImplementedError()
+            sentence_num = next(index for index, start in enumerate(stimuli_story_sentence_starts)
+                                if start >= stimulus_index) - 1
+            sentence_part = sentence_parts[sentence_num]
+            sentence_parts[sentence_num] += 1
+            row = Stimulus(sentence=full_partial_sentence, story=story,
+                           sentence_num=sentence_num, sentence_part=sentence_part)
+            aligned_stimulus_set.append(row)
+            assembly_stimset[assembly_index] = stimulus_set_index
+            stimulus_set_index += 1
         # check
-        aligned_story = " ".join(row.sentence for row in aligned_stimulus_set if row.story == story)
-        stimulus_set_story = " ".join(row.sentence for row in story_stimuli.itertuples())
-        assert aligned_story == compare_ignore(stimulus_set_story)
+        aligned_story = "".join(row.sentence for row in aligned_stimulus_set if row.story == story)
+        assert aligned_story == stimuli_story
     # build StimulusSet
     aligned_stimulus_set = StimulusSet(aligned_stimulus_set)
     aligned_stimulus_set['stimulus_id'] = [".".join([str(value) for value in values]) for values in zip(*[
@@ -416,8 +409,8 @@ def _align_stimuli_recordings(stimulus_set, assembly):
     aligned_stimulus_set.name = f"{stimulus_set.name}-aligned"
 
     # align assembly
-    alignment = [stimset_idx for assembly_idx, stimset_idx in (
-        sorted(assembly_stimset.items(), key=operator.itemgetter(0)))]
+    alignment = [stimset_idx for assembly_idx, stimset_idx in
+                 sorted(assembly_stimset.items(), key=operator.itemgetter(0))]
     assembly_coords = {**{coord: (dims, values) for coord, dims, values in walk_coords(assembly)},
                        **{'stimulus_id': ('presentation', aligned_stimulus_set['stimulus_id'].values[alignment]),
                           'meta_sentence': ('presentation', assembly['stimulus_sentence'].values),
