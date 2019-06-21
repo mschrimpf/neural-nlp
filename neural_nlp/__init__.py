@@ -30,6 +30,7 @@ def _run(model, layers):
 
     _logger.info('Running benchmark')
     benchmark = NaturalisticStoriesBenchmark()
+    print(benchmark.ceiling)
     scores = benchmark(candidate)
     return scores
 
@@ -58,36 +59,32 @@ class NaturalisticStoriesBenchmark:
     @property
     @store()
     def ceiling(self):
-        cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='story', splits=1)
-        correction = SpearmanBrownCorrection()
+        cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='story', splits=2)
 
         def ceiling_apply(train_source, train_target, test_source, test_target):
             self._regression.fit(train_source, train_target)
             prediction = self._regression.predict(test_source)
             score = self._correlation(prediction, test_target)
-            score = correction(score, n=2)
             return score
 
-        subjects = list(set(self._target_assembly['subject_UID'].values))
-        rng = RandomState(0)
+        subjects = list(sorted(set(self._target_assembly['subject_UID'].values)))
         split_scores = []
-        for subject_split in tqdm(range(10), desc='subject split'):
-            rng.shuffle(subjects)
-            half1, half2 = subjects[:len(subjects) // 2], subjects[len(subjects) // 2:]
-            indexer1 = DataArray(np.zeros(len(half1)), coords={'subject_UID': half1}, dims=['subject_UID']) \
-                .stack(neuroid=['subject_UID'])
-            indexer2 = DataArray(np.zeros(len(half2)), coords={'subject_UID': half2}, dims=['subject_UID']) \
-                .stack(neuroid=['subject_UID'])
-            half1 = subset(self._target_assembly, indexer1, dims_must_match=False)
-            half2 = subset(self._target_assembly, indexer2, dims_must_match=False)
-            split_score = cross_validation(half1, half2, apply=ceiling_apply, aggregate=self._metric.aggregate)
-            split_score = split_score.expand_dims('subject_split')
-            split_score['subject_split'] = [subject_split]
-            split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY].squeeze('split')
+        for heldout_subject in tqdm(subjects, desc='subject holdout'):
+            subject_pool = list(sorted(set(subjects) - {heldout_subject}))
+            indexer_pool = DataArray(np.zeros(len(subject_pool)), coords={'subject_UID': subject_pool},
+                                     dims=['subject_UID']).stack(neuroid=['subject_UID'])
+            heldout_indexer = DataArray(np.zeros(1), coords={'subject_UID': [heldout_subject]},
+                                        dims=['subject_UID']).stack(neuroid=['subject_UID'])
+            subject_pool = subset(self._target_assembly, indexer_pool, dims_must_match=False)
+            heldout = subset(self._target_assembly, heldout_indexer, dims_must_match=False)
+            split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
+            split_score = split_score.expand_dims('heldout_subject')
+            split_score['heldout_subject'] = [heldout_subject]
+            split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
             split_scores.append(split_score)
         consistency = Score.merge(*split_scores)
-        error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'subject_split')
-        consistency = apply_aggregate(lambda scores: scores.mean('subject_split'), consistency)
+        error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
+        consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
         consistency.loc[{'aggregation': 'error'}] = error
         return consistency
 
