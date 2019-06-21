@@ -38,14 +38,14 @@ class NaturalisticStoriesBenchmark:
     def __init__(self):
         _logger.info('Loading neural data')
         neural_data = load_voxels()
-        # leave-out ELvis story
+        # leave-out Elvis story
         neural_data = neural_data[{'presentation': [story != 'Elvis' for story in neural_data['story'].values]}]
         neural_data.attrs['stimulus_set'] = neural_data.attrs['stimulus_set'][
             [row.story != 'Elvis' for row in neural_data.attrs['stimulus_set'].itertuples()]]
         # note that even though all subjects in this dataset now have seen all stories,
         # there could still be NaN neural data at this point, e.g. from non-collected MD
         neural_data = neural_data.sel(region='language')  # for now
-        neural_data = self._filter_nan_neuroids(neural_data)
+        assert not np.isnan(neural_data).any()
         self._target_assembly = neural_data
 
         self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
@@ -116,9 +116,4 @@ class NaturalisticStoriesBenchmark:
         assert not np.isnan(subject_assembly).any()
         return self._metric(source_assembly, subject_assembly)
 
-    def _filter_nan_neuroids(self, assembly):
-        neuroid_nan = np.isnan(assembly).any('presentation')
-        nonnan_neuroids, = np.where(~neuroid_nan.values)
-        assembly = assembly[{'neuroid': nonnan_neuroids}]
-        assert not np.isnan(assembly).any()
-        return assembly
+

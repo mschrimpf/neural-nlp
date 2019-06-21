@@ -176,13 +176,19 @@ def _iterate_voxel_timepoints(desc='files'):
     assert not nonexistent_files, f"Files {nonexistent_files} do not exist"
     file_subject_meta = [dict(zip(subject_meta, t)) for t in zip(*subject_meta.values())]
     for subject_meta, filepath in tqdm(zip(file_subject_meta, files), total=len(file_subject_meta), desc=desc):
+        if subject_meta['UID'] not in ['088', '085', '098', '061', '090']:
+            continue
         f = scipy.io.loadmat(filepath)
         file_data = f['data']
         regions = list(file_data.dtype.fields)
         for region in regions:
+            if region not in ['language']:
+                continue
             region_data = file_data[region][0, 0][0, 0]
             thresholds = list(region_data.dtype.fields)
             for threshold in thresholds:
+                if threshold not in ['from90to100']:
+                    continue
                 threshold_data = region_data[threshold].squeeze()
                 num_fROIs = threshold_data.shape[0]
                 for fROI_index in range(num_fROIs):
