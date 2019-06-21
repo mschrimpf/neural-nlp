@@ -14,19 +14,22 @@ requirements = [
     "seaborn",
     "jupyter",
     "nltk",
+    "nltk_contrib @ git+https://github.com/nltk/nltk_contrib.git",
     "gensim",
     "theano",
     "pytest",
     "pip:",
     "git+https://github.com/brain-score/brain-score.git@e97478f",
     "git+https://github.com/brain-score/result_caching.git",
+    "netCDF4",
     "pillow",
     "llist",
     "git+https://github.com/mschrimpf/skip-thoughts.git@7d46c14",
     "git+https://github.com/mschrimpf/lm_1b.git@dd4061b",
     "nbsvm",
+    # the following require pytorch>=0.4 which is incompatible with `architecture_sampling` which requires =0.2.0
     "git+https://github.com/williamrainer/OpenNMT-py.git@cdc8f37",
-    # TODO: replace pip torchtext with  pip install git+https://github.com/pytorch/text.gitCollecting git+https://github.com/pytorch/text.git
+    "git+https://github.com/pytorch/text.git",
 ]
 
 test_requirements = [
