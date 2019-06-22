@@ -23,19 +23,28 @@ def run(model, layers=None):
     return _run(model=model, layers=layers)
 
 
-@store_xarray(identifier_ignore=['layers'], combine_fields={'layers': 'layer'})
-def _run(model, layers):
-    def candidate(stimuli):
-        return get_activations(model_identifier=model, layers=layers, stimuli=stimuli)
-
+@store_xarray(identifier_ignore=['layers', 'prerun'], combine_fields={'layers': 'layer'})
+def _run(model, layers, prerun=True):
     _logger.info('Running benchmark')
-    benchmark = NaturalisticStoriesBenchmark()
+    benchmark = VoxelBenchmark()
     print(benchmark.ceiling)
-    scores = benchmark(candidate)
-    return scores
+
+    if prerun:
+        get_activations(model_identifier=model, layers=layers, stimuli=benchmark._target_assembly.stimulus_set)
+
+    layer_scores = []
+    for layer in tqdm(layers, desc='layers'):
+        candidate = lambda stimuli: get_activations(model_identifier=model, layers=[layer], stimuli=stimuli)
+        layer_score = benchmark(candidate)
+        layer_score = layer_score.expand_dims('layer')
+        layer_score['layer'] = [layer]
+        layer_scores.append(layer_score)
+    layer_scores = Score.merge(*layer_scores)
+    layer_scores = layer_scores.sel(layer=layers)  # preserve layer ordering
+    return layer_scores
 
 
-class NaturalisticStoriesBenchmark:
+class VoxelBenchmark:
     def __init__(self):
         _logger.info('Loading neural data')
         neural_data = load_voxels()
@@ -99,18 +108,12 @@ class NaturalisticStoriesBenchmark:
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
         _logger.info('Scoring layers')
-        cross_layer = CartesianProduct(dividers=['layer'])
-        scores = cross_layer(model_activations, apply=self._apply_layer)
-        return scores
 
-    def _apply_layer(self, source_assembly):
         subject_scores = self._cross_subject(self._target_assembly, apply=
-        lambda subject_assembly: self._apply_subject(source_assembly, subject_assembly))
+        lambda subject_assembly: self._apply_subject(model_activations, subject_assembly))
         score = apply_aggregate(lambda scores: scores.median('subject_UID'), subject_scores)
         return score
 
     def _apply_subject(self, source_assembly, subject_assembly):
         assert not np.isnan(subject_assembly).any()
         return self._metric(source_assembly, subject_assembly)
-
-

@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from architecture_sampling.evaluate.onmt import build_model
 from brainscore.utils import LazyLoad
-from neural_nlp import NaturalisticStoriesBenchmark, get_activations
+from neural_nlp import VoxelBenchmark
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 from result_caching import store
 

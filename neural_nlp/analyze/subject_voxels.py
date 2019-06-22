@@ -3,13 +3,13 @@ import os
 import seaborn
 from matplotlib import pyplot
 
-from neural_nlp import NaturalisticStoriesBenchmark
+from neural_nlp import VoxelBenchmark
 
 seaborn.set()
 
 
 def main():
-    benchmark = NaturalisticStoriesBenchmark()
+    benchmark = VoxelBenchmark()
     data = benchmark._target_assembly
     subject_voxels = {}
     for subject in set(data['subject_UID'].values):
