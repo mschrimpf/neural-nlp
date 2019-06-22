@@ -293,7 +293,7 @@ def _merge_voxel_meta(data, meta, bold_shift_seconds):
         story_data = story_data.sortby('timepoint_value')
         timepoints = story_data['timepoint_value'].values.tolist()
         assert is_sorted(timepoints)
-        timepoints = [timepoint + bold_shift_seconds for timepoint in timepoints]
+        timepoints = [timepoint - bold_shift_seconds for timepoint in timepoints]
         sentences = []
         last_timepoint = -np.inf
         for timepoint in timepoints:
