@@ -1,52 +1,13 @@
-import logging
-
 import numpy as np
-
-from neural_nlp.benchmarks import VoxelBenchmark
-from result_caching import store_xarray, store
 from tqdm import tqdm
 from xarray import DataArray
 
-from brainio_base.assemblies import DataAssembly, walk_coords
 from brainscore.metrics import Score
-from brainscore.metrics.rdm import RDM, RDMSimilarity
 from brainscore.metrics.regression import pls_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation
-from brainscore.metrics.transformations import apply_aggregate, subset, standard_error_of_the_mean
-from neural_nlp import models
-from neural_nlp import models
-from neural_nlp.models import get_activations, model_layers
-from neural_nlp.models import get_activations, model_layers
-from neural_nlp.neural_data.fmri import load_rdm_sentences as load_neural_rdms, load_voxels
-from result_caching import store_xarray, store
-
-_logger = logging.getLogger(__name__)
-
-
-def run(model, layers=None):
-    layers = layers or model_layers[model]
-    return _run(model=model, layers=layers)
-
-
-@store_xarray(identifier_ignore=['layers', 'prerun'], combine_fields={'layers': 'layer'})
-def _run(model, layers, prerun=True):
-    _logger.info('Running benchmark')
-    benchmark = VoxelBenchmark()
-    print(benchmark.ceiling)
-
-    if prerun:
-        get_activations(model_identifier=model, layers=layers, stimuli=benchmark._target_assembly.stimulus_set)
-
-    layer_scores = []
-    for layer in tqdm(layers, desc='layers'):
-        candidate = lambda stimuli: get_activations(model_identifier=model, layers=[layer], stimuli=stimuli)
-        layer_score = benchmark(candidate)
-        layer_score = layer_score.expand_dims('layer')
-        layer_score['layer'] = [layer]
-        layer_scores.append(layer_score)
-    layer_scores = Score.merge(*layer_scores)
-    layer_scores = layer_scores.sel(layer=layers)  # preserve layer ordering
-    return layer_scores
+from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
+    apply_aggregate
+from neural_nlp import _logger, load_voxels
+from result_caching import store
 
 
 class VoxelBenchmark:
