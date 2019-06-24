@@ -1,5 +1,6 @@
 import logging
 import sys
+from collections import OrderedDict
 
 import argparse
 from brainio_base.assemblies import merge_data_arrays
@@ -18,8 +19,8 @@ class SubsamplingHook:
 
     def __call__(self, activations):
         self._ensure_initialized(activations)
-        activations = type(activations)((layer, layer_activations[:, self._sampling_indices[layer]])
-                                        for layer, layer_activations in activations.items())
+        activations = OrderedDict((layer, layer_activations[:, self._sampling_indices[layer]])
+                                  for layer, layer_activations in activations.items())
         return activations
 
     @classmethod
