@@ -20,18 +20,21 @@ benchmarks = {
 
 
 @store(identifier_ignore=['layers', 'prerun'])
-def _run(benchmark, model, layers, prerun=True):
+def _run(benchmark, model, layers, subsample=None, prerun=True):
     _logger.info('Running benchmark')
     benchmark = benchmarks[benchmark]()
     if hasattr(benchmark, 'ceiling'):  # not yet implemented for all
         print(benchmark.ceiling)
 
     if prerun:
-        get_activations(model_identifier=model, layers=layers, stimuli=benchmark._target_assembly.stimulus_set)
+        stimulus_set = benchmark._target_assembly.stimulus_set
+        get_activations(model_identifier=model, layers=layers, subsample=subsample,
+                        stimuli=stimulus_set, stimuli_identifier=stimulus_set.name)
 
     layer_scores = []
     for layer in tqdm(layers, desc='layers'):
-        candidate = lambda stimuli: get_activations(model_identifier=model, layers=[layer], stimuli=stimuli)
+        candidate = lambda stimuli: get_activations(
+            model_identifier=model, layers=[layer], subsample=subsample, stimuli=stimuli)
         layer_score = benchmark(candidate)
         layer_score = layer_score.expand_dims('layer')
         layer_score['layer'] = [layer]

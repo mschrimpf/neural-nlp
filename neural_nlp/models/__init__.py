@@ -3,18 +3,52 @@ import sys
 
 import argparse
 from brainio_base.assemblies import merge_data_arrays
+from numpy.random.mtrand import RandomState
 
 from neural_nlp.models.implementations import _model_mappings, load_model, model_layers
 
 _logger = logging.getLogger(__name__)
 
 
-def get_activations(model_identifier, layers, stimuli):
+class SubsamplingHook:
+    def __init__(self, activations_extractor, num_features):
+        self._activations_extractor = activations_extractor
+        self._num_features = num_features
+        self._sampling_indices = None
+
+    def __call__(self, activations):
+        self._ensure_initialized(activations)
+        activations = type(activations)((layer, layer_activations[:, self._sampling_indices[layer]])
+                                        for layer, layer_activations in activations.items())
+        return activations
+
+    @classmethod
+    def hook(cls, activations_extractor, num_features):
+        hook = SubsamplingHook(activations_extractor=activations_extractor, num_features=num_features)
+        handle = activations_extractor.register_activations_hook(hook)
+        hook.handle = handle
+        if hasattr(activations_extractor, 'identifier'):
+            activations_extractor.identifier += f'-subsample_{num_features}'
+        else:
+            activations_extractor._extractor.identifier += f'-subsample_{num_features}'
+        return handle
+
+    def _ensure_initialized(self, activations):
+        if self._sampling_indices:
+            return
+        rng = RandomState(0)
+        self._sampling_indices = {layer: rng.randint(layer_activations.shape[1], size=self._num_features)
+                                  for layer, layer_activations in activations.items()}
+
+
+def get_activations(model_identifier, layers, stimuli, stimuli_identifier=None, subsample=None):
     _logger.debug(f'Loading model {model_identifier}')
     model = load_model(model_identifier)
+    if subsample:
+        SubsamplingHook.hook(model, subsample)
 
     _logger.debug("Retrieving activations")
-    activations = model(stimuli, layers=layers)
+    activations = model(stimuli, layers=layers, stimuli_identifier=stimuli_identifier)
     return activations
 
 
