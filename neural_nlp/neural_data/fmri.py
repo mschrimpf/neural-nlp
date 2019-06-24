@@ -1,9 +1,8 @@
-import glob
 import logging
 import operator
 import os
 import warnings
-from collections import namedtuple, defaultdict, OrderedDict
+from collections import namedtuple, defaultdict
 
 import fire
 import numpy as np
@@ -441,16 +440,16 @@ def load_rdm_sentences(story='Boar', roi_filter='from90to100', bold_shift_second
     coords = {}
     for coord_name, coord_value in timepoint_rdms.coords.items():
         dims = timepoint_rdms.coords[coord_name].dims
-        dims = [dim if not dim.startswith('timepoint') else 'stimulus' for dim in dims]
+        dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in dims]
         coords[coord_name] = dims, coord_value.values
-    coords = {**coords, **{'stimulus_sentence': ('stimulus', meta_data['reducedSentence'].values)}}
-    dims = [dim if not dim.startswith('timepoint') else 'stimulus' for dim in timepoint_rdms.dims]
+    coords = {**coords, **{'stimulus_sentence': ('presentation', meta_data['reducedSentence'].values)}}
+    dims = [dim if not dim.startswith('timepoint') else 'presentation' for dim in timepoint_rdms.dims]
     data = DataAssembly(timepoint_rdms, coords=coords, dims=dims)
     return data
 
 
 def load_sentences_meta(story):
-    filepath = neural_data_dir / 'Stories_old' / 'meta' \
+    filepath = neural_data_dir / 'Stories_RDMs' / 'meta' \
                / f'story{NaturalisticStories.story_item_mapping[story]}_{story}_sentencesByTR.csv'
     _logger.debug("Loading meta {}".format(filepath))
     meta_data = pd.read_csv(filepath)
@@ -460,13 +459,15 @@ def load_sentences_meta(story):
 @cache()
 def load_rdm_timepoints(story='Boar', roi_filter='from90to100'):
     data = []
-    data_paths = glob.glob(neural_data_dir / 'Stories_old' / f'{story}_{roi_filter}*.csv')
+    data_paths = list((neural_data_dir / 'Stories_RDMs').glob(f'{story}_{roi_filter}*.csv'))
     for i, filepath in enumerate(data_paths):
-        _logger.debug("Loading file {} ({}/{})".format(filepath, i, len(data_paths)))
+        _logger.debug(f"Loading file {filepath} ({i}/{len(data_paths)})")
         basename = os.path.basename(filepath)
         attributes = re.match('^(?P<story>.*)_from(?P<roi_low>[0-9]+)to(?P<roi_high>[0-9]+)'
                               '(_(?P<subjects>[0-9]+)Subjects)?\.mat_r(?P<region>[0-9]+).csv', basename)
-        assert attributes is not None, f"file {basename} did not match regex"
+        if attributes is None:
+            warnings.warn(f"file {basename} did not match regex -- ignoring")
+            continue
         # load values (pandas is much faster than np.loadtxt https://stackoverflow.com/a/18260092/2225200)
         region_data = pd.read_csv(filepath, header=None).values
         assert len(region_data.shape) == 2  # (subjects x stimuli) x stimuli
