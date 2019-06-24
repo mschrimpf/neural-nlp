@@ -3,11 +3,12 @@ import logging
 from tqdm import tqdm
 
 from brainscore.metrics import Score
+from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import models
 from neural_nlp.benchmarks import VoxelBenchmark, fROIBenchmark, RDMBenchmark
 from neural_nlp.models import get_activations, model_layers
 from neural_nlp.neural_data.fmri import load_rdm_sentences as load_neural_rdms, load_voxels
-from result_caching import store_xarray
+from result_caching import store
 
 _logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ benchmarks = {
 }
 
 
-@store_xarray(identifier_ignore=['layers', 'prerun'], combine_fields={'layers': 'layer'})
+@store(identifier_ignore=['layers', 'prerun'])
 def _run(benchmark, model, layers, prerun=True):
     _logger.info('Running benchmark')
     benchmark = benchmarks[benchmark]()
@@ -37,4 +38,5 @@ def _run(benchmark, model, layers, prerun=True):
         layer_scores.append(layer_score)
     layer_scores = Score.merge(*layer_scores)
     layer_scores = layer_scores.sel(layer=layers)  # preserve layer ordering
-    return layer_scores
+    score = apply_aggregate(lambda score: score.max('layer'), layer_scores)
+    return score

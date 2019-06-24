@@ -119,6 +119,8 @@ class RDMBenchmark:
             score['story'] = [story]
             scores.append(score)
         score = Score.merge(*scores)
+        score = apply_aggregate(lambda score: score.mean('story'), score)
+        score = apply_aggregate(lambda score: score.mean('region'), score)
         return score
 
 
