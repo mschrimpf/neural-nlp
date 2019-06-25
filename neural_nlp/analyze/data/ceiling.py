@@ -1,11 +1,11 @@
+import itertools
 import numpy as np
 from brainio_base.assemblies import walk_coords
 from tqdm import tqdm
-from xarray import DataArray
 
 from brainscore.metrics import Score
 from brainscore.metrics.regression import pearsonr_correlation
-from brainscore.metrics.transformations import apply_aggregate, subset
+from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp.neural_data.fmri import load_voxels
 from result_caching import store
 
@@ -14,30 +14,30 @@ from result_caching import store
 def fROI_correlation():
     assembly = load_voxels()
 
+    stories = list(sorted(set(assembly['story'].values)))
     subjects = list(sorted(set(assembly['subject_UID'].values)))
     split_scores = []
     correlate = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id', neuroid_coord='fROI_area'))
-    for heldout_subject in tqdm(subjects, desc='subject holdout'):
-        subject_pool = list(sorted(set(subjects) - {heldout_subject}))
-        indexer_pool = DataArray(np.zeros(len(subject_pool)), coords={'subject_UID': subject_pool},
-                                 dims=['subject_UID']).stack(neuroid=['subject_UID'])
-        heldout_indexer = DataArray(np.zeros(1), coords={'subject_UID': [heldout_subject]},
-                                    dims=['subject_UID']).stack(neuroid=['subject_UID'])
-        subject_pool = subset(assembly, indexer_pool, dims_must_match=False)
+    cross_stories_subjects = list(itertools.product(stories, subjects))
+    for story, heldout_subject in tqdm(cross_stories_subjects, desc='cross-{story,subject}'):
+        story_assembly = assembly[{'presentation': [coord_story == story for coord_story in assembly['story'].values]}]
+        subject_pool = story_assembly[{'neuroid': [subject != heldout_subject
+                                                   for subject in story_assembly['subject_UID'].values]}]
         subject_pool = average_subregions(subject_pool)
-        heldout = subset(assembly, heldout_indexer, dims_must_match=False)
+        heldout = story_assembly[{'neuroid': [subject == heldout_subject
+                                              for subject in story_assembly['subject_UID'].values]}]
         heldout = average_subregions(heldout)
         split_score = correlate(subject_pool, heldout)
         split_score = type(split_score)(split_score.values, coords={
             coord: (dims, values) for coord, dims, values in walk_coords(split_score)
             if not coord.startswith('subject_') and coord != 'neuroid_id'}, dims=split_score.dims)
 
-        split_score = split_score.expand_dims('heldout_subject')
-        split_score['heldout_subject'] = [heldout_subject]
+        split_score = split_score.expand_dims('heldout_subject').expand_dims('story')
+        split_score['heldout_subject'], split_score['story'] = [heldout_subject], [story]
         split_scores.append(split_score)
     correlation = Score.merge(*split_scores)
 
-    correlation = apply_aggregate(lambda scores: scores.median('neuroid'), correlation)
+    correlation = apply_aggregate(lambda scores: scores.mean('neuroid').mean('story'), correlation)
     center = correlation.mean('heldout_subject')
     error = correlation.std('heldout_subject')
     score = Score([center, error], coords={**{'aggregation': ['center', 'error']},
