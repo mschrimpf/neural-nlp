@@ -4,9 +4,9 @@ import tempfile
 
 import numpy as np
 import pandas as pd
-from brainscore.utils import LazyLoad
 from numpy.random import RandomState
 
+from brainscore.utils import LazyLoad
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 
@@ -129,6 +129,54 @@ class LM1B:
         return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
+def Transformer_WordAll():
+    """
+    use representations for all the words. Due to different sentence lengths,
+    this will most likely only work with sub-sampling.
+    However, even then we're subsampling at different locations, making this unlikely to yield reliable representations.
+    :return:
+    """
+    transformer = Transformer()
+
+    def combine_word_activations(layer_activations):
+        for layer, activations in layer_activations.items():
+            activations = [a.reshape(a.shape[0], -1) for a in activations]
+            layer_activations[layer] = np.concatenate(activations)
+        return layer_activations
+
+    transformer.register_activations_hook(combine_word_activations)
+    transformer._extractor.identifier += '-wordall'
+    return transformer
+
+
+def Transformer_WordLast():
+    transformer = Transformer()
+
+    def combine_word_activations(layer_activations):
+        for layer, activations in layer_activations.items():
+            activations = [a[0, -1, :] for a in activations]
+            layer_activations[layer] = np.array(activations)
+        return layer_activations
+
+    transformer.register_activations_hook(combine_word_activations)
+    transformer._extractor.identifier += '-wordlast'
+    return transformer
+
+
+def Transformer_WordMean():
+    transformer = Transformer()
+
+    def combine_word_activations(layer_activations):
+        for layer, activations in layer_activations.items():
+            activations = [np.mean(a, axis=1) for a in activations]  # average across words within a sentence
+            layer_activations[layer] = np.concatenate(activations)
+        return layer_activations
+
+    transformer.register_activations_hook(combine_word_activations)
+    transformer._extractor.identifier += '-wordmean'
+    return transformer
+
+
 def Transformer():
     """
     https://arxiv.org/pdf/1706.03762.pdf
@@ -170,14 +218,6 @@ def Transformer():
     model_container = TransformerContainer()
     extractor = TransformerWrapper(identifier='transformer', model=model_container,
                                    reset=lambda: None)  # transformer is feed-forward
-
-    def combine_word_activations(layer_activations):
-        for layer, activations in layer_activations.items():
-            activations = [np.mean(a, axis=1) for a in activations]  # average across words within a sentence
-            layer_activations[layer] = np.concatenate(activations)
-        return layer_activations
-
-    extractor.register_activations_hook(combine_word_activations)
     return extractor
 
 
@@ -315,7 +355,9 @@ _model_mappings = {
     'word2vec': Word2Vec,
     'glove': Glove,
     'rntn': RecursiveNeuralTensorNetwork,
-    'transformer': Transformer,
+    'transformer-wordmean': Transformer_WordMean,
+    'transformer-wordall': Transformer_WordAll,
+    'transformer-wordlast': Transformer_WordLast,
 }
 
 model_layers = {
@@ -324,5 +366,7 @@ model_layers = {
     'lm_1b': LM1B.default_layers(),
     'word2vec': Word2Vec.default_layers(),
     'glove': Glove.default_layers(),
-    'transformer': Transformer.default_layers,
+    'transformer-wordmean': Transformer.default_layers,
+    'transformer-wordall': Transformer.default_layers,
+    'transformer-wordlast': Transformer.default_layers,
 }
