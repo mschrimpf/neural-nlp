@@ -13,30 +13,40 @@ _logger = logging.getLogger(__name__)
 def main(data_dir):
     data_dir = Path(data_dir)
     model_dirs = list(data_dir.iterdir())
-    val_losses = []
-    no_finfiles = 0
+    validation_perplexities = []
+    no_result = 0
     for model_dir in tqdm(model_dirs, desc='models'):
-        fin_file = model_dir / 'FIN'
-        if not fin_file.is_file():
-            no_finfiles += 1
+        log_file = (model_dir / 'log')
+        if not log_file.exists():
+            warnings.warn(f"Log file {log_file} does not exist")
             continue
-        text = fin_file.read_text().split('\n')
-        result = json.loads(text[1])
-        val_losses.append(result['val_loss'])
+        logs = log_file.read_text().split('\n')
+        logs = [json.loads(log) for log in logs if log]
+        val_ppls = [log for log in logs if log['data'] == 'valid']
+        if not val_ppls:
+            no_result += 1
+            continue
+        for val_ppl in val_ppls:
+            epoch = val_ppl['epoch']
+            if not (model_dir / f"checkpoint-epoch{epoch}.pt").exists():
+                continue
+            validation_perplexities.append(val_ppl['ppl'])
 
-    if no_finfiles:
-        warnings.warn(f"Found {no_finfiles} model directories without FIN file")
+    if no_result:
+        warnings.warn(f"Found {no_result} logs without validation perplexity")
 
-    val_losses = np.array(val_losses)
-    val_losses = val_losses[~np.isnan(val_losses)]
+    validation_perplexities = np.array(validation_perplexities)
+    validation_perplexities = validation_perplexities[~np.isnan(validation_perplexities)]
 
     fig, axes = pyplot.subplots(nrows=2, ncols=1)
-    axes[0].hist(val_losses, bins=100, log=True)
+    axes[0].hist(validation_perplexities, bins=100, log=True)
+    axes[0].set_ylabel('validation perplexity')
 
-    val_losses = val_losses[val_losses < 100]
-    axes[1].hist(val_losses, bins=100)
+    validation_perplexities = validation_perplexities[validation_perplexities < 100]
+    axes[1].hist(validation_perplexities, bins=100)
+    axes[1].set_ylabel('validation perplexity')
 
-    pyplot.savefig(Path(__file__).parent / f"val_losses-{data_dir.name}.png")
+    pyplot.savefig(Path(__file__).parent / f"validation_perplexities-{data_dir.name}.png")
 
 
 if __name__ == '__main__':
