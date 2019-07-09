@@ -7,6 +7,9 @@ from matplotlib import pyplot
 from pathlib import Path
 from tqdm import tqdm
 
+import seaborn
+seaborn.set()
+
 _logger = logging.getLogger(__name__)
 
 
@@ -40,15 +43,17 @@ def main(data_dir):
 
     fig, axes = pyplot.subplots(nrows=2, ncols=1)
     axes[0].hist(validation_perplexities, bins=100, log=True)
-    axes[0].set_ylabel('validation perplexity')
+    axes[0].set_xlabel('validation perplexity')
+    axes[0].set_ylabel('# architectures')
 
     validation_perplexities = validation_perplexities[validation_perplexities < 100]
     axes[1].hist(validation_perplexities, bins=100)
-    axes[1].set_ylabel('validation perplexity')
+    axes[1].set_xlabel('validation perplexity')
+    axes[1].set_ylabel('# architectures')
 
     pyplot.savefig(Path(__file__).parent / f"validation_perplexities-{data_dir.name}.png")
 
 
 if __name__ == '__main__':
-    # main('/braintree/data2/active/users/msch/zoo.bck20190408-multi30k')
+    main('/braintree/data2/active/users/msch/zoo.bck20190408-multi30k')
     main('/braintree/data2/active/users/msch/zoo.wmt17')
