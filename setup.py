@@ -30,6 +30,7 @@ requirements = [
     # the following require pytorch>=0.4 which is incompatible with `architecture_sampling` which requires =0.2.0
     "git+https://github.com/williamrainer/OpenNMT-py.git@cdc8f37",
     "git+https://github.com/pytorch/text.git",
+    "pytorch-pretrained-bert",
 ]
 
 test_requirements = [

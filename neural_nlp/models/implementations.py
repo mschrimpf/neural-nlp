@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,8 @@ class Model(object):
 
 class GaussianRandom:
     _layer_name = 'random'
+    available_layers = [_layer_name]
+    default_layers = available_layers
 
     def __init__(self, num_samples=1000):
         """
@@ -32,10 +35,6 @@ class GaussianRandom:
     def _get_activations(self, sentences, layer_names):
         assert layer_names == [self._layer_name]
         return {self._layer_name: self._rng.standard_normal((len(sentences), self._num_samples))}
-
-    @classmethod
-    def available_layers(cls):
-        return [cls._layer_name]
 
 
 class SkipThoughts:
@@ -61,13 +60,8 @@ class SkipThoughts:
         encoding = self._encoder.encode(sentences)
         return {'encoder': encoding}
 
-    @classmethod
-    def available_layers(cls):
-        return ['encoder']
-
-    @classmethod
-    def default_layers(cls):
-        return cls.available_layers()
+    available_layers = ['encoder']
+    default_layers = available_layers
 
 
 class LM1B:
@@ -124,9 +118,7 @@ class LM1B:
     def available_layers(self, filter_inputs=True):
         return [tensor_name for tensor_name in self._encoder.t if not filter_inputs or not tensor_name.endswith('_in')]
 
-    @classmethod
-    def default_layers(cls):
-        return ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
+    default_layers = ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
 def Transformer_WordAll():
@@ -291,6 +283,69 @@ Note however that the attended input has not yet been added back to the feed for
 """
 
 
+class BERT:
+    # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
+    available_layers = [f'encoder.layer.{i}.output' for i in range(12)]  # output == layer_norm(fc(attn) + attn)
+    default_layers = available_layers
+
+    def __init__(self):
+        from pytorch_pretrained_bert import BertTokenizer, BertModel
+
+        # Load pre-trained model tokenizer (vocabulary) and model
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        model = BertModel.from_pretrained('bert-base-uncased')
+        model.eval()
+
+        model_container = self.ModelContainer(tokenizer, model, self.available_layers)
+        self._extractor = ActivationsExtractorHelper(identifier='bert', get_activations=model_container,
+                                                     reset=lambda: None)
+        self._extractor.insert_attrs(self)
+
+    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
+        return self._extractor(*args, **kwargs)
+
+    class ModelContainer:
+        def __init__(self, tokenizer, model, layer_names):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.layer_names = layer_names
+
+        def __call__(self, sentences, layers):
+            import torch
+            # A [CLS] token is inserted at the beginning of the first sentence
+            # and a [SEP] token at the end of each sentence.
+            if len(sentences) > 0:
+                sentences[0] = '[CLS] ' + sentences[0]
+            sentences = [sentence + ' [SEP]' for sentence in sentences]
+
+            # Tokenized input
+            tokenized_sentences = [self.tokenizer.tokenize(sentence) for sentence in sentences]
+            # Define sentence index associations
+            segments_ids, segment_counter = [], 0
+            for tokenized_sentence in tokenized_sentences:
+                segments_ids += [segment_counter] * len(tokenized_sentence)
+                segment_counter += 1
+
+            # Convert token to vocabulary indices
+            indexed_sentence_tokens = [self.tokenizer.convert_tokens_to_ids(tokenized_text)
+                                       for tokenized_text in tokenized_sentences]
+
+            # Convert inputs to PyTorch tensors
+            tokens_tensor = torch.tensor(indexed_sentence_tokens)
+            segments_tensors = torch.tensor(segments_ids)
+
+            # Predict hidden states features for each layer
+            with torch.no_grad():
+                encoded_layers, _ = self.model(tokens_tensor, segments_tensors)
+            # We have a hidden states for each of the 12 layers in model bert-base-uncased
+            assert len(encoded_layers) == 12
+            encoded_layers = [PytorchWrapper._tensor_to_numpy(layer_encoding) for layer_encoding in encoded_layers]
+            encoded_layers = OrderedDict(zip(self.layer_names, encoded_layers))
+            encoded_layers = OrderedDict([(layer, encoding) for layer, encoding in encoded_layers.items()
+                                          if layer in layers])
+            return encoded_layers
+
+
 class KeyedVectorModel:
     """
     Lookup-table-like models where each word has an embedding.
@@ -325,13 +380,8 @@ class KeyedVectorModel:
                 self._logger.warning("Word {} not present in model".format(word))
         return self._combine_vectors(feature_vectors)
 
-    @classmethod
-    def available_layers(cls):
-        return ['projection']
-
-    @classmethod
-    def default_layers(cls):
-        return cls.available_layers()
+    available_layers = ['projection']
+    default_layers = available_layers
 
 
 class Word2Vec(KeyedVectorModel):
@@ -404,17 +454,19 @@ _model_mappings = {
     'transformer-wordlast': Transformer_WordLast,
     'transformer-subsample_random': Transformer_SubsampleRandom,
     'transformer-pad_zero': Transformer_PadZero,
+    'bert': BERT,
 }
 
 model_layers = {
-    'random-gaussian': GaussianRandom.available_layers(),
-    'skip-thoughts': SkipThoughts.default_layers(),
-    'lm_1b': LM1B.default_layers(),
-    'word2vec': Word2Vec.default_layers(),
-    'glove': Glove.default_layers(),
+    'random-gaussian': GaussianRandom.default_layers,
+    'skip-thoughts': SkipThoughts.default_layers,
+    'lm_1b': LM1B.default_layers,
+    'word2vec': Word2Vec.default_layers,
+    'glove': Glove.default_layers,
     'transformer-wordmean': Transformer.default_layers,
     'transformer-wordall': Transformer.default_layers,
     'transformer-wordlast': Transformer.default_layers,
     'transformer-subsample_random': Transformer.default_layers,
     'transformer-pad_zero': Transformer.default_layers,
+    'bert': BERT.default_layers,
 }
