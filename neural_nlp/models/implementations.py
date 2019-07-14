@@ -177,6 +177,50 @@ def Transformer_WordMean():
     return transformer
 
 
+def Transformer_SubsampleRandom():
+    transformer = Transformer()
+
+    num_components = 1000
+
+    def random_subsample(sentence_activations):
+        for layer, layer_activations in sentence_activations.items():
+            subsampled_layer_activations = []
+            for activations in layer_activations:
+                activations = activations.reshape(activations.shape[0], -1)
+                indices = np.random.randint(activations.shape[1], size=num_components)
+                activations = activations[:, indices]
+                subsampled_layer_activations.append(activations)
+            sentence_activations[layer] = np.array(subsampled_layer_activations)
+        return sentence_activations
+
+    transformer.register_activations_hook(random_subsample)
+    transformer._extractor.identifier += '-subsample_random'
+    return transformer
+
+
+def Transformer_PadZero():
+    transformer = Transformer()
+
+    def pad(sentence_activations):
+        for layer, layer_activations in sentence_activations.items():
+            per_word_features = layer_activations[0].shape[-1]
+            max_num_features = max(a.shape[1] for a in layer_activations)
+            max_num_features = max_num_features * per_word_features
+
+            padded_layer_activations = []
+            for activations in layer_activations:
+                activations = activations.reshape(activations.shape[0], -1)
+                activations = np.pad(activations, pad_width=((0, 0), (0, max_num_features - activations.size)),
+                                     mode='constant', constant_values=0)
+                padded_layer_activations.append(activations)
+            sentence_activations[layer] = np.array(padded_layer_activations)
+        return sentence_activations
+
+    transformer.register_activations_hook(pad)
+    transformer._extractor.identifier += '-pad_zero'
+    return transformer
+
+
 def Transformer():
     """
     https://arxiv.org/pdf/1706.03762.pdf
@@ -358,6 +402,8 @@ _model_mappings = {
     'transformer-wordmean': Transformer_WordMean,
     'transformer-wordall': Transformer_WordAll,
     'transformer-wordlast': Transformer_WordLast,
+    'transformer-subsample_random': Transformer_SubsampleRandom,
+    'transformer-pad_zero': Transformer_PadZero,
 }
 
 model_layers = {
@@ -369,4 +415,6 @@ model_layers = {
     'transformer-wordmean': Transformer.default_layers,
     'transformer-wordall': Transformer.default_layers,
     'transformer-wordlast': Transformer.default_layers,
+    'transformer-subsample_random': Transformer.default_layers,
+    'transformer-pad_zero': Transformer.default_layers,
 }
