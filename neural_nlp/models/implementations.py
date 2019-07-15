@@ -1,9 +1,9 @@
-import itertools
 import logging
 import os
 import tempfile
 from collections import OrderedDict
 
+import itertools
 import numpy as np
 import pandas as pd
 from numpy.random import RandomState
@@ -212,23 +212,33 @@ def Transformer_PadZero():
     return transformer
 
 
-def Transformer():
+class Transformer(PytorchWrapper):
     """
     https://arxiv.org/pdf/1706.03762.pdf
     """
-    weights = os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')
-    from onmt.opts import add_md_help_argument, translate_opts
-    from onmt.translate.translator import build_translator
-    import argparse
-    parser = argparse.ArgumentParser(description='transformer-parser-base')
-    add_md_help_argument(parser)
-    translate_opts(parser, weights)
-    opt = parser.parse_args(['-batch_size', '1'])
-    translator = build_translator(opt, report_score=True)
+
+    def __init__(self):
+        weights = os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')
+        from onmt.opts import add_md_help_argument, translate_opts
+        from onmt.translate.translator import build_translator
+        import argparse
+        parser = argparse.ArgumentParser(description='transformer-parser-base')
+        add_md_help_argument(parser)
+        translate_opts(parser, weights)
+        opt = parser.parse_args(['-batch_size', '1'])
+        translator = build_translator(opt, report_score=True)
+
+        model_container = self.TransformerContainer(translator, opt)
+        super(Transformer, self).__init__(model=model_container, identifier='transformer',
+                                          reset=lambda: None)  # transformer is feed-forward
 
     class TransformerContainer:
+        def __init__(self, translator, opt):
+            self.translator = translator
+            self.opt = opt
+
         def __getattr__(self, name):
-            return getattr(translator.model, name)
+            return getattr(self.translator.model, name)
 
         def __call__(self, sentences):
             with tempfile.NamedTemporaryFile(mode='w+') as file:
@@ -236,50 +246,43 @@ def Transformer():
                 # will lead to one set of activations per sentence (albeit multiple words).
                 file.write('\n'.join(sentences) + '\n')
                 file.flush()
-                encodings = translator.get_encodings(src_path=file.name, tgt_path=opt.tgt,
-                                                     src_dir=opt.src_dir, batch_size=opt.batch_size,
-                                                     attn_debug=opt.attn_debug)
+                encodings = self.translator.get_encodings(src_path=file.name, tgt_path=self.opt.tgt,
+                                                          src_dir=self.opt.src_dir, batch_size=self.opt.batch_size,
+                                                          attn_debug=self.opt.attn_debug)
                 return encodings
 
-    class TransformerWrapper(PytorchWrapper):
-        def register_hook(self, layer, layer_name, target_dict):
-            def hook_function(_layer, _input, output, name=layer_name):
-                numpy_output = PytorchWrapper._tensor_to_numpy(output)
-                target_dict[name].append(numpy_output)
+    def register_hook(self, layer, layer_name, target_dict):
+        def hook_function(_layer, _input, output, name=layer_name):
+            numpy_output = PytorchWrapper._tensor_to_numpy(output)
+            target_dict[name].append(numpy_output)
 
-            hook = layer.register_forward_hook(hook_function)
-            return hook
+        hook = layer.register_forward_hook(hook_function)
+        return hook
 
-    model_container = TransformerContainer()
-    extractor = TransformerWrapper(identifier='transformer', model=model_container,
-                                   reset=lambda: None)  # transformer is feed-forward
-    return extractor
-
-
-Transformer.default_layers = [f'encoder.transformer.{i}.{layer}'
-                              for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
-"""
-For each of the 6 encoder blocks, we're using two layers,
-one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
-
-The encoder is implemented as follows:
-```
-input_norm = self.layer_norm(inputs)
-context, _ = self.self_attn(input_norm, input_norm, input_norm, mask=mask)
-out = self.dropout(context) + inputs
-return self.feed_forward(out)
-```
-`feed_forward` is implemented as follows:
-```
-inter = self.dropout_1(self.relu(self.w_1(self.layer_norm(x))))
-output = self.dropout_2(self.w_2(inter))
-return output + x
-```
-We thus use `feed_forward.layer_norm` as the layer immediately following the Multi-Head Attention
-and `feed_forward.dropout_2` as the last layer of the Feed Forward block.
-Note however that the attended input has not yet been added back to the feed forward output with
-`feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
-"""
+    default_layers = [f'encoder.transformer.{i}.{layer}'
+                      for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
+    """
+    For each of the 6 encoder blocks, we're using two layers,
+    one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
+    
+    The encoder is implemented as follows:
+    ```
+    input_norm = self.layer_norm(inputs)
+    context, _ = self.self_attn(input_norm, input_norm, input_norm, mask=mask)
+    out = self.dropout(context) + inputs
+    return self.feed_forward(out)
+    ```
+    `feed_forward` is implemented as follows:
+    ```
+    inter = self.dropout_1(self.relu(self.w_1(self.layer_norm(x))))
+    output = self.dropout_2(self.w_2(inter))
+    return output + x
+    ```
+    We thus use `feed_forward.layer_norm` as the layer immediately following the Multi-Head Attention
+    and `feed_forward.dropout_2` as the last layer of the Feed Forward block.
+    Note however that the attended input has not yet been added back to the feed forward output with
+    `feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
+    """
 
 
 def BERT_WordMean():
