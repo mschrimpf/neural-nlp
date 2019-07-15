@@ -1,3 +1,4 @@
+import itertools
 import logging
 import os
 import tempfile
@@ -121,6 +122,48 @@ class LM1B:
     default_layers = ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 
 
+def word_last(layer_activations):
+    for layer, activations in layer_activations.items():
+        activations = [a[0, -1, :] for a in activations]
+        layer_activations[layer] = np.array(activations)
+    return layer_activations
+
+
+def word_mean(layer_activations):
+    for layer, activations in layer_activations.items():
+        activations = [np.mean(a, axis=1) for a in activations]  # average across words within a sentence
+        layer_activations[layer] = np.concatenate(activations)
+    return layer_activations
+
+
+def subsample_random(sentence_activations, num_components=1000):
+    for layer, layer_activations in sentence_activations.items():
+        subsampled_layer_activations = []
+        for activations in layer_activations:
+            activations = activations.reshape(activations.shape[0], -1)
+            indices = np.random.randint(activations.shape[1], size=num_components)
+            activations = activations[:, indices]
+            subsampled_layer_activations.append(activations)
+        sentence_activations[layer] = np.concatenate(subsampled_layer_activations)
+    return sentence_activations
+
+
+def pad_zero(sentence_activations):
+    for layer, layer_activations in sentence_activations.items():
+        per_word_features = layer_activations[0].shape[-1]
+        max_num_features = max(a.shape[1] for a in layer_activations)
+        max_num_features = max_num_features * per_word_features
+
+        padded_layer_activations = []
+        for activations in layer_activations:
+            activations = activations.reshape(activations.shape[0], -1)
+            activations = np.pad(activations, pad_width=((0, 0), (0, max_num_features - activations.size)),
+                                 mode='constant', constant_values=0)
+            padded_layer_activations.append(activations)
+        sentence_activations[layer] = np.array(padded_layer_activations)
+    return sentence_activations
+
+
 def Transformer_WordAll():
     """
     use representations for all the words. Due to different sentence lengths,
@@ -143,72 +186,28 @@ def Transformer_WordAll():
 
 def Transformer_WordLast():
     transformer = Transformer()
-
-    def combine_word_activations(layer_activations):
-        for layer, activations in layer_activations.items():
-            activations = [a[0, -1, :] for a in activations]
-            layer_activations[layer] = np.array(activations)
-        return layer_activations
-
-    transformer.register_activations_hook(combine_word_activations)
+    transformer.register_activations_hook(word_last)
     transformer._extractor.identifier += '-wordlast'
     return transformer
 
 
 def Transformer_WordMean():
     transformer = Transformer()
-
-    def combine_word_activations(layer_activations):
-        for layer, activations in layer_activations.items():
-            activations = [np.mean(a, axis=1) for a in activations]  # average across words within a sentence
-            layer_activations[layer] = np.concatenate(activations)
-        return layer_activations
-
-    transformer.register_activations_hook(combine_word_activations)
+    transformer.register_activations_hook(word_mean)
     transformer._extractor.identifier += '-wordmean'
     return transformer
 
 
 def Transformer_SubsampleRandom():
     transformer = Transformer()
-
-    num_components = 1000
-
-    def random_subsample(sentence_activations):
-        for layer, layer_activations in sentence_activations.items():
-            subsampled_layer_activations = []
-            for activations in layer_activations:
-                activations = activations.reshape(activations.shape[0], -1)
-                indices = np.random.randint(activations.shape[1], size=num_components)
-                activations = activations[:, indices]
-                subsampled_layer_activations.append(activations)
-            sentence_activations[layer] = np.array(subsampled_layer_activations)
-        return sentence_activations
-
-    transformer.register_activations_hook(random_subsample)
+    transformer.register_activations_hook(subsample_random)
     transformer._extractor.identifier += '-subsample_random'
     return transformer
 
 
 def Transformer_PadZero():
     transformer = Transformer()
-
-    def pad(sentence_activations):
-        for layer, layer_activations in sentence_activations.items():
-            per_word_features = layer_activations[0].shape[-1]
-            max_num_features = max(a.shape[1] for a in layer_activations)
-            max_num_features = max_num_features * per_word_features
-
-            padded_layer_activations = []
-            for activations in layer_activations:
-                activations = activations.reshape(activations.shape[0], -1)
-                activations = np.pad(activations, pad_width=((0, 0), (0, max_num_features - activations.size)),
-                                     mode='constant', constant_values=0)
-                padded_layer_activations.append(activations)
-            sentence_activations[layer] = np.array(padded_layer_activations)
-        return sentence_activations
-
-    transformer.register_activations_hook(pad)
+    transformer.register_activations_hook(pad_zero)
     transformer._extractor.identifier += '-pad_zero'
     return transformer
 
@@ -283,6 +282,27 @@ Note however that the attended input has not yet been added back to the feed for
 """
 
 
+def BERT_WordMean():
+    model = BERT()
+    model.register_activations_hook(word_mean)
+    model._extractor.identifier += '-wordmean'
+    return model
+
+
+def BERT_PadZero():
+    model = BERT()
+    model.register_activations_hook(pad_zero)
+    model._extractor.identifier += '-pad_zero'
+    return model
+
+
+def BERT_SubsampleRandom():
+    model = BERT()
+    model.register_activations_hook(subsample_random)
+    model._extractor.identifier += '-subsample_random'
+    return model
+
+
 class BERT:
     # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
     available_layers = [f'encoder.layer.{i}.output' for i in range(12)]  # output == layer_norm(fc(attn) + attn)
@@ -325,25 +345,32 @@ class BERT:
             for tokenized_sentence in tokenized_sentences:
                 segments_ids += [segment_counter] * len(tokenized_sentence)
                 segment_counter += 1
+            # chain
+            sentence_lengths = [len(tokenized_sentence) for tokenized_sentence in tokenized_sentences]
+            sentence_indices = [0] + [sum(sentence_lengths[:i]) for i in range(1, len(sentence_lengths), 1)]
+            tokenized_sentences = list(itertools.chain.from_iterable(tokenized_sentences))
 
             # Convert token to vocabulary indices
-            indexed_sentence_tokens = [self.tokenizer.convert_tokens_to_ids(tokenized_text)
-                                       for tokenized_text in tokenized_sentences]
+            indexed_sentence_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_sentences)
 
             # Convert inputs to PyTorch tensors
-            tokens_tensor = torch.tensor(indexed_sentence_tokens)
-            segments_tensors = torch.tensor(segments_ids)
+            tokens_tensor = torch.tensor([indexed_sentence_tokens])
+            segments_tensors = torch.tensor([segments_ids])
 
             # Predict hidden states features for each layer
             with torch.no_grad():
                 encoded_layers, _ = self.model(tokens_tensor, segments_tensors)
+            encoded_layers = [PytorchWrapper._tensor_to_numpy(layer_encoding) for layer_encoding in encoded_layers]
             # We have a hidden states for each of the 12 layers in model bert-base-uncased
             assert len(encoded_layers) == 12
-            encoded_layers = [PytorchWrapper._tensor_to_numpy(layer_encoding) for layer_encoding in encoded_layers]
-            encoded_layers = OrderedDict(zip(self.layer_names, encoded_layers))
-            encoded_layers = OrderedDict([(layer, encoding) for layer, encoding in encoded_layers.items()
-                                          if layer in layers])
-            return encoded_layers
+            # separate into sentences again
+            sentence_encodings = [[layer_encoding[:, start:end, :] for start, end in
+                                   zip(sentence_indices, sentence_indices[1:] + [len(tokenized_sentences)])]
+                                  for layer_encoding in encoded_layers]
+            sentence_encodings = OrderedDict(zip(self.layer_names, sentence_encodings))
+            sentence_encodings = OrderedDict([(layer, encoding) for layer, encoding in sentence_encodings.items()
+                                              if layer in layers])
+            return sentence_encodings
 
 
 class KeyedVectorModel:
@@ -454,7 +481,9 @@ _model_mappings = {
     'transformer-wordlast': Transformer_WordLast,
     'transformer-subsample_random': Transformer_SubsampleRandom,
     'transformer-pad_zero': Transformer_PadZero,
-    'bert': BERT,
+    'bert-wordmean': BERT_WordMean,
+    'bert-subsample_random': BERT_SubsampleRandom,
+    'bert-pad_zero': BERT_PadZero,
 }
 
 model_layers = {
@@ -468,5 +497,7 @@ model_layers = {
     'transformer-wordlast': Transformer.default_layers,
     'transformer-subsample_random': Transformer.default_layers,
     'transformer-pad_zero': Transformer.default_layers,
-    'bert': BERT.default_layers,
+    'bert-wordmean': BERT.default_layers,
+    'bert-subsample_random': BERT.default_layers,
+    'bert-pad_zero': BERT.default_layers,
 }
