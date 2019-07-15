@@ -343,15 +343,12 @@ class BERT:
 
             # Tokenized input
             tokenized_sentences = [self.tokenizer.tokenize(sentence) for sentence in sentences]
-            # Define sentence index associations
-            segments_ids, segment_counter = [], 0
-            for tokenized_sentence in tokenized_sentences:
-                segments_ids += [segment_counter] * len(tokenized_sentence)
-                segment_counter += 1
             # chain
             sentence_lengths = [len(tokenized_sentence) for tokenized_sentence in tokenized_sentences]
             sentence_indices = [0] + [sum(sentence_lengths[:i]) for i in range(1, len(sentence_lengths), 1)]
             tokenized_sentences = list(itertools.chain.from_iterable(tokenized_sentences))
+            # since in the paper, they use B embeddings for the input paragraph of a squad task, we set everything to 1
+            segments_ids = [1] * len(tokenized_sentences)
 
             # Convert token to vocabulary indices
             indexed_sentence_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_sentences)
