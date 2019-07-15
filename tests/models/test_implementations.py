@@ -99,15 +99,3 @@ def _test_model(model_name, sentence='The quick brown fox jumps over the lazy do
     print(encoding.shape)
     assert len(encoding.shape) == 2
     assert encoding.shape[0] == 1
-
-
-class TestContext:
-    @pytest.mark.parametrize("num_tokens, index, max_num_tokens, expected", [
-        # (100, 0, 512, (0, 100)),
-        (1000, 10, 512, (0, 512)),
-        (1000, 500, 512, (244, 756)),
-    ])
-    def test_maximize_context(self, num_tokens, index, max_num_tokens, expected):
-        from neural_nlp.models.implementations import find_maximum_context
-        actual = find_maximum_context(num_words=num_tokens, index=index, max_num_words=max_num_tokens)
-        np.testing.assert_array_equal(actual, expected)
