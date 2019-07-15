@@ -3,10 +3,12 @@ import os
 import tempfile
 from collections import OrderedDict
 
+import copy
 import itertools
 import numpy as np
 import pandas as pd
 from numpy.random import RandomState
+from tqdm import tqdm
 
 from brainscore.utils import LazyLoad
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
@@ -335,37 +337,69 @@ class BERT:
 
         def __call__(self, sentences, layers):
             import torch
+            num_words = [len(sentence.split(' ')) for sentence in sentences]
             # A [CLS] token is inserted at the beginning of the first sentence
             # and a [SEP] token at the end of each sentence.
-            if len(sentences) > 0:
-                sentences[0] = '[CLS] ' + sentences[0]
-            sentences = [sentence + ' [SEP]' for sentence in sentences]
+            text = copy.deepcopy(sentences)
+            additional_tokens = ['[CLS]', '[SEP]']
+            if len(text) > 0:
+                text[0] = '[CLS] ' + text[0]
+                text[-1] = text[-1] + ' [SEP]'
 
             # Tokenized input
-            tokenized_sentences = [self.tokenizer.tokenize(sentence) for sentence in sentences]
+            tokenized_sentences = [self.tokenizer.tokenize(sentence) for sentence in text]
             # chain
             sentence_lengths = [len(tokenized_sentence) for tokenized_sentence in tokenized_sentences]
             sentence_indices = [0] + [sum(sentence_lengths[:i]) for i in range(1, len(sentence_lengths), 1)]
             tokenized_sentences = list(itertools.chain.from_iterable(tokenized_sentences))
-            # since in the paper, they use B embeddings for the input paragraph of a squad task, we set everything to 1
-            segments_ids = [1] * len(tokenized_sentences)
+            tokenized_sentences = np.array(tokenized_sentences)
 
-            # Convert token to vocabulary indices
-            indexed_sentence_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_sentences)
+            # sliding window approach (see https://github.com/google-research/bert/issues/66)
+            # however, since this is a brain model candidate, we don't let it see future words (just like the brain
+            # doesn't receive future word input). Instead, we maximize the past context of each word
+            sentence_index = 0
+            sentences_chain = ' '.join(sentences).split(' ')
+            previous_indices = []
 
-            # Convert inputs to PyTorch tensors
-            tokens_tensor = torch.tensor([indexed_sentence_tokens])
-            segments_tensors = torch.tensor([segments_ids])
+            encoded_layers = [[]] * 12
+            max_num_words = 512
+            for token_index in tqdm(range(len(tokenized_sentences)), desc='BERT token features'):
+                if tokenized_sentences[token_index] in additional_tokens:
+                    continue  # ignore altogether
+                # combine e.g. "'hunts', '##man'" or "'jennie', '##s'"
+                tokens = [word.lstrip('##') for word in tokenized_sentences[previous_indices + [token_index]]]
+                if sentences_chain[sentence_index].lower() != ''.join(tokens).lower():
+                    previous_indices.append(token_index)
+                    continue
+                previous_indices = []
+                sentence_index += 1
 
-            # Predict hidden states features for each layer
-            with torch.no_grad():
-                encoded_layers, _ = self.model(tokens_tensor, segments_tensors)
-            encoded_layers = [PytorchWrapper._tensor_to_numpy(layer_encoding) for layer_encoding in encoded_layers]
-            # We have a hidden states for each of the 12 layers in model bert-base-uncased
-            assert len(encoded_layers) == 12
+                context_start = max(0, token_index - max_num_words + 1)
+                context = tokenized_sentences[context_start:token_index + 1]
+                # Convert token to vocabulary indices
+                indexed_sentence_tokens = self.tokenizer.convert_tokens_to_ids(context)
+                # the paper uses B embeddings for the input paragraph of a squad task, thus we set everything to B (1)
+                segments_ids = [1] * len(indexed_sentence_tokens)
+
+                # Convert inputs to PyTorch tensors
+                tokens_tensor = torch.tensor([indexed_sentence_tokens])
+                segments_tensors = torch.tensor([segments_ids])
+
+                # Predict hidden states features for each layer
+                with torch.no_grad():
+                    context_encoding, _ = self.model(tokens_tensor, segments_tensors)
+                # We have a hidden states for each of the 12 layers in model bert-base-uncased
+                assert len(context_encoding) == 12
+                # take only the encoding of the current word index
+                word_encoding = [encoding[:, -1:, :] for encoding in context_encoding]
+                word_encoding = [PytorchWrapper._tensor_to_numpy(encoding) for encoding in word_encoding]
+                encoded_layers = [previous_words + [word_layer_encoding] for previous_words, word_layer_encoding
+                                  in zip(encoded_layers, word_encoding)]
+            encoded_layers = [np.concatenate(layer_encoding, axis=1) for layer_encoding in encoded_layers]
+            assert all(layer_encoding.shape[1] == sum(num_words) for layer_encoding in encoded_layers)
             # separate into sentences again
             sentence_encodings = [[layer_encoding[:, start:end, :] for start, end in
-                                   zip(sentence_indices, sentence_indices[1:] + [len(tokenized_sentences)])]
+                                   zip(sentence_indices, sentence_indices[1:] + [sum(num_words)])]
                                   for layer_encoding in encoded_layers]
             sentence_encodings = OrderedDict(zip(self.layer_names, sentence_encodings))
             sentence_encodings = OrderedDict([(layer, encoding) for layer, encoding in sentence_encodings.items()
