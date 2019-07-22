@@ -310,15 +310,16 @@ def BERT_SubsampleRandom():
 
 class BERT:
     # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
-    available_layers = [f'encoder.layer.{i}.output' for i in range(12)]  # output == layer_norm(fc(attn) + attn)
+    available_layers = ['embedding'] + [
+        f'encoder.layer.{i}.output' for i in range(12)]  # output == layer_norm(fc(attn) + attn)
     default_layers = available_layers
 
     def __init__(self):
-        from pytorch_pretrained_bert import BertTokenizer, BertModel
+        from pytorch_transformers import BertTokenizer, BertModel
 
         # Load pre-trained model tokenizer (vocabulary) and model
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = BertModel.from_pretrained('bert-base-uncased')
+        model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
         model.eval()
 
         model_container = self.ModelContainer(tokenizer, model, self.available_layers)
@@ -376,20 +377,16 @@ class BERT:
 
                 context_start = max(0, token_index - max_num_words + 1)
                 context = tokenized_sentences[context_start:token_index + 1]
-                # Convert token to vocabulary indices
-                indexed_sentence_tokens = self.tokenizer.convert_tokens_to_ids(context)
-                # the paper uses B embeddings for the input paragraph of a squad task, thus we set everything to B (1)
-                segments_ids = [1] * len(indexed_sentence_tokens)
+                context_ids = self.tokenizer.convert_tokens_to_ids(context)
 
                 # Convert inputs to PyTorch tensors
-                tokens_tensor = torch.tensor([indexed_sentence_tokens])
-                segments_tensors = torch.tensor([segments_ids])
+                tokens_tensor = torch.tensor([context_ids])
 
                 # Predict hidden states features for each layer
                 with torch.no_grad():
-                    context_encoding, _ = self.model(tokens_tensor, segments_tensors)
-                # We have a hidden states for each of the 12 layers in model bert-base-uncased
-                assert len(context_encoding) == 12
+                    _, _, context_encoding = self.model(tokens_tensor)
+                # We have a hidden states for the embedding layer and each of the 12 layers in model bert-base-uncased
+                assert len(context_encoding) == 1 + 12
                 # take only the encoding of the current word index
                 word_encoding = [encoding[:, -1:, :] for encoding in context_encoding]
                 word_encoding = [PytorchWrapper._tensor_to_numpy(encoding) for encoding in word_encoding]
