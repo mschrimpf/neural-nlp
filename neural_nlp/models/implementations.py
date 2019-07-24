@@ -294,6 +294,13 @@ def BERT_WordMean():
     return model
 
 
+def BERT_WordLast():
+    model = BERT()
+    model.register_activations_hook(word_last)
+    model._extractor.identifier += '-wordlast'
+    return model
+
+
 def BERT_PadZero():
     model = BERT()
     model.register_activations_hook(pad_zero)
@@ -338,7 +345,7 @@ class BERT:
 
         def __call__(self, sentences, layers):
             import torch
-            num_words = [len(sentence.split(' ')) for sentence in sentences]
+            num_words = [len(sentence.split()) for sentence in sentences]
             # A [CLS] token is inserted at the beginning of the first sentence
             # and a [SEP] token at the end of each sentence.
             text = copy.deepcopy(sentences)
@@ -350,19 +357,19 @@ class BERT:
             # Tokenized input
             tokenized_sentences = [self.tokenizer.tokenize(sentence) for sentence in text]
             # chain
-            sentence_lengths = [len(tokenized_sentence) for tokenized_sentence in tokenized_sentences]
-            sentence_indices = [0] + [sum(sentence_lengths[:i]) for i in range(1, len(sentence_lengths), 1)]
             tokenized_sentences = list(itertools.chain.from_iterable(tokenized_sentences))
             tokenized_sentences = np.array(tokenized_sentences)
+            # mapping from original text to later undo chain
+            sentence_indices = [0] + [sum(num_words[:i]) for i in range(1, len(num_words), 1)]
 
             # sliding window approach (see https://github.com/google-research/bert/issues/66)
             # however, since this is a brain model candidate, we don't let it see future words (just like the brain
             # doesn't receive future word input). Instead, we maximize the past context of each word
             sentence_index = 0
-            sentences_chain = ' '.join(sentences).split(' ')
+            sentences_chain = ' '.join(sentences).split()
             previous_indices = []
 
-            encoded_layers = [[]] * 12
+            encoded_layers = [[]] * len(BERT.available_layers)
             max_num_words = 512
             for token_index in tqdm(range(len(tokenized_sentences)), desc='BERT token features'):
                 if tokenized_sentences[token_index] in additional_tokens:
@@ -513,6 +520,7 @@ _model_mappings = {
     'transformer-subsample_random': Transformer_SubsampleRandom,
     'transformer-pad_zero': Transformer_PadZero,
     'bert-wordmean': BERT_WordMean,
+    'bert-wordlast': BERT_WordLast,
     'bert-subsample_random': BERT_SubsampleRandom,
     'bert-pad_zero': BERT_PadZero,
 }
@@ -529,6 +537,7 @@ model_layers = {
     'transformer-subsample_random': Transformer.default_layers,
     'transformer-pad_zero': Transformer.default_layers,
     'bert-wordmean': BERT.default_layers,
+    'bert-wordlast': BERT.default_layers,
     'bert-subsample_random': BERT.default_layers,
     'bert-pad_zero': BERT.default_layers,
 }
