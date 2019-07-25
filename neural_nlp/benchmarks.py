@@ -1,16 +1,18 @@
 import logging
+import warnings
 
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords
 from tqdm import tqdm
 from xarray import DataArray
 
+from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity
 from brainscore.metrics.regression import pls_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
     apply_aggregate
-from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences
+from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018
 from neural_nlp.stimuli import load_stimuli
 from result_caching import store
 
@@ -199,3 +201,46 @@ class VoxelPCABenchmark:
 
     def __call__(self, candidate):
         pass
+
+
+class Invert:
+    def __init__(self, metric):
+        self._metric = metric
+
+    def __call__(self, source, target):
+        source, target = target, source
+        return self._metric(source, target)
+
+
+class PereiraDecoding(Benchmark):
+    def __init__(self, bold_shift=None):
+        self._target_assembly = load_Pereira2018()
+        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
+        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+        metric = CrossRegressedCorrelation(
+            regression=self._regression,
+            correlation=self._correlation,
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None))
+        self._metric = Invert(metric)
+        self._cross_subject = CartesianProduct(dividers=['subject'])
+
+    def __call__(self, candidate):
+        model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
+        assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
+
+        _logger.info('Scoring across subjects')
+        subject_scores = self._cross_subject(self._target_assembly, apply=
+        lambda subject_assembly: self._apply_subject(model_activations, subject_assembly))
+        score = apply_aggregate(lambda scores: scores.median('subject'), subject_scores)
+        return score
+
+    def _apply_subject(self, source_assembly, subject_assembly):
+        subject_assembly = subject_assembly.dropna('presentation')  # some subjects have only done one experiment
+        assert len(subject_assembly['presentation']) in [243, 384, 243 + 384]
+        assert not np.isnan(subject_assembly).any()
+        source_assembly = source_assembly[{'presentation': [stimulus_id in subject_assembly['stimulus_id'].values
+                                                            for stimulus_id in source_assembly['stimulus_id'].values]}]
+        return self._metric(source_assembly, subject_assembly)
+
+    def ceiling(self):
+        return None

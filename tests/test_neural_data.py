@@ -1,5 +1,9 @@
+from pytest import approx
+
 from neural_nlp import neural_data
 import numpy as np
+
+from neural_nlp.neural_data.fmri import load_Pereira2018
 
 
 class TestLoadRdmSentences(object):
@@ -47,3 +51,13 @@ class TestLoadRdmTimepoints:
         assert len(data['timepoint']) == num_timepoints
         np.testing.assert_array_equal(data['timepoint'], list(range(num_timepoints)))
         assert len(data['region']) == num_regions
+
+
+def test_Pereira():
+    assembly = load_Pereira2018()
+    assert set(assembly['experiment'].values) == set(assembly['story'].values) == {'243sentences', '384sentences'}
+    assert len(assembly['presentation']) == 243 + 384
+    assert len(set(assembly['subject'].values)) == 9
+    subject_assembly = assembly.sel(subject='P01')
+    assert not np.isnan(subject_assembly).any()
+    assert subject_assembly.values.sum() == approx(101003052.8293553)

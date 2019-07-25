@@ -10,7 +10,8 @@ import pandas as pd
 import re
 import scipy.io
 import xarray as xr
-from brainio_base.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords, array_is_element
+from brainio_base.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords, array_is_element, \
+    NeuroidAssembly
 from nltk_contrib.textgrid import TextGrid
 from pathlib import Path
 from tqdm import tqdm
@@ -20,8 +21,76 @@ from neural_nlp.stimuli import NaturalisticStories, StimulusSet
 from neural_nlp.utils import ordered_set, is_sorted
 from result_caching import cache, store, store_netcdf
 
-neural_data_dir = (Path(os.path.dirname(__file__)) / '..' / '..' / 'ressources' / 'neural_data' / 'fmri').absolute()
+neural_data_dir = (Path(os.path.dirname(__file__)) / '..' / '..' / 'ressources' / 'neural_data' / 'fmri').resolve()
 _logger = logging.getLogger(__name__)
+
+
+@store()
+def load_Pereira2018():
+    data_dir = neural_data_dir / "Pereira2018"
+    experiment2, experiment3 = "243sentences.mat", "384sentences.mat"
+    stimuli = {}  # experiment -> stimuli
+    assemblies = []
+    for subject_directory in tqdm(list(data_dir.iterdir()), desc="subjects"):
+        if not subject_directory.is_dir():
+            continue
+        for experiment_filename in [experiment2, experiment3]:
+            data_file = subject_directory / f"examples_{experiment_filename}"
+            if not data_file.is_file():
+                _logger.debug(f"{subject_directory} does not contain {experiment_filename}")
+                continue
+            data = scipy.io.loadmat(str(data_file))
+
+            # assembly
+            assembly = data['examples']
+            meta = data['meta']
+            assembly = NeuroidAssembly(assembly, coords={
+                'experiment': ('presentation', [os.path.splitext(experiment_filename)[0]] * assembly.shape[0]),
+                'stimulus_num': ('presentation', list(range(assembly.shape[0]))),
+                'passage_index': ('presentation', data['labelsPassageForEachSentence'][:, 0]),
+                'passage_label': ('presentation', [data['keyPassages'][index - 1, 0][0]
+                                                   for index in data['labelsPassageForEachSentence'][:, 0]]),
+                'passage_category': ('presentation', [
+                    data['keyPassageCategory'][0, data['labelsPassageCategory'][index - 1, 0] - 1][0][0]
+                    for index in data['labelsPassageForEachSentence']]),
+
+                'subject': ('neuroid', [subject_directory.name] * assembly.shape[1]),
+                'voxel_num': ('neuroid', list(range(assembly.shape[1]))),
+                'AAL_roi_index': ('neuroid', meta[0][0]['roiMultimaskAAL'][:, 0]),
+            }, dims=['presentation', 'neuroid'])
+            stimulus_id = _build_id(assembly, ['experiment', 'stimulus_num'])
+            assembly['stimulus_id'] = 'presentation', stimulus_id
+            assembly['story'] = 'presentation', assembly['experiment'].values  # set story for compatibility
+            assembly['neuroid_id'] = 'neuroid', _build_id(assembly, ['subject', 'voxel_num'])
+            assemblies.append(assembly)
+
+            # stimuli
+            if experiment_filename not in stimuli:
+                sentences = data['keySentences']
+                sentences = [sentence[0] for sentence in sentences[:, 0]]
+                stimuli[experiment_filename] = {
+                    'sentence': sentences,
+                    'sentence_num': list(range(len(sentences))),
+                    'stimulus_id': stimulus_id,
+                    'experiment': assembly['experiment'].values,
+                    'story': assembly['story'].values,
+                }
+                for copy_coord in ['experiment', 'story', 'passage_index', 'passage_label', 'passage_category']:
+                    stimuli[experiment_filename][copy_coord] = assembly[copy_coord].values
+
+    assembly = merge_data_arrays(assemblies)
+
+    combined_stimuli = {}
+    for key in stimuli[experiment2]:
+        combined_stimuli[key] = np.concatenate((stimuli[experiment2][key], stimuli[experiment3][key]))
+    stimuli = StimulusSet(combined_stimuli)
+    stimuli.name = "Pereira2018"
+    assembly.attrs['stimulus_set'] = stimuli
+    return assembly
+
+
+def _build_id(assembly, coords):
+    return [".".join([f"{value}" for value in values]) for values in zip(*[assembly[coord].values for coord in coords])]
 
 
 def load_voxels():
