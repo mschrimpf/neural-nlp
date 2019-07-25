@@ -6,7 +6,7 @@ from brainscore.metrics import Score
 from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import models
 from neural_nlp.benchmarks import VoxelBenchmark, fROIBenchmark, RDMBenchmark, \
-    PereiraDecoding
+    PereiraDecoding, TransformerWordmeanBenchmark
 from neural_nlp.models import get_activations, model_layers
 from neural_nlp.neural_data.fmri import load_rdm_sentences as load_neural_rdms, load_voxels
 from result_caching import store
@@ -18,6 +18,7 @@ benchmarks = {
     'fROI': fROIBenchmark,
     'rdm': RDMBenchmark,
     'Pereira2018-decoding': PereiraDecoding,
+    'transformer-wordmean': TransformerWordmeanBenchmark,
 }
 
 

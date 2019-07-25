@@ -19,6 +19,30 @@ from result_caching import store
 _logger = logging.getLogger(__name__)
 
 
+class TransformerWordmeanBenchmark:
+    def __init__(self, bold_shift=None):
+        from neural_nlp import get_activations
+        self._target_assemblies = {story: get_activations(
+            model_identifier='transformer-wordmean', layers=[f'encoder.transformer.0.feed_forward.dropout_2'],
+            stimuli=load_stimuli(f'naturalistic-neural-reduced.{story}'))
+            for story in ['Boar', 'KingOfBirds', 'Elvis', 'HighSchool', 'MatchstickSeller']}
+        self._metric = RDMSimilarityCrossValidated()
+
+    def __call__(self, candidate):
+        scores = []
+        for story, story_assembly in self._target_assemblies.items():
+            stimulus_set = load_stimuli(f'naturalistic-neural-reduced.{story}')
+            source_assembly = candidate(stimuli=stimulus_set)
+            story_assembly_rdm = self._metric._rdm(story_assembly)
+            score = self._metric(source_assembly, story_assembly_rdm)
+            score = score.expand_dims('story')
+            score['story'] = [story]
+            scores.append(score)
+        score = Score.merge(*scores)
+        score = apply_aggregate(lambda score: score.mean('story'), score)
+        return score
+
+
 class VoxelBenchmark:
     def __init__(self):
         _logger.info('Loading neural data')
