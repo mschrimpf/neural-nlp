@@ -63,7 +63,7 @@ class PytorchWrapper:
 
     def register_hook(self, layer, layer_name, target_dict):
         def hook_function(_layer, _input, output, name=layer_name):
-            numpy_output = PytorchWrapper._tensor_to_numpy(output)
+            numpy_output = self._tensor_to_numpy(output)
             target_dict[name] = numpy_output
 
         hook = layer.register_forward_hook(hook_function)
