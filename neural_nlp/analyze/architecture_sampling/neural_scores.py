@@ -32,7 +32,7 @@ def _model_perplexity(model_dir):
     logs = [json.loads(log) for log in logs if log]
     val_ppls = [log for log in logs if log['data'] == 'valid']
     if not val_ppls:
-        raise ValueError(f"No validation perplexities found in {log_file}")
+        raise FileNotFoundError(f"No validation perplexities found in {log_file}")
     val_ppl = val_ppls[-1]
     return val_ppl['ppl']
 
@@ -51,18 +51,19 @@ def main(data_dir):
             warnings.warn(f"Ignoring {model_dir} due to {e}")
 
 
-@store(identifier_ignore=['stimuli', 'index_dict'])
-def prepare_stimulus_set(identifier, stimuli, index_dict):
+@store(identifier_ignore=['sentences', 'index_dict'])
+def prepare_stimulus_set(identifier, sentences, index_dict):
     """
     Convert a StimulusSet into input that can be fed to architecture-sampling models.
     Follows the steps in `setup.sh:45-56`.
     """
-    with NamedTemporaryFile(suffix=f'-{stimuli.name}.en') as sentences_file, \
-            NamedTemporaryFile(suffix=f'-{stimuli.name}.tok') as tokenized_file, \
-            NamedTemporaryFile(suffix=f'-{stimuli.name}.low') as lowercase_file:
+    with NamedTemporaryFile(suffix=f'-{identifier}.en') as sentences_file, \
+            NamedTemporaryFile(suffix=f'-{identifier}.tok') as tokenized_file, \
+            NamedTemporaryFile(suffix=f'-{identifier}.low') as lowercase_file:
         # write out
         _logger.debug(f"Writing stimuli to {sentences_file.name}")
-        sentences_file.writelines([(sentence + os.linesep).encode() for sentence in stimuli['sentence'].values])
+        sentences_file.writelines([(sentence + os.linesep).encode() for sentence in sentences])
+        sentences_file.flush()
 
         # tokenize
         _logger.debug(f"Tokenizing to {tokenized_file.name}")
@@ -184,16 +185,21 @@ class ArchitectureWrapper(PytorchWrapper):
         return activations
 
     def __call__(self, stimuli, *args, **kwargs):
-        data_stimuli = prepare_stimulus_set(identifier=stimuli.name, stimuli=stimuli, index_dict=self._index_dict)
-        data_stimuli = onmt.Dataset(srcData=data_stimuli, tgtData=None,
-                                    batchSize=self._batch_size, cuda=utils.cuda_available, volatile=True)
-        # TODO: check nans in data_stimuli
-        # 8 dat2a_stimuli from 627 sentences (8 * 80 batch_size)
-        return super(ArchitectureWrapper, self).__call__(data_stimuli, *args, layers=self._layers,
-                                                         stimuli_identifier=stimuli.name, **kwargs)
+        self._current_stimuli_identifier = stimuli.name
+        result = super(ArchitectureWrapper, self).__call__(stimuli, *args, layers=self._layers, **kwargs)
+        self._current_stimuli_identifier = None
+        return result
 
-    def get_activations(self, *args, **kwargs):
-        activations = super(ArchitectureWrapper, self).get_activations(*args, **kwargs)
+    def get_activations(self, sentences, *args, **kwargs):
+        _logger.debug(f"{len(sentences)} sentences")
+        stimuli_identifier = f"{self._current_stimuli_identifier}-{len(sentences)}"
+        data_sentences = prepare_stimulus_set(identifier=stimuli_identifier, sentences=sentences,
+                                              index_dict=self._index_dict)
+        data_sentences = onmt.Dataset(srcData=data_sentences, tgtData=None,
+                                      batchSize=self._batch_size, cuda=utils.cuda_available, volatile=True)
+        # TODO: check nans in data_sentences
+        # 8 data_sentences from 627 sentences (8 * 80 batch_size)
+        activations = super(ArchitectureWrapper, self).get_activations(data_sentences, *args, **kwargs)
         activations = OrderedDict((layer, np.concatenate(layer_activations))
                                   for layer, layer_activations in activations.items())
         return activations
