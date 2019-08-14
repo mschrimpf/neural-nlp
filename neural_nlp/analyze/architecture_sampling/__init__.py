@@ -3,6 +3,7 @@ import json
 import logging
 
 import torch
+from architecture_sampling import utils
 from numpy.lib.arraysetops import _unpack_tuple
 from pathlib import Path
 
@@ -30,6 +31,9 @@ def load_model(model_dir, return_checkpoint=False, return_params=False):
     _logger.info(f'Loading model from checkpoint at {checkpoint_file}')
     model.load_state_dict(checkpoint['model'])
     generator.load_state_dict(checkpoint['generator'])
+    if utils.cuda_available:
+        model.cuda()
+        generator.cuda()
     model.generator = generator
     output = (model,)
     if return_checkpoint:

@@ -4,6 +4,7 @@ import sys
 import fire
 import logging
 import torch
+from pytest import approx
 
 import architecture_sampling
 from architecture_sampling import utils
@@ -18,9 +19,6 @@ _logger = logging.getLogger(__name__)
 def run(model_dir, data):
     _logger.debug(f"Loading model from {model_dir}")
     model, params = load_model(model_dir, return_params=True)
-    if utils.cuda_available:
-        model.cuda()
-        model.generator.cuda()
     data_path = os.path.join(os.path.dirname(architecture_sampling.__file__), 'evaluate', 'data', data)
     _logger.debug(f"Loading data from {data_path}")
     dataset = torch.load(data_path)
@@ -32,7 +30,7 @@ def run(model_dir, data):
     _logger.debug("Evaluating model")
     loss, accuracy = evaluate_data(model, criterion, valid_data, max_generator_batches=100)
     reported_loss = retrieve_log_value(model_dir, value_key='loss')
-    assert loss == reported_loss, f"reproduced {loss} != previous {reported_loss}"
+    assert loss == approx(reported_loss, abs=0.01), f"reproduced {loss} != previous {reported_loss}"
 
 
 if __name__ == '__main__':
