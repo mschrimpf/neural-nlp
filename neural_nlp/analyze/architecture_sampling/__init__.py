@@ -1,10 +1,10 @@
 import copy
 import json
 import logging
-from pathlib import Path
 
 import torch
 from numpy.lib.arraysetops import _unpack_tuple
+from pathlib import Path
 
 from architecture_sampling.evaluate.onmt import build_model
 
@@ -13,10 +13,10 @@ _logger = logging.getLogger(__name__)
 
 def load_model(model_dir, return_checkpoint=False, return_params=False):
     model_dir = Path(model_dir)
-    fin_file = model_dir / 'FIN'
-    if not fin_file.is_file():
-        raise FileNotFoundError(f"No FIN file found in {model_dir}")
-    text = fin_file.read_text().split('\n')
+    log_file = model_dir / 'log'
+    if not log_file.is_file():
+        raise FileNotFoundError(f"No log file found in {model_dir}")
+    text = log_file.read_text().split('\n')
     params = json.loads(text[0])
     # checkpoint
     checkpoint_files = list(model_dir.glob("checkpoint-epoch*.pt"))
@@ -62,3 +62,24 @@ def _build_stored_model(checkpoint, params):
     params['source_size'], params['target_size'] = checkpoint['dicts']['src'].size(), checkpoint['dicts']['tgt'].size()
     decoder, encoder, generator, model = build_model(**params)
     return decoder, encoder, generator, model
+
+
+def retrieve_log_value(model_dir, value_key='ppl', data_key='valid'):
+    model_dir = Path(model_dir)
+    log_file = model_dir / 'log'
+    if not log_file.exists():
+        raise FileNotFoundError(f"Log file {log_file} does not exist")
+    logs = log_file.read_text().split('\n')
+    logs = [json.loads(log) for log in logs if log]
+    logs = [log for log in logs if log['data'] == data_key]
+    if not logs:
+        raise FileNotFoundError(f"No validation perplexities found in {log_file}")
+    # use the perplexity of the last model checkpoint
+    for log in reversed(logs):
+        epoch = log['epoch']
+        if not (model_dir / f"checkpoint-epoch{epoch}.pt").exists():
+            _logger.warning(f"Ignoring log for epoch {epoch} since no checkpoint was found")
+            continue
+        value = log[value_key]
+        return value
+    raise FileNotFoundError(f"No {data_key} with checkpoints found in {log_file}")

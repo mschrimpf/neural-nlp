@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import sys
@@ -16,24 +15,11 @@ from architecture_sampling import utils
 from architecture_sampling.evaluate import onmt
 from brainscore.utils import LazyLoad
 from neural_nlp import PereiraDecoding
-from neural_nlp.analyze.architecture_sampling import load_model
+from neural_nlp.analyze.architecture_sampling import load_model, retrieve_log_value
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
-
-
-def _model_perplexity(model_dir):
-    log_file = model_dir / 'log'
-    if not log_file.exists():
-        raise FileNotFoundError(f"Log file {log_file} does not exist")
-    logs = log_file.read_text().split('\n')
-    logs = [json.loads(log) for log in logs if log]
-    val_ppls = [log for log in logs if log['data'] == 'valid']
-    if not val_ppls:
-        raise FileNotFoundError(f"No validation perplexities found in {log_file}")
-    val_ppl = val_ppls[-1]
-    return val_ppl['ppl']
 
 
 def main(data_dir):
@@ -41,8 +27,8 @@ def main(data_dir):
     model_dirs = list(data_dir.iterdir())
     for model_dir in tqdm(model_dirs, desc='models'):
         try:
-            perplexity = _model_perplexity(model_dir)
-            if perplexity > 20:
+            perplexity = retrieve_log_value(model_dir)
+            if np.isnan(perplexity) or perplexity > 20:
                 warnings.warn(f"Ignoring {model_dir} due to poor perplexity ({perplexity})")
                 continue
             score = score_model(model_dir)
