@@ -47,7 +47,8 @@ def main(data_dir):
                 warnings.warn(f"Ignoring {model_dir} due to poor perplexity ({perplexity})")
                 continue
             score = score_model(model_dir)
-        except (FileNotFoundError, ValueError) as e:
+            print(f"{model_dir} -> {score}")
+        except FileNotFoundError as e:
             warnings.warn(f"Ignoring {model_dir} due to {e}")
 
 
@@ -122,6 +123,28 @@ def score_model(model_dir):
     checkpoint_file = max(checkpoint_files)
     checkpoint = torch.load(str(checkpoint_file), map_location=lambda storage, location: storage)
 
+    _logger.debug(f"Building model from params in {model_dir}")
+    decoder, encoder, generator, model = _build_stored_model(checkpoint, params)
+
+    # load weights
+    _logger.info(f'Loading model from checkpoint at {checkpoint_file}')
+    model.load_state_dict(checkpoint['model'])
+    generator.load_state_dict(checkpoint['generator'])
+    model.generator = generator
+    layers = [f'encoder.rnn.cells.{cell}' for cell in [0, 1]]
+
+    batch_size = 1
+    activations_model = ArchitectureWrapper(identifier=model_dir, model=MultiSentenceWrapper(model), layers=layers,
+                                            reset=lambda: model.reset(batch_size), batch_size=batch_size,
+                                            index_dict=checkpoint['dicts']['src'])  # use src dict since it's in English
+
+    _logger.info('Running benchmark')
+    benchmark = LazyLoad(PereiraDecoding)
+    score = benchmark(activations_model)
+    return score
+
+
+def _build_stored_model(checkpoint, params):
     if 'encoder_architecture' not in params:
         params['encoder_architecture'] = params['model']
         del params['model']
@@ -141,26 +164,8 @@ def score_model(model_dir):
     # not sure about the following
     del params['embedding_size']
     params['source_size'], params['target_size'] = checkpoint['dicts']['src'].size(), checkpoint['dicts']['tgt'].size()
-
-    _logger.debug(f"Building model from params in {model_dir}")
     decoder, encoder, generator, model = build_model(**params)
-
-    # load weights
-    _logger.info(f'Loading model from checkpoint at {checkpoint_file}')
-    model.load_state_dict(checkpoint['model'])
-    generator.load_state_dict(checkpoint['generator'])
-    model.generator = generator
-    layers = [f'encoder.rnn.cells.{cell}' for cell in [0, 1]]
-
-    batch_size = 1
-    activations_model = ArchitectureWrapper(identifier=model_dir, model=MultiSentenceWrapper(model), layers=layers,
-                                            reset=lambda: model.reset(batch_size), batch_size=batch_size,
-                                            index_dict=checkpoint['dicts']['src'])  # use src dict since it's in English
-
-    _logger.info('Running benchmark')
-    benchmark = LazyLoad(PereiraDecoding)
-    score = benchmark(activations_model)
-    return score
+    return decoder, encoder, generator, model
 
 
 class ArchitectureWrapper(PytorchWrapper):
