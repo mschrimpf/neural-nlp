@@ -12,7 +12,7 @@ from architecture_sampling.evaluate.onmt import build_model
 _logger = logging.getLogger(__name__)
 
 
-def load_model(model_dir, return_checkpoint=False, return_params=False):
+def load_model(model_dir, load_weights=True, return_checkpoint=False, return_params=False):
     model_dir = Path(model_dir)
     log_file = model_dir / 'log'
     if not log_file.is_file():
@@ -27,11 +27,12 @@ def load_model(model_dir, return_checkpoint=False, return_params=False):
     checkpoint = torch.load(str(checkpoint_file), map_location=lambda storage, location: storage)
     _logger.debug(f"Building model from params in {model_dir}")
     decoder, encoder, generator, model = _build_stored_model(checkpoint, params)
-    # load weights
-    _logger.info(f'Loading model from checkpoint at {checkpoint_file}')
-    model.load_state_dict(checkpoint['model'])
-    generator.load_state_dict(checkpoint['generator'])
+    if load_weights:
+        _logger.info(f'Loading model from checkpoint at {checkpoint_file}')
+        model.load_state_dict(checkpoint['model'])
+        generator.load_state_dict(checkpoint['generator'])
     if utils.cuda_available:
+        _logger.info("Moving model to CUDA")
         model.cuda()
         generator.cuda()
     model.generator = generator
