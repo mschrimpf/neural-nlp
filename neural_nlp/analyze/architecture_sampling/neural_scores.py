@@ -41,7 +41,7 @@ def main(data_dir):
 def prepare_stimulus_set(identifier, sentences, index_dict):
     """
     Convert a StimulusSet into input that can be fed to architecture-sampling models.
-    Follows the steps in `setup.sh:45-56`.
+    Follows the steps in `architecture_sampling/setup.sh:45-56`.
     """
     with NamedTemporaryFile(suffix=f'-{identifier}.en') as sentences_file, \
             NamedTemporaryFile(suffix=f'-{identifier}.tok') as tokenized_file, \
@@ -77,7 +77,7 @@ def prepare_stimulus_set(identifier, sentences, index_dict):
         # from architecture_sampling/evaluate/data/onmt/preprocess.py:118
         for line in lowercase_file.readlines():
             line = line.decode()
-            embedding = index_dict.convertToIdx(line, onmt.Constants.UNK_WORD)
+            embedding = index_dict.convertToIdx(line.split(), onmt.Constants.UNK_WORD)
             preprocessed_stimuli.append(embedding)
         return preprocessed_stimuli
 
