@@ -5,6 +5,7 @@ import warnings
 from collections import OrderedDict
 from tempfile import NamedTemporaryFile
 
+import fire
 import numpy as np
 import subprocess
 from pathlib import Path
@@ -22,9 +23,9 @@ from result_caching import store
 _logger = logging.getLogger(__name__)
 
 
-def main(data_dir):
-    data_dir = Path(data_dir)
-    model_dirs = list(data_dir.iterdir())
+def score_all_models(zoo_dir):
+    zoo_dir = Path(zoo_dir)
+    model_dirs = list(zoo_dir.iterdir())
     for model_dir in tqdm(model_dirs, desc='models'):
         try:
             perplexity = retrieve_log_value(model_dir)
@@ -96,17 +97,24 @@ def prepare_stimulus_set(identifier, sentences, index_dict):
 
 @store()
 def score_model(model_dir):
-    model, checkpoint = load_model(model_dir, return_checkpoint=True)
-    layers = [f'encoder.rnn.cells.{cell}' for cell in [0, 1]]
-    batch_size = 1
-    activations_model = ArchitectureWrapper(identifier=model_dir, model=MultiSentenceWrapper(model), layers=layers,
-                                            reset=lambda: model.reset(batch_size), batch_size=batch_size,
-                                            index_dict=checkpoint['dicts']['src'])  # use src dict since it's in English
-
+    activations_model = build_activations_model(model_dir)
     _logger.info('Running benchmark')
     benchmark = LazyLoad(PereiraDecoding)
     score = benchmark(activations_model)
     return score
+
+
+def build_activations_model(model_dir, load_weights=True):
+    if not Path(model_dir).exists():
+        raise FileNotFoundError(f"model dir {model_dir} does not exist")
+    model, checkpoint, params = load_model(model_dir, load_weights=load_weights,
+                                           return_checkpoint=True, return_params=True)
+    layers = [f'encoder.rnn.cells.{cell}' for cell in [0, 1]]
+    batch_size = 1  # params['batch_size']
+    activations_model = ArchitectureWrapper(identifier=model_dir, model=MultiSentenceWrapper(model), layers=layers,
+                                            reset=lambda: model.reset(batch_size), batch_size=batch_size,
+                                            index_dict=checkpoint['dicts']['src'])  # use src dict since it's in English
+    return activations_model
 
 
 class ArchitectureWrapper(PytorchWrapper):
@@ -115,10 +123,12 @@ class ArchitectureWrapper(PytorchWrapper):
         self._index_dict = index_dict
         self._batch_size = batch_size
         self._layers = layers
+        self._current_stimuli_identifier = None
 
     def register_hook(self, layer, layer_name, target_dict):
         def hook_function(_layer, _input, output, name=layer_name):
             numpy_output = self._tensor_to_numpy(output)
+            numpy_output = numpy_output[:_input[0].data.shape[1]]  # remove padding
             target_dict[name].append(numpy_output)
 
         hook = layer.register_forward_hook(hook_function)
@@ -131,19 +141,20 @@ class ArchitectureWrapper(PytorchWrapper):
         return activations
 
     def __call__(self, stimuli, *args, **kwargs):
-        self._current_stimuli_identifier = stimuli.name
+        if hasattr(stimuli, "name"):
+            self._current_stimuli_identifier = stimuli.name
         result = super(ArchitectureWrapper, self).__call__(stimuli, *args, layers=self._layers, **kwargs)
         self._current_stimuli_identifier = None
         return result
 
     def get_activations(self, sentences, *args, **kwargs):
         _logger.debug(f"{len(sentences)} sentences")
-        stimuli_identifier = f"{self._current_stimuli_identifier}-{len(sentences)}"
+        stimuli_identifier = f"{self._current_stimuli_identifier}-{len(sentences)}" \
+            if self._current_stimuli_identifier else None
         data_sentences = prepare_stimulus_set(identifier=stimuli_identifier, sentences=sentences,
                                               index_dict=self._index_dict)
         data_sentences = onmt.Dataset(srcData=data_sentences, tgtData=None,
                                       batchSize=self._batch_size, cuda=utils.cuda_available, volatile=True)
-        # TODO: check nans in data_sentences
         # 8 data_sentences from 627 sentences (8 * 80 batch_size)
         activations = super(ArchitectureWrapper, self).get_activations(data_sentences, *args, **kwargs)
         activations = OrderedDict((layer, np.concatenate(layer_activations))
@@ -174,7 +185,7 @@ class MultiSentenceWrapper:
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-    main('/braintree/data2/active/users/msch/zoo.wmt17/')
+    fire.Fire()
 
 # missing dependencies when running this with architecture-sampling interpreter:
 # boto3 xarray peewee sklearn fire nltk "nltk_contrib @ git+https://github.com/nltk/nltk_contrib.git"
