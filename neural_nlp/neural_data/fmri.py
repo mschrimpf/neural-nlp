@@ -60,7 +60,8 @@ def load_Pereira2018():
             }, dims=['presentation', 'neuroid'])
             stimulus_id = _build_id(assembly, ['experiment', 'stimulus_num'])
             assembly['stimulus_id'] = 'presentation', stimulus_id
-            assembly['story'] = 'presentation', assembly['experiment'].values  # set story for compatibility
+            # set story for compatibility
+            assembly['story'] = 'presentation', _build_id(assembly, ['experiment', 'passage_category'])
             assembly['neuroid_id'] = 'neuroid', _build_id(assembly, ['subject', 'voxel_num'])
             assemblies.append(assembly)
 
@@ -93,8 +94,8 @@ def _build_id(assembly, coords):
     return [".".join([f"{value}" for value in values]) for values in zip(*[assembly[coord].values for coord in coords])]
 
 
-def load_voxels():
-    assembly = load_voxel_data()
+def load_voxels(bold_shift_seconds=4):
+    assembly = load_voxel_data(bold_shift_seconds=bold_shift_seconds)
     assembly = DataAssembly(assembly)
     stimulus_set = NaturalisticStories()()
     stimulus_set, assembly = _align_stimuli_recordings(stimulus_set, assembly)
