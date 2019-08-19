@@ -1,20 +1,22 @@
 import logging
 import warnings
 
+import itertools
 import numpy as np
-from brainio_base.assemblies import DataAssembly, walk_coords
+from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays
 from tqdm import tqdm
 from xarray import DataArray
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity
-from brainscore.metrics.regression import pls_regression, pearsonr_correlation, CrossRegressedCorrelation, \
-    linear_regression
+from brainscore.metrics.regression import pls_regression, linear_regression, pearsonr_correlation, \
+    CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
     apply_aggregate
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018
 from neural_nlp.stimuli import load_stimuli
+from neural_nlp.utils import ordered_set
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
@@ -265,7 +267,8 @@ class _PereiraBenchmark(Benchmark):
         self._cross_subject = CartesianProduct(dividers=['subject'])
 
     def __call__(self, candidate):
-        model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
+        stimulus_set = self._target_assembly.attrs['stimulus_set']
+        model_activations = listen_to_stories(candidate, stimulus_set)
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
         _logger.info('Scoring across subjects')
@@ -284,6 +287,22 @@ class _PereiraBenchmark(Benchmark):
 
     def ceiling(self):
         return None
+
+
+def listen_to_stories(candidate, stimulus_set):
+    activations = []
+    for story in ordered_set(stimulus_set['story'].values):
+        story_stimuli = stimulus_set[stimulus_set['story'] == story]
+        story_stimuli.name = f"{stimulus_set.name}-{story}"
+        story_activations = candidate(stimuli=story_stimuli)
+        activations.append(story_activations)
+    model_activations = merge_data_arrays(activations)
+    # merging does not maintain stimulus order. the following orders again
+    idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
+           itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
+    assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
+    model_activations = model_activations[{'presentation': idx}]
+    return model_activations
 
 
 class PereiraEncoding(_PereiraBenchmark):

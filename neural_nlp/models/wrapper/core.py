@@ -3,14 +3,12 @@
 import logging
 
 import functools
-import itertools
 import numpy as np
-from brainio_base.assemblies import NeuroidAssembly, walk_coords, merge_data_arrays
-from brainscore.utils import fullname
+from brainio_base.assemblies import NeuroidAssembly, walk_coords
 from tqdm import tqdm
 
+from brainscore.utils import fullname
 from neural_nlp.stimuli import StimulusSet
-from neural_nlp.utils import ordered_set
 from result_caching import store_xarray
 
 
@@ -47,20 +45,8 @@ class ActivationsExtractorHelper:
         for hook in self._stimulus_set_hooks.copy().values():  # copy to avoid stale handles
             stimulus_set = hook(stimulus_set)
 
-        story_activations = []
-        for story in ordered_set(stimulus_set['story'].values.tolist()):
-            story_stimuli = stimulus_set[stimulus_set['story'] == story]
-            story_sentences = story_stimuli['sentence'].values
-            single_story_activations = self.from_sentences(sentences=story_sentences, layers=layers,
-                                                           stimuli_identifier=f"{stimuli_identifier}-{story}")
-            single_story_activations['stimulus_id'] = 'presentation', story_stimuli['stimulus_id'].values
-            story_activations.append(single_story_activations)
-        activations = merge_data_arrays(story_activations)
-        # merging does not maintain stimulus order. the following orders again
-        idx = [activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
-               itertools.chain.from_iterable(s['stimulus_id'].values for s in story_activations)]
-        assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
-        activations = activations[{'presentation': idx}]
+        activations = self.from_sentences(sentences=stimulus_set['sentence'].values, layers=layers,
+                                          stimuli_identifier=stimuli_identifier)
         activations = attach_stimulus_set_meta(activations, stimulus_set)
         return activations
 
