@@ -1,3 +1,4 @@
+import itertools
 import logging
 import os
 import sys
@@ -78,7 +79,7 @@ def prepare_stimulus_set(identifier, sentences, index_dict):
         # from architecture_sampling/evaluate/data/onmt/preprocess.py:118
         for line in lowercase_file.readlines():
             line = line.decode()
-            embedding = index_dict.convertToIdx(line.split(), onmt.Constants.UNK_WORD)
+            embedding = index_dict.convertToIdx(line.split(), onmt.Constants.UNK_WORD, warn_unknown=True)
             preprocessed_stimuli.append(embedding)
         return preprocessed_stimuli
 
@@ -149,13 +150,15 @@ class ArchitectureWrapper(PytorchWrapper):
 
     def get_activations(self, sentences, *args, **kwargs):
         _logger.debug(f"{len(sentences)} sentences")
-        stimuli_identifier = f"{self._current_stimuli_identifier}-{len(sentences)}" \
-            if self._current_stimuli_identifier else None
-        data_sentences = prepare_stimulus_set(identifier=stimuli_identifier, sentences=sentences,
-                                              index_dict=self._index_dict)
-        data_sentences = onmt.Dataset(srcData=data_sentences, tgtData=None,
+        preprocessed_sentences = prepare_stimulus_set(identifier=self._current_stimuli_identifier, sentences=sentences,
+                                                      index_dict=self._index_dict)
+        num_unks = sum([encoding == self._index_dict.lookup(onmt.Constants.UNK_WORD)
+                        for encoding in itertools.chain.from_iterable(preprocessed_sentences)])
+        if num_unks:
+            _logger.warning(f"{num_unks} unknowns in vocabulary for {self._current_stimuli_identifier}")
+        data_sentences = onmt.Dataset(srcData=preprocessed_sentences, tgtData=None,
                                       batchSize=self._batch_size, cuda=utils.cuda_available, volatile=True)
-        # 8 data_sentences from 627 sentences (8 * 80 batch_size)
+        # the sentence-length in the preprocessed data is usually longer than sentence.split() due to '.', ',' etc.
         activations = super(ArchitectureWrapper, self).get_activations(data_sentences, *args, **kwargs)
         activations = OrderedDict((layer, np.concatenate(layer_activations))
                                   for layer, layer_activations in activations.items())
@@ -164,6 +167,9 @@ class ArchitectureWrapper(PytorchWrapper):
 
 class MultiSentenceWrapper:
     def __init__(self, model, propagate_hiddens=False):
+        """
+        :param propagate_hiddens: do not propagate hiddens between stories (at least valid for Pereira data)
+        """
         self._model = model
         self._propagate_hiddens = propagate_hiddens
 
@@ -176,6 +182,7 @@ class MultiSentenceWrapper:
             batch = data_sentences[num_batch]
             batch = batch[:-1]  # ignore indices following architecture_sampling/evaluate/onmt/evaluate.py:63-65
             hiddens = self._model(batch, enc_hidden=hiddens if self._propagate_hiddens else None, encoder_only=True)
+            # the hiddens are supposed to be all zero because they are zero-ed for the decoder input (context is kept)
 
     def __getattr__(self, name):
         if name in ['_model']:
