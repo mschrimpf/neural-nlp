@@ -14,9 +14,13 @@ class TestActivations:
         ('transformer-subsample_random', 2 * 6),
         ('transformer-pad_zero', 2 * 6),
         ('transformer-wordmean', 2 * 6),
-        ('bert-subsample_random', 12),
-        ('bert-pad_zero', 12),
-        ('bert-wordmean', 12),
+        ('bert', 13),
+        ('openaigpt', 13),
+        ('gpt2', 13),
+        ('transfoxl', 19),
+        ('xlnet', 13),
+        ('xlm', 7),
+        ('roberta', 13),
     ])
     def test_sentences(self, model, num_layers, num_sentences):
         sentence = 'The quick brown fox jumps over the lazy dog'

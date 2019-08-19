@@ -1,9 +1,9 @@
+import copy
 import logging
 import os
 import tempfile
 from collections import OrderedDict
 
-import copy
 import itertools
 import numpy as np
 import pandas as pd
@@ -287,50 +287,11 @@ class Transformer(PytorchWrapper):
     """
 
 
-def BERT_WordMean():
-    model = BERT()
-    model.register_activations_hook(word_mean)
-    model._extractor.identifier += '-wordmean'
-    return model
-
-
-def BERT_WordLast():
-    model = BERT()
-    model.register_activations_hook(word_last)
-    model._extractor.identifier += '-wordlast'
-    return model
-
-
-def BERT_PadZero():
-    model = BERT()
-    model.register_activations_hook(pad_zero)
-    model._extractor.identifier += '-pad_zero'
-    return model
-
-
-def BERT_SubsampleRandom():
-    model = BERT()
-    model.register_activations_hook(subsample_random)
-    model._extractor.identifier += '-subsample_random'
-    return model
-
-
-class BERT:
-    # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
-    available_layers = ['embedding'] + [
-        f'encoder.layer.{i}.output' for i in range(12)]  # output == layer_norm(fc(attn) + attn)
-    default_layers = available_layers
-
-    def __init__(self):
-        from pytorch_transformers import BertTokenizer, BertModel
-
-        # Load pre-trained model tokenizer (vocabulary) and model
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
-        model.eval()
-
-        model_container = self.ModelContainer(tokenizer, model, self.available_layers)
-        self._extractor = ActivationsExtractorHelper(identifier='bert', get_activations=model_container,
+class _PytorchTransformerWrapper:
+    def __init__(self, identifier, tokenizer, model, layers, tokenizer_special_tokens=()):
+        self.default_layers = self.available_layers = layers
+        model_container = self.ModelContainer(tokenizer, model, layers, tokenizer_special_tokens)
+        self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=model_container,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
 
@@ -338,21 +299,25 @@ class BERT:
         return self._extractor(*args, **kwargs)
 
     class ModelContainer:
-        def __init__(self, tokenizer, model, layer_names):
+        def __init__(self, tokenizer, model, layer_names, tokenizer_special_tokens=()):
             self.tokenizer = tokenizer
             self.model = model
             self.layer_names = layer_names
+            self.tokenizer_special_tokens = tokenizer_special_tokens
 
         def __call__(self, sentences, layers):
             import torch
+            self.model.eval()
             num_words = [len(sentence.split()) for sentence in sentences]
-            # A [CLS] token is inserted at the beginning of the first sentence
-            # and a [SEP] token at the end of each sentence.
             text = copy.deepcopy(sentences)
-            additional_tokens = ['[CLS]', '[SEP]']
-            if len(text) > 0:
-                text[0] = '[CLS] ' + text[0]
-                text[-1] = text[-1] + ' [SEP]'
+            additional_tokens = []
+            # If the tokenizer has a `cls_token`, we insert a `cls_token` at the beginning of the text
+            # and a [SEP] token at the end of the text. For models without a `cls_token`, no tokens are inserted.
+            if self.tokenizer.cls_token is not None:
+                additional_tokens += [self.tokenizer.cls_token, self.tokenizer.sep_token]
+                if len(text) > 0:
+                    text[0] = self.tokenizer.cls_token + text[0]
+                    text[-1] = text[-1] + self.tokenizer.sep_token
 
             # Tokenized input
             tokenized_sentences = [self.tokenizer.tokenize(sentence) for sentence in text]
@@ -369,14 +334,17 @@ class BERT:
             sentences_chain = ' '.join(sentences).split()
             previous_indices = []
 
-            encoded_layers = [[]] * len(BERT.available_layers)
+            encoded_layers = [[]] * len(self.layer_names)
             max_num_words = 512
-            for token_index in tqdm(range(len(tokenized_sentences)), desc='BERT token features'):
+            for token_index in tqdm(range(len(tokenized_sentences)), desc='token features'):
                 if tokenized_sentences[token_index] in additional_tokens:
                     continue  # ignore altogether
                 # combine e.g. "'hunts', '##man'" or "'jennie', '##s'"
                 tokens = [word.lstrip('##') for word in tokenized_sentences[previous_indices + [token_index]]]
-                if sentences_chain[sentence_index].lower() != ''.join(tokens).lower():
+                token_word = ''.join(tokens).lower()
+                for special_token in self.tokenizer_special_tokens:
+                    token_word = token_word.replace(special_token, '')
+                if sentences_chain[sentence_index].lower() != token_word:
                     previous_indices.append(token_index)
                     continue
                 previous_indices = []
@@ -391,9 +359,9 @@ class BERT:
 
                 # Predict hidden states features for each layer
                 with torch.no_grad():
-                    _, _, context_encoding = self.model(tokens_tensor)
-                # We have a hidden states for the embedding layer and each of the 12 layers in model bert-base-uncased
-                assert len(context_encoding) == 1 + 12
+                    context_encoding, = self.model(tokens_tensor)[-1:]
+                # We have a hidden state for all the layers
+                assert len(context_encoding) == len(self.layer_names)
                 # take only the encoding of the current word index
                 word_encoding = [encoding[:, -1:, :] for encoding in context_encoding]
                 word_encoding = [PytorchWrapper._tensor_to_numpy(encoding) for encoding in word_encoding]
@@ -504,10 +472,10 @@ def _mean_vector(feature_vectors):
 
 
 def load_model(model_name):
-    return LazyLoad(_model_mappings[model_name])
+    return LazyLoad(model_pool[model_name])
 
 
-_model_mappings = {
+model_pool = {
     'random-gaussian': GaussianRandom,
     'skip-thoughts': SkipThoughts,
     'lm_1b': LM1B,
@@ -519,12 +487,7 @@ _model_mappings = {
     'transformer-wordlast': Transformer_WordLast,
     'transformer-subsample_random': Transformer_SubsampleRandom,
     'transformer-pad_zero': Transformer_PadZero,
-    'bert-wordmean': BERT_WordMean,
-    'bert-wordlast': BERT_WordLast,
-    'bert-subsample_random': BERT_SubsampleRandom,
-    'bert-pad_zero': BERT_PadZero,
 }
-
 model_layers = {
     'random-gaussian': GaussianRandom.default_layers,
     'skip-thoughts': SkipThoughts.default_layers,
@@ -536,8 +499,67 @@ model_layers = {
     'transformer-wordlast': Transformer.default_layers,
     'transformer-subsample_random': Transformer.default_layers,
     'transformer-pad_zero': Transformer.default_layers,
-    'bert-wordmean': BERT.default_layers,
-    'bert-wordlast': BERT.default_layers,
-    'bert-subsample_random': BERT.default_layers,
-    'bert-pad_zero': BERT.default_layers,
 }
+
+from pytorch_transformers import \
+    BertModel, BertTokenizer, \
+    OpenAIGPTModel, OpenAIGPTTokenizer, \
+    GPT2Model, GPT2Tokenizer, \
+    TransfoXLModel, TransfoXLTokenizer, \
+    XLNetModel, XLNetTokenizer, \
+    XLMModel, XLMTokenizer, \
+    RobertaModel, RobertaTokenizer
+from pytorch_transformers.tokenization_xlnet import SPIECE_UNDERLINE
+
+for identifier, model_ctr, tokenizer_ctr, tokenizer_special_tokens, pretrained_weights, layers in [
+    ('bert',
+     BertModel, BertTokenizer, (), 'bert-base-uncased',
+     # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
+     ('embedding',) + tuple(f'encoder.layer.{i}.output' for i in range(12))  # output == layer_norm(fc(attn) + attn)
+     ),
+    ('openaigpt',
+     OpenAIGPTModel, OpenAIGPTTokenizer, ('</w>',), 'openai-gpt',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_openai.py#L517
+     ('drop',) + tuple(f'encoder.h.{i}.ln_2' for i in range(12))
+     ),
+    ('gpt2',
+     GPT2Model, GPT2Tokenizer, ('ġ',), 'gpt2',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
+     ('drop',) + tuple(f'encoder.h.{i}' for i in range(12))
+     ),
+    ('transfoxl',
+     TransfoXLModel, TransfoXLTokenizer, (), 'transfo-xl-wt103',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_transfo_xl.py#L1161
+     ('drop',) + tuple(f'encoder.layers.{i}' for i in range(18))
+     ),
+    ('xlnet',
+     XLNetModel, XLNetTokenizer, (SPIECE_UNDERLINE,), 'xlnet-base-cased',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlnet.py#L962
+     ('drop',) + tuple(f'encoder.layer.{i}' for i in range(12))
+     ),
+    ('xlm',
+     XLMModel, XLMTokenizer, ('</w>',), 'xlm-mlm-enfr-1024',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlm.py#L638
+     ('dropout',) + tuple(f'encoder.layer_norm2.{i}' for i in range(6))
+     ),
+    ('roberta',
+     RobertaModel, RobertaTokenizer, ('ġ',), 'roberta-base',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_roberta.py#L174
+     ('embedding',) + tuple(f'encoder.layer.{i}' for i in range(12))
+     ),
+]:
+    def ModelInstantiation(identifier=identifier, model_ctr=model_ctr,
+                           tokenizer_ctr=tokenizer_ctr, tokenizer_special_tokens=tokenizer_special_tokens,
+                           pretrained_weights=pretrained_weights, layers=layers):
+        # Load pre-trained model tokenizer (vocabulary) and model
+        tokenizer = tokenizer_ctr.from_pretrained(pretrained_weights)
+        model = model_ctr.from_pretrained(pretrained_weights, output_hidden_states=True)
+        transformer = _PytorchTransformerWrapper(identifier=identifier,
+                                                 tokenizer=tokenizer, tokenizer_special_tokens=tokenizer_special_tokens,
+                                                 model=model, layers=layers)
+        transformer._extractor.register_activations_hook(word_last)
+        return transformer
+
+
+    model_pool[identifier] = ModelInstantiation
+    model_layers[identifier] = layers

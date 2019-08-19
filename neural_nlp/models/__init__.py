@@ -6,7 +6,7 @@ import argparse
 from brainio_base.assemblies import merge_data_arrays
 from numpy.random.mtrand import RandomState
 
-from neural_nlp.models.implementations import _model_mappings, load_model, model_layers
+from neural_nlp.models.implementations import model_pool, load_model, model_layers
 
 _logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ def get_activations_for_sentence(model_name, layers, sentences):
 
 def main():
     parser = argparse.ArgumentParser('model activations')
-    parser.add_argument('--model', type=str, required=True, choices=list(_model_mappings.keys()))
+    parser.add_argument('--model', type=str, required=True, choices=list(model_pool.keys()))
     parser.add_argument('--layers', type=str, nargs='+', default='default')
     parser.add_argument('--sentence', type=str, required=True)
     parser.add_argument('--log_level', type=str, default='INFO')
