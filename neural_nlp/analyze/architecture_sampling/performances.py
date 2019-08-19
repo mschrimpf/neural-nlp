@@ -43,6 +43,17 @@ def plot_histogram(data_dir):
     pyplot.savefig(Path(__file__).parent / f"validation_perplexities-{Path(data_dir).name}.png")
 
 
+def best_models(data_dir, top=10):
+    data = collect(data_dir)
+    data = data[data['data'] == 'valid']
+    data = data.loc[data.groupby('model_dir')['ppl'].idxmin()]
+    data = data.sort_values('ppl')
+    for i, (row_index, row) in enumerate(data.iterrows()):
+        if i > top:
+            break
+        print(f"{row['model_dir']} --> {row['ppl']}")
+
+
 @store()
 def collect(data_dir):
     data_dir = Path(data_dir)
