@@ -313,7 +313,8 @@ class _PytorchTransformerWrapper:
             additional_tokens = []
             # If the tokenizer has a `cls_token`, we insert a `cls_token` at the beginning of the text
             # and a [SEP] token at the end of the text. For models without a `cls_token`, no tokens are inserted.
-            if self.tokenizer.cls_token is not None:
+            use_special_tokens = self.tokenizer.cls_token is not None
+            if use_special_tokens:
                 additional_tokens += [self.tokenizer.cls_token, self.tokenizer.sep_token]
                 if len(text) > 0:
                     text[0] = self.tokenizer.cls_token + text[0]
@@ -335,7 +336,7 @@ class _PytorchTransformerWrapper:
             previous_indices = []
 
             encoded_layers = [[]] * len(self.layer_names)
-            max_num_words = 512
+            max_num_words = 512 if not use_special_tokens else 511
             for token_index in tqdm(range(len(tokenized_sentences)), desc='token features'):
                 if tokenized_sentences[token_index] in additional_tokens:
                     continue  # ignore altogether
@@ -352,6 +353,10 @@ class _PytorchTransformerWrapper:
 
                 context_start = max(0, token_index - max_num_words + 1)
                 context = tokenized_sentences[context_start:token_index + 1]
+                if use_special_tokens and context_start > 0:  # `cls_token` has been discarded
+                    # insert `cls_token` again following
+                    # https://huggingface.co/pytorch-transformers/model_doc/roberta.html#pytorch_transformers.RobertaModel
+                    context = np.insert(context, 0, tokenized_sentences[0])
                 context_ids = self.tokenizer.convert_tokens_to_ids(context)
 
                 # Convert inputs to PyTorch tensors
