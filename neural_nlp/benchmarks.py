@@ -322,3 +322,16 @@ class PereiraDecoding(_PereiraBenchmark):
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None))
         metric = Invert(metric)
         super(PereiraDecoding, self).__init__(metric=metric)
+
+
+benchmark_pool = {
+    'voxel-encoding': StoriesVoxelEncoding,
+    'stories-voxel-encoding-cg': StoriesVoxelEncodingCG,
+    'voxel-decoding': StoriesVoxelDecoding,
+    'fROI': StoriesfROIBenchmark,
+    'rdm': StoriesRDMBenchmark,
+    'Pereira2018-encoding': PereiraEncoding,
+    'Pereira2018-encoding-cg': PereiraEncodingCG,
+    'Pereira2018-decoding': PereiraDecoding,
+    'transformer-wordmean': StoriesTransformerWordmeanBenchmark,
+}
