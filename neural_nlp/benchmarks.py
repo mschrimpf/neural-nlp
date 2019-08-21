@@ -5,6 +5,7 @@ import itertools
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays
 from tqdm import tqdm
+from sklearn.linear_model import Ridge
 from xarray import DataArray
 
 from brainscore.benchmarks import Benchmark
@@ -14,12 +15,20 @@ from brainscore.metrics.regression import pls_regression, linear_regression, pea
     CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
     apply_aggregate
+from brainscore.metrics.xarray_utils import XarrayRegression
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018
-from neural_nlp.stimuli import load_stimuli
+from neural_nlp.stimuli import load_stimuli, StimulusSet
 from neural_nlp.utils import ordered_set
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
+
+
+def cg_regression(xarray_kwargs=None):
+    regression = Ridge()  # solver='sparse_cg')
+    xarray_kwargs = xarray_kwargs or {}
+    regression = XarrayRegression(regression, **xarray_kwargs)
+    return regression
 
 
 class Invert:
@@ -31,7 +40,7 @@ class Invert:
         return self._metric(source, target)
 
 
-class TransformerWordmeanBenchmark:
+class StoriesTransformerWordmeanBenchmark:
     def __init__(self, bold_shift=None):
         from neural_nlp import get_activations
         self._target_assemblies = {story: get_activations(
@@ -55,7 +64,7 @@ class TransformerWordmeanBenchmark:
         return score
 
 
-class _VoxelBenchmark(Benchmark):
+class _StoriesVoxelBenchmark(Benchmark):
     def __init__(self, regression, correlation, metric, bold_shift=4):
         _logger.info('Loading neural data')
         assembly = load_voxels(bold_shift_seconds=bold_shift)
@@ -127,18 +136,29 @@ class _VoxelBenchmark(Benchmark):
         return self._metric(source_assembly, subject_assembly)
 
 
-class VoxelEncoding(_VoxelBenchmark):
+class StoriesVoxelEncoding(_StoriesVoxelBenchmark):
     def __init__(self, bold_shift=4):
         regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
         correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         metric = CrossRegressedCorrelation(
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
-        super(VoxelEncoding, self).__init__(bold_shift=bold_shift,
-                                            regression=regression, correlation=correlation, metric=metric)
+        super(StoriesVoxelEncoding, self).__init__(bold_shift=bold_shift,
+                                                   regression=regression, correlation=correlation, metric=metric)
 
 
-class VoxelDecoding(_VoxelBenchmark):
+class StoriesVoxelEncodingCG(_StoriesVoxelBenchmark):
+    def __init__(self, bold_shift=4):
+        regression = cg_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
+        correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+        metric = CrossRegressedCorrelation(
+            regression=regression, correlation=correlation,
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
+        super(StoriesVoxelEncodingCG, self).__init__(bold_shift=bold_shift,
+                                                     regression=regression, correlation=correlation, metric=metric)
+
+
+class StoriesVoxelDecoding(_StoriesVoxelBenchmark):
     def __init__(self, bold_shift=4):
         regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
         correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
@@ -146,13 +166,13 @@ class VoxelDecoding(_VoxelBenchmark):
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
         metric = Invert(metric)
-        super(VoxelDecoding, self).__init__(bold_shift=bold_shift,
-                                            regression=regression, correlation=correlation, metric=metric)
+        super(StoriesVoxelDecoding, self).__init__(bold_shift=bold_shift,
+                                                   regression=regression, correlation=correlation, metric=metric)
 
 
-class RDMBenchmark:
-    def __init__(self):
-        assemblies = self._load_rdms()
+class StoriesRDMBenchmark:
+    def __init__(self, bold_shift=4):
+        assemblies = self._load_rdms(bold_shift_seconds=bold_shift)
         assemblies = {story: rdm for story, rdm in assemblies.items() if story != 'Elvis'}
         self._target_assemblies = assemblies
         self._metric = RDMSimilarityCrossValidated()
@@ -163,7 +183,10 @@ class RDMBenchmark:
         for story in ['Boar', 'KingOfBirds', 'Elvis', 'HighSchool', 'MatchstickSeller']:
             assembly = load_rdm_sentences(story=story, roi_filter=roi_filter, bold_shift_seconds=bold_shift_seconds)
             assembly = assembly.mean(dim='subject')
-            stimulus_set = load_stimuli(f'naturalistic-neural-reduced.{story}')
+            stimulus_set_identifier = f'naturalistic-neural-reduced.{story}'
+            stimulus_set = load_stimuli(stimulus_set_identifier)
+            stimulus_set = StimulusSet({'sentence': stimulus_set})
+            stimulus_set.name = stimulus_set_identifier
             assembly.attrs['stimulus_set'] = stimulus_set
             assemblies[story] = assembly
         return assemblies
@@ -205,6 +228,12 @@ class RDMSimilarityCrossValidated:
     def __call__(self, model_activations, target_rdm):
         model_activations = align(model_activations, target_rdm, on='stimulus_sentence')
         model_rdm = self._rdm(model_activations)
+        values = model_rdm.values
+        if np.isnan(values.flatten()).any():
+            warnings.warn(f"{np.isnan(values.flatten()).sum()} nan values found in model rdm - setting to 0")
+            values[np.isnan(values)] = 0
+            model_rdm = type(model_rdm)(values, coords={coord: (dims, vals) for coord, dims, vals in
+                                                        walk_coords(model_rdm)}, dims=model_rdm.dims)
         leave_one_out = self.LeaveOneOutWrapper(self._similarity)
         # multi-dimensional coords with repeated dimensions not yet supported in CrossValidation
         drop_coords = [coord for coord, dims, value in walk_coords(target_rdm) if dims == ('stimulus', 'stimulus')]
@@ -222,7 +251,7 @@ def align(source, target, on):
     return aligned
 
 
-class fROIBenchmark:
+class StoriesfROIBenchmark:
     def __init__(self):
         assembly = load_voxels()
         # leave-out Elvis story
@@ -312,6 +341,15 @@ class PereiraEncoding(_PereiraBenchmark):
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
         super(PereiraEncoding, self).__init__(metric=metric)
+
+
+class PereiraEncodingCG(_PereiraBenchmark):
+    def __init__(self, bold_shift=None):
+        metric = CrossRegressedCorrelation(
+            regression=cg_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
+            correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
+        super(PereiraEncodingCG, self).__init__(metric=metric)
 
 
 class PereiraDecoding(_PereiraBenchmark):
