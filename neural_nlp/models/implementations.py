@@ -390,23 +390,26 @@ class KeyedVectorModel:
     To retrieve the sentence activation, we take the mean of the word embeddings.
     """
 
-    def __init__(self, weights_file, binary=False):
+    def __init__(self, identifier, weights_file, binary=False):
         super().__init__()
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
         self._index2word_set = set(self._model.index2word)
+        self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._get_activations,
+                                                     reset=lambda: None)
+        self._extractor.insert_attrs(self)
+        self._extractor.register_activations_hook(word_mean)
         self._logger = logging.getLogger(self.__class__.__name__)
 
-    def _combine_vectors(self, feature_vectors):
-        return _mean_vector(feature_vectors)
+    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
+        return self._extractor(*args, **kwargs)
 
-    def _get_activations(self, sentences, layer_names):
-        np.testing.assert_array_equal(layer_names, ['projection'])
-        encoding = np.array([self._encode_sentence(sentence) for sentence in sentences])
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, ['projection'])
+        encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
+        # expand "batch" dimension for compatibility with transformers (for sentence-word-aggregation)
+        encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
         return {'projection': encoding}
-
-    def __call__(self, sentences):
-        return np.array([self._encode_sentence(sentence) for sentence in sentences])
 
     def _encode_sentence(self, sentence):
         words = sentence.split()
@@ -415,8 +418,8 @@ class KeyedVectorModel:
             if word in self._index2word_set:
                 feature_vectors.append(self._model[word])
             else:
-                self._logger.warning("Word {} not present in model".format(word))
-        return self._combine_vectors(feature_vectors)
+                self._logger.warning(f"Word {word} not present in model")
+        return feature_vectors
 
     available_layers = ['projection']
     default_layers = available_layers
@@ -429,7 +432,7 @@ class Word2Vec(KeyedVectorModel):
 
     def __init__(self, weights_file='GoogleNews-vectors-negative300.bin'):
         weights_file = os.path.join(_ressources_dir, 'word2vec', weights_file)
-        super(Word2Vec, self).__init__(weights_file=weights_file, binary=True)
+        super(Word2Vec, self).__init__(identifier='word2vec', weights_file=weights_file, binary=True)
 
 
 class Glove(KeyedVectorModel):
@@ -443,7 +446,7 @@ class Glove(KeyedVectorModel):
         word2vec_weightsfile = weights_file + '.word2vec'
         if not os.path.isfile(word2vec_weightsfile):
             glove2word2vec(weights_file, word2vec_weightsfile)
-        super(Glove, self).__init__(weights_file=word2vec_weightsfile)
+        super(Glove, self).__init__(identifier='glove', weights_file=word2vec_weightsfile)
 
 
 class RecursiveNeuralTensorNetwork(Model):
@@ -465,15 +468,6 @@ class RecursiveNeuralTensorNetwork(Model):
         assert len(result) == 1
         result = result[[column for column in result if column.startswith('activation')]]
         return result.values
-
-
-def _mean_vector(feature_vectors):
-    num_words = len(feature_vectors)
-    assert num_words > 0
-    if num_words == 1:
-        return feature_vectors[0]
-    feature_vectors = np.sum(feature_vectors, axis=0)
-    return np.divide(feature_vectors, num_words)
 
 
 def load_model(model_name):
