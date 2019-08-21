@@ -471,21 +471,21 @@ class RecursiveNeuralTensorNetwork(Model):
 
 
 def load_model(model_name):
-    return LazyLoad(model_pool[model_name])
+    return model_pool[model_name]
 
 
 model_pool = {
-    'random-gaussian': GaussianRandom,
-    'skip-thoughts': SkipThoughts,
-    'lm_1b': LM1B,
-    'word2vec': Word2Vec,
-    'glove': Glove,
-    'rntn': RecursiveNeuralTensorNetwork,
-    'transformer-wordmean': Transformer_WordMean,
-    'transformer-wordall': Transformer_WordAll,
-    'transformer-wordlast': Transformer_WordLast,
-    'transformer-subsample_random': Transformer_SubsampleRandom,
-    'transformer-pad_zero': Transformer_PadZero,
+    'random-gaussian': LazyLoad(GaussianRandom),
+    'skip-thoughts': LazyLoad(SkipThoughts),
+    'lm_1b': LazyLoad(LM1B),
+    'word2vec': LazyLoad(Word2Vec),
+    'glove': LazyLoad(Glove),
+    'rntn': LazyLoad(RecursiveNeuralTensorNetwork),
+    'transformer-wordmean': LazyLoad(Transformer_WordMean),
+    'transformer-wordall': LazyLoad(Transformer_WordAll),
+    'transformer-wordlast': LazyLoad(Transformer_WordLast),
+    'transformer-subsample_random': LazyLoad(Transformer_SubsampleRandom),
+    'transformer-pad_zero': LazyLoad(Transformer_PadZero),
 }
 model_layers = {
     'random-gaussian': GaussianRandom.default_layers,
