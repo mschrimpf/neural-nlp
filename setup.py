@@ -18,7 +18,6 @@ requirements = [
     "gensim",
     "theano",
     "pytest",
-    "pip:",
     "git+https://github.com/brain-score/brain-score.git@e97478f",
     "git+https://github.com/brain-score/result_caching.git",
     "netCDF4",
