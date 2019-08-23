@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 
 import fire
@@ -18,22 +17,7 @@ from typing import Union
 _logger = logging.getLogger(__name__)
 
 
-class Corpus:
-    def __init__(self, path):
-        path = Path(path)
-        self.test = self.tokenize(path / 'test.txt')
-
-    def tokenize(self, path):
-        """Tokenizes a text file."""
-        assert os.path.exists(path)
-
-        # Tokenize file content
-        with open(path, 'r', encoding="utf8") as f:
-            text = '\n'.join(f)
-        return text
-
-
-def language_modeling(model_identifier, data='wikitext-2', device=None, batch_size=35, max_source_len='auto',
+def language_modeling(model_identifier, data='wikitext-2/test.txt', device=None, batch_size=35, max_source_len='auto',
                       temperature=1.0, top_k=0, top_p=.9, keep_newlines=False):
     # cf. https://github.com/pytorch/examples/blob/90738a76837d04e6de1403962acd21df5fbb820c/word_language_model/main.py
     device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
@@ -116,10 +100,12 @@ def language_modeling(model_identifier, data='wikitext-2', device=None, batch_si
         assert predictions.shape[0] == length
         return predictions
 
+    # data
     data_path = Path(__file__).parent.parent.parent / 'ressources' / 'ml' / data
+    _logger.debug(f"Loading data from {data_path}")
     assert data_path.exists(), f"{data_path} does not exist"
-    corpus = Corpus(data_path)
-    test_data = corpus.test
+    with open(data_path, 'r', encoding="utf8") as f:
+        test_data = '\n'.join(f)
 
     def get_batch(source, i):
         seq_len = min(batch_size, len(source) - 1 - i)
@@ -137,11 +123,10 @@ def language_modeling(model_identifier, data='wikitext-2', device=None, batch_si
     else:
         test_data = tokenizer.encode(test_data)
     criterion = torch.nn.NLLLoss(size_average=False)  # torch.nn.CrossEntropyLoss()
+
     total_loss = 0.
     for i in trange(0, len(test_data) - 1, batch_size, desc='test batches'):
         data, targets = get_batch(test_data, i)
-        # output = model(data)
-
         out = sample_sequence(
             model=model,
             context_ids=data,
@@ -152,7 +137,6 @@ def language_modeling(model_identifier, data='wikitext-2', device=None, batch_si
             device=device,
             is_xlnet=bool(model_identifier == "xlnet"),
         )
-
         total_loss += len(data) * criterion(out, torch.tensor(targets, device=device)).item()
     test_loss = total_loss / (len(test_data) - 1)
     perplexity = np.exp(test_loss)
