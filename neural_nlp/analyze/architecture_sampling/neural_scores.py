@@ -1,4 +1,3 @@
-import itertools
 import logging
 import os
 import sys
@@ -7,6 +6,7 @@ from collections import OrderedDict
 from tempfile import NamedTemporaryFile
 
 import fire
+import itertools
 import numpy as np
 import subprocess
 from pathlib import Path
@@ -15,9 +15,8 @@ from tqdm import tqdm
 import architecture_sampling
 from architecture_sampling import utils
 from architecture_sampling.evaluate import onmt
-from brainscore.utils import LazyLoad
-from neural_nlp import PereiraDecoding
 from neural_nlp.analyze.architecture_sampling import load_model, retrieve_log_value
+from neural_nlp.benchmarks import benchmark_pool
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 from result_caching import store
 
@@ -96,12 +95,18 @@ def prepare_stimulus_set(identifier, sentences, index_dict):
     #     -save_data architecture_sampling/evaluate/data/multi30k.tok.low -lower
 
 
+def score_model(model_dir, benchmark='Pereira2018-encoding-min'):
+    score = _score_model(model_dir=model_dir, benchmark=benchmark)
+    print(score.sel(aggregation='center'))
+
+
 @store()
-def score_model(model_dir):
+def _score_model(model_dir, benchmark='Pereira2018-decoding'):
     activations_model = build_activations_model(model_dir)
     _logger.info('Running benchmark')
-    benchmark = LazyLoad(PereiraDecoding)
+    benchmark = benchmark_pool[benchmark]()
     score = benchmark(activations_model)
+    print(score)
     return score
 
 
