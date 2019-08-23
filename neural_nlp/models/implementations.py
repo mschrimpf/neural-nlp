@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 from collections import OrderedDict
+from importlib import import_module
 
 import itertools
 import numpy as np
@@ -509,49 +510,42 @@ model_layers = {
     'transformer-pad_zero': Transformer.default_layers,
 }
 
-from pytorch_transformers import \
-    BertModel, BertTokenizer, \
-    OpenAIGPTModel, OpenAIGPTTokenizer, \
-    GPT2Model, GPT2Tokenizer, \
-    TransfoXLModel, TransfoXLTokenizer, \
-    XLNetModel, XLNetTokenizer, \
-    XLMModel, XLMTokenizer, \
-    RobertaModel, RobertaTokenizer
-from pytorch_transformers.tokenization_xlnet import SPIECE_UNDERLINE
-
-for identifier, model_ctr, tokenizer_ctr, tokenizer_special_tokens, pretrained_weights, layers in [
+SPIECE_UNDERLINE = u'▁'  # define directly to avoid having to import (from pytorch_transformers.tokenization_xlnet)
+for (identifier,
+     model_ctr, tokenizer_ctr, tokenizer_special_tokens, pretrained_weights,
+     layers) in [
     ('bert',
-     BertModel, BertTokenizer, (), 'bert-base-uncased',
+     'BertModel', 'BertTokenizer', (), 'bert-base-uncased',
      # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
      ('embedding',) + tuple(f'encoder.layer.{i}.output' for i in range(12))  # output == layer_norm(fc(attn) + attn)
      ),
     ('openaigpt',
-     OpenAIGPTModel, OpenAIGPTTokenizer, ('</w>',), 'openai-gpt',
+     'OpenAIGPTModel', 'OpenAIGPTTokenizer', ('</w>',), 'openai-gpt',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_openai.py#L517
      ('drop',) + tuple(f'encoder.h.{i}.ln_2' for i in range(12))
      ),
     ('gpt2',
-     GPT2Model, GPT2Tokenizer, ('ġ',), 'gpt2',
+     'GPT2Model', 'GPT2Tokenizer', ('ġ',), 'gpt2',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
      ('drop',) + tuple(f'encoder.h.{i}' for i in range(12))
      ),
     ('transfoxl',
-     TransfoXLModel, TransfoXLTokenizer, (), 'transfo-xl-wt103',
+     'TransfoXLModel', 'TransfoXLTokenizer', (), 'transfo-xl-wt103',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_transfo_xl.py#L1161
      ('drop',) + tuple(f'encoder.layers.{i}' for i in range(18))
      ),
     ('xlnet',
-     XLNetModel, XLNetTokenizer, (SPIECE_UNDERLINE,), 'xlnet-base-cased',
+     'XLNetModel', 'XLNetTokenizer', (SPIECE_UNDERLINE,), 'xlnet-base-cased',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlnet.py#L962
      ('drop',) + tuple(f'encoder.layer.{i}' for i in range(12))
      ),
     ('xlm',
-     XLMModel, XLMTokenizer, ('</w>',), 'xlm-mlm-enfr-1024',
+     'XLMModel', 'XLMTokenizer', ('</w>',), 'xlm-mlm-enfr-1024',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlm.py#L638
      ('dropout',) + tuple(f'encoder.layer_norm2.{i}' for i in range(6))
      ),
     ('roberta',
-     RobertaModel, RobertaTokenizer, ('ġ',), 'roberta-base',
+     'RobertaModel', 'RobertaTokenizer', ('ġ',), 'roberta-base',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_roberta.py#L174
      ('embedding',) + tuple(f'encoder.layer.{i}' for i in range(12))
      ),
@@ -559,6 +553,8 @@ for identifier, model_ctr, tokenizer_ctr, tokenizer_special_tokens, pretrained_w
     def ModelInstantiation(identifier=identifier, model_ctr=model_ctr,
                            tokenizer_ctr=tokenizer_ctr, tokenizer_special_tokens=tokenizer_special_tokens,
                            pretrained_weights=pretrained_weights, layers=layers):
+        module = import_module('pytorch_transformers')
+        model_ctr, tokenizer_ctr = getattr(module, model_ctr), getattr(module, tokenizer_ctr)
         # Load pre-trained model tokenizer (vocabulary) and model
         tokenizer = tokenizer_ctr.from_pretrained(pretrained_weights)
         model = model_ctr.from_pretrained(pretrained_weights, output_hidden_states=True)
@@ -569,5 +565,5 @@ for identifier, model_ctr, tokenizer_ctr, tokenizer_special_tokens, pretrained_w
         return transformer
 
 
-    model_pool[identifier] = ModelInstantiation
+    model_pool[identifier] = LazyLoad(ModelInstantiation)
     model_layers[identifier] = layers
