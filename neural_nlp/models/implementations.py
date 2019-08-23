@@ -78,8 +78,16 @@ class LM1B:
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
                                 ckpt=os.path.join(weights, 'ckpt-*'))
+        self._extractor = ActivationsExtractorHelper(identifier='lm_1b', get_activations=self._get_activations,
+                                                     reset=lambda: None)
+        self._extractor.insert_attrs(self)
+        self._extractor.register_activations_hook(word_last)
+        self._logger = logging.getLogger(self.__class__.__name__)
 
-    def _get_activations(self, sentences, layer_names):
+    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
+        return self._extractor(*args, **kwargs)
+
+    def _get_activations(self, sentences, layers):
         from lm_1b import lm_1b_eval
         from six.moves import xrange
         # the following is copied from lm_1b.lm_1b_eval.Encoder.__call__.
@@ -100,10 +108,8 @@ class LM1B:
             for i in xrange(len(word_ids)):
                 inputs[0, 0] = word_ids[i]
                 char_ids_inputs[0, 0, :] = char_ids[i]
-
-                # Add 'lstm/lstm_0/control_dependency' if you want to dump previous layer
-                # LSTM.
-                lstm_emb = self._encoder.sess.run([self._encoder.t[name] for name in layer_names],
+                # TODO: ensure this preserves hidden state
+                lstm_emb = self._encoder.sess.run([self._encoder.t[name] for name in layers],
                                                   feed_dict={self._encoder.t['char_inputs_in']: char_ids_inputs,
                                                              self._encoder.t['inputs_in']: inputs,
                                                              self._encoder.t['targets_in']: targets,
@@ -113,9 +119,11 @@ class LM1B:
             sentences_word_ids.append(word_ids)
         # `sentences_embeddings` shape is now: sentences x words x layers x *layer_shapes
         layer_activations = {}
-        for i, layer in enumerate(layer_names):
-            # only output last embedding (last word), discard time course
-            layer_activations[layer] = np.array([embedding[-1][i] for embedding in sentences_embeddings])
+        for i, layer in enumerate(layers):
+            # sentences_embeddings is `sentences x words x layers x (1 x 1024)`
+            layer_activations[layer] = [np.array(embedding)[:, i] for embedding in sentences_embeddings]
+            # words x 1 x 1024 --> 1 x words x 1024
+            layer_activations[layer] = [embedding.transpose(1, 0, 2) for embedding in layer_activations[layer]]
         return layer_activations
 
     def available_layers(self, filter_inputs=True):
@@ -126,6 +134,7 @@ class LM1B:
 
 def word_last(layer_activations):
     for layer, activations in layer_activations.items():
+        assert all(a.shape[0] == 1 for a in activations)
         activations = [a[0, -1, :] for a in activations]
         layer_activations[layer] = np.array(activations)
     return layer_activations
