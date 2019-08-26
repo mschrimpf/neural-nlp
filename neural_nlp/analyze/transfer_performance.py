@@ -1,3 +1,6 @@
+import time
+
+import math
 import logging
 import sys
 
@@ -7,12 +10,12 @@ import torch
 import torch.nn.functional as F
 from io import open
 from pathlib import Path
-from pytorch_transformers import GPT2Config, OpenAIGPTConfig, XLNetConfig, TransfoXLConfig
+from pytorch_transformers import GPT2Config, OpenAIGPTConfig, XLNetConfig, TransfoXLConfig, TransfoXLCorpus
 from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from pytorch_transformers import OpenAIGPTLMHeadModel, OpenAIGPTTokenizer
 from pytorch_transformers import TransfoXLLMHeadModel, TransfoXLTokenizer
 from pytorch_transformers import XLNetLMHeadModel, XLNetTokenizer
-from tqdm import trange
+from tqdm import trange, tqdm
 from typing import Union
 
 from result_caching import store
@@ -178,6 +181,95 @@ def preserving_encode(test_data, tokenizer):
             newline_data.append(token)
     test_data = tokenizer.convert_tokens_to_ids(newline_data)
     return test_data
+
+
+def run_transfoxl():
+    # https://github.com/huggingface/pytorch-transformers/blob/df9d6effae43e92761eb92540bc45fac846789ee/examples/single_model_scripts/run_transfo_xl.py
+    import argparse
+    parser = argparse.ArgumentParser(description='PyTorch Transformer Language Model')
+    parser.add_argument('--model_name', type=str, default='transfo-xl-wt103',
+                        help='pretrained model name')
+    parser.add_argument('--batch_size', type=int, default=10,
+                        help='batch size')
+    parser.add_argument('--tgt_len', type=int, default=128,
+                        help='number of tokens to predict')
+    parser.add_argument('--ext_len', type=int, default=0,
+                        help='length of the extended context')
+    parser.add_argument('--mem_len', type=int, default=1600,
+                        help='length of the retained previous heads')
+    parser.add_argument('--clamp_len', type=int, default=1000,
+                        help='max positional embedding index')
+    parser.add_argument('--no_cuda', action='store_true',
+                        help='Do not use CUDA even though CUA is available')
+    parser.add_argument('--work_dir', type=str,
+                        default=Path(__file__).parent.parent.parent / 'ressources' / 'ml' / 'wikitext-2',
+                        help='path to the work_dir')
+    parser.add_argument('--no_log', action='store_true',
+                        help='do not log the eval result')
+    parser.add_argument('--same_length', action='store_true',
+                        help='set same length attention with masking')
+    args, _ = parser.parse_known_args()
+    assert args.ext_len >= 0, 'extended context length must be non-negative'
+
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+    _logger.info("device: {}".format(device))
+
+    # Load a pre-processed dataset
+    # You can also build the corpus yourself using TransfoXLCorpus methods
+    # The pre-processing involve computing word frequencies to prepare the Adaptive input and SoftMax
+    # and tokenizing the dataset
+    # The pre-processed corpus is a convertion (using the conversion script )
+    corpus = TransfoXLCorpus.from_pretrained(args.model_name)
+
+    te_iter = corpus.get_iterator('test', args.batch_size, args.tgt_len,
+                                  device=device, ext_len=args.ext_len)
+
+    # Load a pre-trained model
+    model = TransfoXLLMHeadModel.from_pretrained(args.model_name)
+    model = model.to(device)
+
+    _logger.info(f'Evaluating with bsz {args.batch_size} tgt_len {args.tgt_len} ext_len {args.ext_len} '
+                 f'mem_len {args.mem_len} clamp_len {args.clamp_len}')
+
+    model.reset_length(args.tgt_len, args.ext_len, args.mem_len)
+    if args.clamp_len > 0:
+        model.clamp_len = args.clamp_len
+    if args.same_length:
+        model.same_length = True
+
+    ###############################################################################
+    # Evaluation code
+    ###############################################################################
+    def evaluate(eval_iter):
+        # Turn on evaluation mode which disables dropout.
+        model.eval()
+        total_len, total_loss = 0, 0.
+        start_time = time.time()
+        with torch.no_grad():
+            mems = None
+            for idx, (data, target, seq_len) in tqdm(enumerate(eval_iter), desc='iteration', total=eval_iter.n_batch):
+                loss, _, mems = model(data, target, mems)
+                loss = loss.mean()
+                total_loss += seq_len * loss.item()
+                total_len += seq_len
+            total_time = time.time() - start_time
+        _logger.info('Time : {:.2f}s, {:.2f}ms/segment'.format(
+            total_time, 1000 * total_time / (idx + 1)))
+        return total_loss / total_len
+
+    # Run on test data.
+    test_loss = evaluate(te_iter)
+
+    def format_log(loss, split):
+        log_str = f'| {split} loss {loss:5.2f} | {0} ppl {math.exp(loss):9.3f} '
+        return log_str
+
+    log_str = ''
+    log_str += format_log(test_loss, 'test')
+
+    _logger.info('=' * 100)
+    _logger.info(log_str)
+    _logger.info('=' * 100)
 
 
 def text_generation(prompt=None, padding_text=None, model_type='gpt2', model_name_or_path='gpt2', multinomial=False,
