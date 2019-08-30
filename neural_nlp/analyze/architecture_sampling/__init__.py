@@ -24,6 +24,7 @@ def load_model(model_dir, load_weights=True, return_checkpoint=False, return_par
     if not checkpoint_files:
         raise FileNotFoundError(f"No checkpoints found in {model_dir}")
     checkpoint_file = max(checkpoint_files)
+    _logger.debug(f"Using checkpoint {checkpoint_file}")
     checkpoint = torch.load(str(checkpoint_file), map_location=lambda storage, location: storage)
     _logger.debug(f"Building model from params in {model_dir}")
     decoder, encoder, generator, model = _build_stored_model(checkpoint, params)
