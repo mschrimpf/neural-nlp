@@ -3,14 +3,14 @@ import warnings
 
 import itertools
 import numpy as np
-from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays
+from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly
 from tqdm import tqdm
 from sklearn.linear_model import Ridge
 from xarray import DataArray
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
-from brainscore.metrics.rdm import RDM, RDMSimilarity
+from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import pls_regression, linear_regression, pearsonr_correlation, \
     CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
@@ -343,6 +343,18 @@ class PereiraEncoding(_PereiraBenchmark):
         super(PereiraEncoding, self).__init__(metric=metric)
 
 
+class PereiraEncodingMin(_PereiraBenchmark):
+    def __init__(self, bold_shift=None):
+        metric = CrossRegressedCorrelation(
+            regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
+            correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=2))
+        super(PereiraEncodingMin, self).__init__(metric=metric)
+        self._target_assembly = self._target_assembly.sel(subject='M02')
+        self._target_assembly['subject'] = 'neuroid', ['M02'] * len(self._target_assembly['neuroid'])
+        self._target_assembly = NeuroidAssembly(self._target_assembly)  # re-index with subject
+
+
 class PereiraEncodingCG(_PereiraBenchmark):
     def __init__(self, bold_shift=None):
         metric = CrossRegressedCorrelation(
@@ -362,6 +374,14 @@ class PereiraDecoding(_PereiraBenchmark):
         super(PereiraDecoding, self).__init__(metric=metric)
 
 
+class PereiraRDM(_PereiraBenchmark):
+    def __init__(self, bold_shift=None):
+        metric = RDMCrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
+        super(PereiraRDM, self).__init__(metric=metric)
+
+
 benchmark_pool = {
     'voxel-encoding': StoriesVoxelEncoding,
     'stories-voxel-encoding-cg': StoriesVoxelEncodingCG,
@@ -369,7 +389,9 @@ benchmark_pool = {
     'fROI': StoriesfROIBenchmark,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
+    'Pereira2018-encoding-min': PereiraEncodingMin,
     'Pereira2018-encoding-cg': PereiraEncodingCG,
     'Pereira2018-decoding': PereiraDecoding,
+    'Pereira2018-rdm': PereiraRDM,
     'transformer-wordmean': StoriesTransformerWordmeanBenchmark,
 }
