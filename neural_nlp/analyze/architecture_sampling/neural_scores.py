@@ -78,7 +78,7 @@ def prepare_stimulus_set(identifier, sentences, index_dict):
         # from architecture_sampling/evaluate/data/onmt/preprocess.py:118
         for line in lowercase_file.readlines():
             line = line.decode()
-            embedding = index_dict.convertToIdx(line.split(), onmt.Constants.UNK_WORD, warn_unknown=True)
+            embedding = index_dict.convertToIdx(line.split(), onmt.Constants.UNK_WORD)
             preprocessed_stimuli.append(embedding)
         return preprocessed_stimuli
 
