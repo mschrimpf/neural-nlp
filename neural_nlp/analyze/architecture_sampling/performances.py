@@ -17,16 +17,20 @@ seaborn.set()
 _logger = logging.getLogger(__name__)
 
 
-def plot_histograms(data_dirs=('/braintree/data2/active/users/msch/zoo.bck20190408-multi30k',
-                               '/braintree/data2/active/users/msch/zoo.wmt17')):
+def plot_histograms(data_dirs=(
+        '/braintree/data2/active/users/msch/zoo.bck20190408-multi30k',
+        '/braintree/data2/active/users/msch/zoo.wmt17-mt',
+        '/braintree/data2/active/users/msch/zoo.wmt17',
+), only_last_epoch=True):
     for data_dir in data_dirs:
-        plot_histogram(data_dir)
+        plot_histogram(data_dir, only_last_epoch=only_last_epoch)
 
 
-def plot_histogram(data_dir):
+def plot_histogram(data_dir, only_last_epoch=True):
     data = collect(data_dir)
     data = data[data['data'] == 'valid']
-    data = data.loc[data.groupby('model_dir')['epoch'].idxmax()]
+    if only_last_epoch:
+        data = data.loc[data.groupby('model_dir')['epoch'].idxmax()]
     validation_perplexities = data['ppl'].values
     validation_perplexities = validation_perplexities[~np.isnan(validation_perplexities)]
 
@@ -51,7 +55,7 @@ def best_models(data_dir, top=10):
     for i, (row_index, row) in enumerate(data.iterrows()):
         if i > top:
             break
-        print(f"{row['model_dir']} --> {row['ppl']}")
+        print(f"{row['model_dir']} --> {row['ppl']}    {row['architecture']}")
 
 
 @store()
@@ -66,6 +70,9 @@ def collect(data_dir):
             continue
         logs = log_file.read_text().split('\n')
         logs = [json.loads(log) for log in logs if log]
+        if not logs:
+            continue
+        architecture = logs[0]['encoder_architecture']
         for log in logs[1:]:  # ignore first log (model hyper-parameters)
             if 'epoch' not in log:
                 warnings.warn(f"Ignoring log due to missing epoch value: {log}")
@@ -75,6 +82,7 @@ def collect(data_dir):
                 continue
             data_rows.append({
                 'model_dir': model_dir,
+                'architecture': architecture,
                 'epoch': log['epoch'],
                 'data': log['data'],
                 'ppl': log['ppl'],
