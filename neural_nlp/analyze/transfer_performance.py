@@ -1,3 +1,5 @@
+from importlib import import_module
+from torchtext.data import Field as torchtext_Field
 import time
 
 import math
@@ -15,6 +17,7 @@ from pytorch_transformers import GPT2LMHeadModel, GPT2Tokenizer
 from pytorch_transformers import OpenAIGPTLMHeadModel, OpenAIGPTTokenizer
 from pytorch_transformers import TransfoXLLMHeadModel, TransfoXLTokenizer
 from pytorch_transformers import XLNetLMHeadModel, XLNetTokenizer
+from torch.utils.data import DataLoader, Subset
 from tqdm import trange, tqdm
 from typing import Union
 
@@ -24,7 +27,7 @@ _logger = logging.getLogger(__name__)
 
 
 @store(identifier_ignore=['device', 'batch_size'])
-def language_modeling(model_identifier, data='wikitext-2/test.txt', device=None, batch_size=35, max_source_len='auto',
+def language_modeling(model_identifier, data='WikiText2', device=None, batch_size=35, context_length='auto',
                       temperature=1.0, top_k=0, top_p=.9, keep_newlines=False):
     # combined from
     # https://github.com/pytorch/examples/blob/90738a76837d04e6de1403962acd21df5fbb820c/word_language_model/main.py
@@ -33,6 +36,7 @@ def language_modeling(model_identifier, data='wikitext-2/test.txt', device=None,
     device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
     _logger.debug(f"Using device {device}")
 
+    # model
     # model = model_pool[model_identifier]
     # model.mode = BrainModel.Modes.language_modeling
 
@@ -49,10 +53,10 @@ def language_modeling(model_identifier, data='wikitext-2/test.txt', device=None,
     model = model_class.from_pretrained(model_identifier)
     model = model.to(device)
     model.eval()
-    if max_source_len == 'auto':
-        max_source_len = model.config.max_position_embeddings
-        if max_source_len < 0:
-            max_source_len = 1024
+    if context_length == 'auto':
+        context_length = model.config.max_position_embeddings
+        # if context_length < 0:
+        #     context_length = 1024
 
     def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
         """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
@@ -84,80 +88,73 @@ def language_modeling(model_identifier, data='wikitext-2/test.txt', device=None,
             logits[indices_to_remove] = filter_value
         return logits
 
-    def sample_sequence(model, length, context_ids, temperature: Union[int, float] = 1,
+    def sample_sequence(model, length, context_ids, labels=None,
+                        temperature: Union[int, float] = 1,
                         top_k=0, top_p=0.0, is_xlnet=False, device='cpu'):
-        predictions = None
         with torch.no_grad():
-            # At each step, feed in all the context up to and excluding that step, and keep track of predictions
-            for step in reversed(range(length)):
-                context = context_ids[max(0, len(context_ids) - step - max_source_len):len(context_ids) - step]
-                context = torch.tensor(context, dtype=torch.long, device=device).unsqueeze(0)
-                inputs = {'input_ids': context}
-                if is_xlnet:
-                    # XLNet is a direct (predict same token, not next token) and bi-directional model by default
-                    # => need one additional dummy token in the input (will be masked), attention mask and target mapping (see model docstring)
-                    input_ids = torch.cat((context, torch.zeros((1, 1), dtype=torch.long, device=device)), dim=1)
-                    perm_mask = torch.zeros((1, input_ids.shape[1], input_ids.shape[1]), dtype=torch.float,
-                                            device=device)
-                    perm_mask[:, :, -1] = 1.0  # Previous tokens don't see last token
-                    target_mapping = torch.zeros((1, 1, input_ids.shape[1]), dtype=torch.float, device=device)
-                    target_mapping[0, 0, -1] = 1.0  # predict last token
-                    inputs = {'input_ids': input_ids, 'perm_mask': perm_mask, 'target_mapping': target_mapping}
+            context = torch.tensor(context_ids, dtype=torch.long, device=device).unsqueeze(0)
+            inputs = {'input_ids': context}
+            if is_xlnet:
+                # XLNet is a direct (predict same token, not next token) and bi-directional model by default
+                # => need one additional dummy token in the input (will be masked), attention mask and target mapping (see model docstring)
+                input_ids = torch.cat((context, torch.zeros((1, 1), dtype=torch.long, device=device)), dim=1)
+                perm_mask = torch.zeros((1, input_ids.shape[1], input_ids.shape[1]), dtype=torch.float,
+                                        device=device)
+                perm_mask[:, :, -1] = 1.0  # Previous tokens don't see last token
+                target_mapping = torch.zeros((1, 1, input_ids.shape[1]), dtype=torch.float, device=device)
+                target_mapping[0, 0, -1] = 1.0  # predict last token
+                inputs = {'input_ids': input_ids, 'perm_mask': perm_mask, 'target_mapping': target_mapping}
 
-                outputs = model(**inputs)
-                next_token_logits = outputs[0][0, -1, :] / temperature
-                filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
-                softmax = F.softmax(filtered_logits, dim=-1)
-                softmax = softmax.unsqueeze(0)
-                predictions = softmax if predictions is None else torch.cat((predictions, softmax), dim=0)
+            logits, outputs = model(**inputs, labels=labels)
+            # next_token_logits = logits[0, -1, :] / temperature
+            # filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+            # softmax = F.softmax(filtered_logits, dim=-1)
+            # softmax = softmax.unsqueeze(0)
+            # predictions = softmax
+            predictions = logits
 
-        assert predictions.shape[0] == length
+        # assert predictions.shape[0] == length
+        assert predictions.shape[1] == length
         return predictions
 
     # data
-    data_path = Path(__file__).parent.parent.parent / 'ressources' / 'ml' / data
-    _logger.debug(f"Loading data from {data_path}")
-    assert data_path.exists(), f"{data_path} does not exist"
-    with open(data_path, 'r', encoding="utf8") as f:
-        test_data = '\n'.join(f)
+    _logger.debug(f"Loading data {data}")
+    datasets = import_module('torchtext.datasets')
+    dataset = getattr(datasets, data)
+    test_dataset, = dataset.splits(torchtext_Field(tokenize=tokenizer.encode), train=None, validation=None,
+                                   newline_eos=False)
+    # from https://github.com/cybertronai/bflm/blob/b6ba6d97c9ccdf2b12e104fbdcd0bed25ada7b68/data_loader.py#L57-L60
+    samples = test_dataset.examples[0].text
+    chunked_dataset = Subset(np.array(samples), [
+        slice(i, i + context_length)
+        for i in range(0, len(samples) - (len(samples) % context_length), context_length)])
+    data_loader = DataLoader(chunked_dataset, batch_size=batch_size, shuffle=True)
 
-    def get_batch(source, i):
-        seq_len = min(batch_size, len(source) - 1 - i)
-        # we do not have to strictly limit the data to `max_source_len` here,
-        # but it will avoid unnecessarily moving data to GPU
-        data_start = i if max_source_len is None else max(0, i - max_source_len)
-        data = source[data_start:i + seq_len]
-        target = source[i + 1:i + 1 + seq_len]
-        return data, target
-
-    # We need to tokenize outside the model so that we can operate on the tokens directly for prediction.
-    # Otherwise, the model will output tokens that we would have to compare against target *words*.
-    if keep_newlines:
-        test_data = preserving_encode(test_data, tokenizer)
-    else:
-        test_data = tokenizer.encode(test_data)
-
-    criterion = torch.nn.NLLLoss(size_average=False)
+    # evaluate
+    _logger.debug("Evaluating")
+    criterion = torch.nn.CrossEntropyLoss()  # torch.nn.NLLLoss(size_average=False)
     norm_term = 0
     total_loss = 0.
-    progress = trange(0, len(test_data) - 1, batch_size, desc='test batches')
-    for i in progress:
-        data, targets = get_batch(test_data, i)
+    progress = tqdm(data_loader)
+    for text in progress:
         out = sample_sequence(
             model=model,
-            context_ids=data,
-            length=len(targets),
+            context_ids=text,
+            length=len(text),
+            # labels=torch.tensor(data, device=device),
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
             device=device,
             is_xlnet=bool(model_identifier == "xlnet"),
         )
-        loss = criterion(out, torch.tensor(targets, device=device)).item()
-        norm_term += len(targets)
-        progress.set_postfix(loss=loss, ppl=np.exp(loss / norm_term))
-        total_loss += loss
-    test_loss = total_loss / norm_term
+        loss = criterion(out, torch.tensor(text, device=device)).item()
+        # norm_term += len(targets)
+        progress.set_postfix(loss=loss, ppl=np.exp(loss))
+        # total_loss += loss
+        total_loss += len(text) * loss
+    # test_loss = total_loss / norm_term
+    test_loss = total_loss / len(samples)
     perplexity = np.exp(test_loss)
     print(f"Loss: {test_loss} | Perplexity: {perplexity}")
     return test_loss
@@ -201,9 +198,6 @@ def run_transfoxl():
                         help='max positional embedding index')
     parser.add_argument('--no_cuda', action='store_true',
                         help='Do not use CUDA even though CUA is available')
-    parser.add_argument('--work_dir', type=str,
-                        default=Path(__file__).parent.parent.parent / 'ressources' / 'ml' / 'wikitext-2',
-                        help='path to the work_dir')
     parser.add_argument('--no_log', action='store_true',
                         help='do not log the eval result')
     parser.add_argument('--same_length', action='store_true',
@@ -214,17 +208,24 @@ def run_transfoxl():
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     _logger.info("device: {}".format(device))
 
+    _logger.info("Building corpus")
     # Load a pre-processed dataset
     # You can also build the corpus yourself using TransfoXLCorpus methods
     # The pre-processing involve computing word frequencies to prepare the Adaptive input and SoftMax
     # and tokenizing the dataset
     # The pre-processed corpus is a convertion (using the conversion script )
-    corpus = TransfoXLCorpus.from_pretrained(args.model_name)
+    # corpus = TransfoXLCorpus.from_pretrained(args.model_name)
+    corpus = TransfoXLCorpus()
+    # corpus.vocab.add_special('<eos>')
+    corpus.vocab.special.append('<eos>')
+    corpus.build_corpus(Path(__file__).parent.parent.parent / 'ressources' / 'ml' / 'wikitext-103', 'wt103')
 
+    _logger.debug("Retrieving iterator")
     te_iter = corpus.get_iterator('test', args.batch_size, args.tgt_len,
                                   device=device, ext_len=args.ext_len)
 
     # Load a pre-trained model
+    _logger.debug("Loading model")
     model = TransfoXLLMHeadModel.from_pretrained(args.model_name)
     model = model.to(device)
 
@@ -243,12 +244,15 @@ def run_transfoxl():
     def evaluate(eval_iter):
         # Turn on evaluation mode which disables dropout.
         model.eval()
+        criterion = torch.nn.NLLLoss(size_average=False)
         total_len, total_loss = 0, 0.
         start_time = time.time()
         with torch.no_grad():
             mems = None
             for idx, (data, target, seq_len) in tqdm(enumerate(eval_iter), desc='iteration', total=eval_iter.n_batch):
                 loss, _, mems = model(data, target, mems)
+                # softmax_output, _ = model(data, None, mems)
+                # loss = criterion(softmax_output, target)  # fails right now
                 loss = loss.mean()
                 total_loss += seq_len * loss.item()
                 total_len += seq_len
@@ -260,15 +264,12 @@ def run_transfoxl():
     # Run on test data.
     test_loss = evaluate(te_iter)
 
-    def format_log(loss, split):
-        log_str = f'| {split} loss {loss:5.2f} | {0} ppl {math.exp(loss):9.3f} '
+    def format_log(loss):
+        log_str = f'| loss {loss:5.2f} | ppl {math.exp(loss):9.3f} '
         return log_str
 
-    log_str = ''
-    log_str += format_log(test_loss, 'test')
-
     _logger.info('=' * 100)
-    _logger.info(log_str)
+    _logger.info(format_log(test_loss))
     _logger.info('=' * 100)
 
 
