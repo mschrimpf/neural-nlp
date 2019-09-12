@@ -21,6 +21,8 @@ using a masked language modeling (MLM) loss.
 
 from __future__ import absolute_import, division, print_function
 
+import sys
+
 import argparse
 import glob
 import logging
@@ -55,9 +57,10 @@ MODEL_CLASSES = {
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, file_path='train', block_size=512):
-        assert os.path.isfile(file_path)
+        assert os.path.isfile(file_path), f"{file_path} is not a file"
         directory, filename = os.path.split(file_path)
-        cached_features_file = os.path.join(directory, f'cached_lm_{block_size}_{filename}')
+        cached_features_file = os.path.join(directory,
+                                            f'cached_lm_{tokenizer.__class__.__name__}_{block_size}_{filename}')
 
         if os.path.exists(cached_features_file):
             logger.info("Loading features from cached file %s", cached_features_file)
@@ -71,10 +74,15 @@ class TextDataset(Dataset):
                 text = f.read()
 
             tokenized_text = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(text))
+            tokenized_text = np.array(tokenized_text)  # ~10 sec with numpy, ~40 hours without
 
+            progress = tqdm(total=len(tokenized_text), desc='truncate text into blocks')
             while len(tokenized_text) >= block_size:  # Truncate in block of block_size
-                self.examples.append(tokenizer.add_special_tokens_single_sentence(tokenized_text[:block_size]))
+                block = tokenized_text[:block_size].tolist()
+                self.examples.append(tokenizer.add_special_tokens_single_sentence(block))
                 tokenized_text = tokenized_text[block_size:]
+                progress.update(len(block))
+            progress.close()
             # Note that we are loosing the last truncated example here for the sake of simplicity (no padding)
             # If your dataset is small, first you should loook for a bigger one :-) and second you
             # can change this behavior by adding (model specific) padding.
@@ -413,8 +421,9 @@ def main():
     logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                         datefmt = '%m/%d/%Y %H:%M:%S',
                         level = logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
-    logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
+    logger.info("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
                     args.local_rank, device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
+    logger.debug(args)
 
     # Set seed
     set_seed(args)
@@ -493,4 +502,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     main()
