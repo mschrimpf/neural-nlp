@@ -32,10 +32,10 @@ import argparse
 import numpy as np
 import torch
 from pytorch_transformers import (WEIGHTS_NAME, AdamW, WarmupLinearSchedule,
-                                  BertConfig, BertTokenizer, BertPreTrainedModel, BertModel,
-                                  GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
-                                  OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
-                                  RobertaConfig, RobertaForMaskedLM, RobertaTokenizer)
+                                  BertConfig, BertForMaskedLM, BertModel, BertTokenizer,
+                                  GPT2Config, GPT2LMHeadModel, GPT2Model, GPT2Tokenizer,
+                                  OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTModel, OpenAIGPTTokenizer,
+                                  RobertaConfig, RobertaForMaskedLM, RobertaModel, RobertaTokenizer)
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.nn import CrossEntropyLoss
@@ -46,15 +46,15 @@ from tqdm import tqdm, trange
 logger = logging.getLogger(__name__)
 
 
-class BertLMHeadModel(BertPreTrainedModel):
-    def __init__(self, config):
-        super(BertLMHeadModel, self).__init__(config)
-        self.bert = BertModel(config)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+class LMHeadModel(torch.nn.Module):
+    def __init__(self, features_model, features_size, vocab_size):
+        super(LMHeadModel, self).__init__()
+        self.features = features_model
+        self.lm_head = nn.Linear(features_size, vocab_size)
 
     def forward(self, input_ids, position_ids=None, token_type_ids=None, labels=None, head_mask=None):
-        transformer_outputs = self.bert(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
-                                        head_mask=head_mask)
+        transformer_outputs = self.features(input_ids, position_ids=position_ids, token_type_ids=token_type_ids,
+                                            head_mask=head_mask)
         hidden_states = transformer_outputs[0]
         lm_logits = self.lm_head(hidden_states)
 
@@ -73,10 +73,10 @@ class BertLMHeadModel(BertPreTrainedModel):
 
 
 MODEL_CLASSES = {
-    'gpt2': (GPT2Config, GPT2LMHeadModel, GPT2Tokenizer),
-    'openai-gpt': (OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer),
-    'bert': (BertConfig, BertLMHeadModel, BertTokenizer),
-    'roberta': (RobertaConfig, RobertaForMaskedLM, RobertaTokenizer)
+    'gpt2': (GPT2Config, GPT2Model, GPT2Tokenizer),
+    'openai-gpt': (OpenAIGPTConfig, OpenAIGPTModel, OpenAIGPTTokenizer),
+    'bert': (BertConfig, BertModel, BertTokenizer),
+    'roberta': (RobertaConfig, RobertaModel, RobertaTokenizer)
 }
 
 
@@ -224,7 +224,7 @@ def train(args, train_dataset, model, tokenizer):
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproducibility (even between python 2 and 3)
-    for _ in train_iterator:
+    for epoch, _ in enumerate(train_iterator):
         epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
         for step, batch in enumerate(epoch_iterator):
             inputs, labels = mask_tokens(batch, tokenizer, args) if args.mlm else (batch, batch)
@@ -262,6 +262,7 @@ def train(args, train_dataset, model, tokenizer):
                         results = evaluate(args, model, tokenizer)
                         for key, value in results.items():
                             tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                            logger.debug(f"{global_step} eval_{key}: {value}")
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
                     logging_loss = tr_loss
@@ -269,17 +270,20 @@ def train(args, train_dataset, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, 'checkpoint-{}'.format(global_step))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    model_to_save = model.module if hasattr(model,
-                                                            'module') else model  # Take care of distributed/parallel training
-                    model_to_save.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, 'training_args.bin'))
-                    logger.info("Saving model checkpoint to %s", output_dir)
+                    _save_checkpoint(model, output_dir, args)
 
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
+
+        if args.evaluate_after_epoch:
+            results = evaluate(args, model, tokenizer)
+            logger.debug(f"epoch {epoch}: {results}")
+        # Save model checkpoint
+        if args.save_epochs > 0 and epoch % args.save_epochs == 0:
+            output_dir = os.path.join(args.output_dir, f'checkpoint-{epoch}')
+            _save_checkpoint(model, output_dir, args)
+
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
@@ -288,6 +292,19 @@ def train(args, train_dataset, model, tokenizer):
         tb_writer.close()
 
     return global_step, tr_loss / global_step
+
+
+def _save_checkpoint(model, output_dir, args):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    model_to_save = model.module if hasattr(model,
+                                            'module') else model  # Take care of distributed/parallel training
+    model_to_save.config.save_pretrained(output_dir)
+    model_to_save.save_pretrained(output_dir)
+    # model_to_save.features.config.save_pretrained(output_dir)
+    # torch.save(model_to_save.state_dict(), os.path.join(output_dir, 'pytorch_model.bin'))
+    torch.save(args, os.path.join(output_dir, 'training_args.bin'))
+    logger.info("Saving model checkpoint to %s", output_dir)
 
 
 def evaluate(args, model, tokenizer, prefix=""):
@@ -380,6 +397,8 @@ def main():
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Run evaluation during training at each logging step.")
+    parser.add_argument("--evaluate_after_epoch", action='store_true',
+                        help="Run evaluation after each training epoch.")
     parser.add_argument("--do_lower_case", action='store_true',
                         help="Set this flag if you are using an uncased model.")
 
@@ -406,8 +425,10 @@ def main():
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
-    parser.add_argument('--save_steps', type=int, default=1000000,
+    parser.add_argument('--save_steps', type=int, default=-1,
                         help="Save checkpoint every X updates steps.")
+    parser.add_argument('--save_epochs', type=int, default=-1,
+                        help="Save checkpoint every X epochs.")
     parser.add_argument("--eval_all_checkpoints", action='store_true',
                         help="Evaluate all checkpoints starting with the same prefix as model_name_or_path ending and ending with step number")
     parser.add_argument("--no_cuda", action='store_true',
@@ -487,10 +508,13 @@ def main():
     args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
     model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path),
                                         config=config)
+    model = LMHeadModel(model, features_size=model.config.hidden_size, vocab_size=model.config.vocab_size)
     model.to(args.device)
 
     if args.local_rank == 0:
         torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
+
+    _save_checkpoint(model, args.output_dir, args)
 
     logger.info("Training/evaluation parameters %s", args)
 
@@ -526,6 +550,7 @@ def main():
 
         # Load a trained model and vocabulary that you have fine-tuned
         model = model_class.from_pretrained(args.output_dir)
+        model = LMHeadModel(model, features_size=model.config.hidden_size, vocab_size=model.config.vocab_size)
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         model.to(args.device)
 
@@ -541,6 +566,7 @@ def main():
         for checkpoint in checkpoints:
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(checkpoint)
+            model = LMHeadModel(model, features_size=model.config.hidden_size, vocab_size=model.config.vocab_size)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=global_step)
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
