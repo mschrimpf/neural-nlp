@@ -236,9 +236,9 @@ class _PerformanceBenchmark:
         # Evaluation
         test_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
                                    file_path=self.eval_data_file, block_size=block_size)
-        result = evaluate(model=lm_head, eval_dataset=test_dataset, device=device)
-        perplexity = result['perplexity'].numpy().tolist()
-        score = Score([perplexity], coords={'measure': ['test_perplexity']}, dims=['measure'])
+        test_result = evaluate(model=lm_head, eval_dataset=test_dataset, device=device)
+        score = Score([test_result[key].numpy().tolist() for key in ['perplexity', 'loss']],
+                      coords={'measure': ['test_perplexity', 'test_loss']}, dims=['measure'])
         score.attrs['datasets'] = {'train': self.train_data_file,
                                    'val': self.val_data_file,
                                    'test': self.eval_data_file}
