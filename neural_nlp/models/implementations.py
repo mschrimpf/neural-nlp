@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 from collections import OrderedDict
+from enum import Enum
 from importlib import import_module
 
 import itertools
@@ -18,7 +19,22 @@ from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 _ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
 
 
-class Model(object):
+class BrainModel:
+    Modes = Enum('Mode', 'recording general_features')
+
+    def __init__(self):
+        super(BrainModel, self).__init__()
+        self._mode = self.Modes.recording
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        assert value in self.Modes
+        self._mode = value
+
     def __call__(self, sentences):
         raise NotImplementedError()
 
@@ -297,16 +313,43 @@ class Transformer(PytorchWrapper):
     """
 
 
-class _PytorchTransformerWrapper:
+class _PytorchTransformerWrapper(BrainModel):
     def __init__(self, identifier, tokenizer, model, layers, tokenizer_special_tokens=()):
+        super(_PytorchTransformerWrapper, self).__init__()
         self.default_layers = self.available_layers = layers
-        model_container = self.ModelContainer(tokenizer, model, layers, tokenizer_special_tokens)
-        self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=model_container,
+        self._model = model
+        self._model_container = self.ModelContainer(tokenizer, model, layers, tokenizer_special_tokens)
+        self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._model_container,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
 
     def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)
+        self._model.eval()
+        if self.mode == BrainModel.Modes.recording:
+            return self._extractor(*args, **kwargs)
+        elif self.mode == BrainModel.Modes.general_features:
+            # (input_ids, position_ids=position_ids, token_type_ids=token_type_ids, head_mask=head_mask)
+            transformer_outputs = self._model(*args, **kwargs)
+            hidden_states = transformer_outputs[0]
+            return hidden_states
+        else:
+            raise ValueError(f"Unknown mode {self.mode}")
+
+    @property
+    def identifier(self):
+        return self._extractor.identifier
+
+    @property
+    def tokenizer(self):
+        return self._model_container.tokenizer
+
+    @property
+    def features_size(self):
+        return self._model.config.hidden_size
+
+    @property
+    def vocab_size(self):
+        return self._model.config.vocab_size
 
     class ModelContainer:
         def __init__(self, tokenizer, model, layer_names, tokenizer_special_tokens=()):
