@@ -517,6 +517,11 @@ transformers = [
      # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
      ('embedding',) + tuple(f'encoder.layer.{i}.output' for i in range(12))  # output == layer_norm(fc(attn) + attn)
      ),
+    ('bert-large',
+     'BertConfig', 'BertModel', 'BertTokenizer', (), 'bert-large-uncased',
+     # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
+     ('embedding',) + tuple(f'encoder.layer.{i}.output' for i in range(24))  # output == layer_norm(fc(attn) + attn)
+     ),
     ('openaigpt',
      'OpenAIGPTConfig', 'OpenAIGPTModel', 'OpenAIGPTTokenizer', ('</w>',), 'openai-gpt',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_openai.py#L517
@@ -526,6 +531,16 @@ transformers = [
      'GPT2Config', 'GPT2Model', 'GPT2Tokenizer', ('ġ',), 'gpt2',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
      ('drop',) + tuple(f'encoder.h.{i}' for i in range(12))
+     ),
+    ('gpt2-medium',
+     'GPT2Config', 'GPT2Model', 'GPT2Tokenizer', ('ġ',), 'gpt2-medium',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
+     ('drop',) + tuple(f'encoder.h.{i}' for i in range(24))
+     ),
+    ('gpt2-large',
+     'GPT2Config', 'GPT2Model', 'GPT2Tokenizer', ('ġ',), 'gpt2-large',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
+     ('drop',) + tuple(f'encoder.h.{i}' for i in range(36))
      ),
     ('transfoxl',
      'TransfoXLConfig', 'TransfoXLModel', 'TransfoXLTokenizer', (), 'transfo-xl-wt103',
@@ -537,8 +552,18 @@ transformers = [
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlnet.py#L962
      ('drop',) + tuple(f'encoder.layer.{i}' for i in range(12))
      ),
+    ('xlnet-large',
+     'XLNetConfig', 'XLNetModel', 'XLNetTokenizer', (SPIECE_UNDERLINE,), 'xlnet-large-cased',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlnet.py#L962
+     ('drop',) + tuple(f'encoder.layer.{i}' for i in range(24))
+     ),
     ('xlm',
      'XLMConfig', 'XLMModel', 'XLMTokenizer', ('</w>',), 'xlm-mlm-enfr-1024',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlm.py#L638
+     ('dropout',) + tuple(f'encoder.layer_norm2.{i}' for i in range(6))
+     ),
+    ('xlm-clm',
+     'XLMConfig', 'XLMModel', 'XLMTokenizer', ('</w>',), 'xlm-clm-enfr-1024',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlm.py#L638
      ('dropout',) + tuple(f'encoder.layer_norm2.{i}' for i in range(6))
      ),
@@ -546,6 +571,11 @@ transformers = [
      'RobertaConfig', 'RobertaModel', 'RobertaTokenizer', ('ġ',), 'roberta-base',
      # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_roberta.py#L174
      ('embedding',) + tuple(f'encoder.layer.{i}' for i in range(12))
+     ),
+    ('roberta-large',
+     'RobertaConfig', 'RobertaModel', 'RobertaTokenizer', ('ġ',), 'roberta-large',
+     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_roberta.py#L174
+     ('embedding',) + tuple(f'encoder.layer.{i}' for i in range(24))
      ),
 ]
 for untrained in False, True:
