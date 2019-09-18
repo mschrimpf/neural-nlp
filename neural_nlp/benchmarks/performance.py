@@ -4,11 +4,9 @@ import os
 import pickle
 import random
 
-from brainscore.metrics import Score
-from pathlib import Path
-
 import numpy as np
 import torch
+from pathlib import Path
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 from tensorboardX import SummaryWriter
 from torch import nn
@@ -16,6 +14,7 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler
 from tqdm import tqdm, trange
 
+from brainscore.metrics import Score
 from neural_nlp.models.implementations import _PytorchTransformerWrapper, BrainModel
 
 logger = logging.getLogger(__name__)
@@ -100,7 +99,7 @@ def set_seed(seed):
 def train(model, train_dataset, val_dataset, device='cuda',
           ppl_diff_threshold=1,
           train_batch_size=4, weight_decay=0.0, learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0,
-          gradient_accumulation_steps=1, num_train_epochs=30, max_grad_norm=1.0,
+          gradient_accumulation_steps=1, num_train_epochs=50, max_grad_norm=1.0,
           logging_steps=50):
     """ Train the model """
     tb_writer = SummaryWriter()
@@ -198,7 +197,7 @@ def evaluate(model, eval_dataset, eval_batch_size=4, device='cuda', prefix=""):
         nb_eval_steps += 1
 
     eval_loss = eval_loss / nb_eval_steps
-    perplexity = torch.exp(torch.tensor(eval_loss))
+    perplexity = torch.exp(torch.tensor(eval_loss)).numpy().tolist()
 
     result = {
         "loss": eval_loss,
@@ -238,7 +237,7 @@ class _PerformanceBenchmark:
         test_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
                                    file_path=self.eval_data_file, block_size=block_size)
         test_result = evaluate(model=lm_head, eval_dataset=test_dataset, device=device)
-        score = Score([test_result[key].numpy().tolist() for key in ['perplexity', 'loss']],
+        score = Score([test_result[key] for key in ['perplexity', 'loss']],
                       coords={'measure': ['test_perplexity', 'test_loss']}, dims=['measure'])
         score.attrs['datasets'] = {'train': self.train_data_file,
                                    'val': self.val_data_file,
