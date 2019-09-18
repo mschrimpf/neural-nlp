@@ -224,8 +224,11 @@ class _PerformanceBenchmark:
         lm_head = lm_head.to(device)
         model._model.to(device)
         tokenizer = model.tokenizer
-        block_size = tokenizer.max_len_single_sentence if hasattr(tokenizer, 'max_len_single_sentence') \
-            else tokenizer.max_len
+        block_size = min(2048,
+                         tokenizer.max_len_single_sentence if hasattr(tokenizer, 'max_len_single_sentence')
+                         else tokenizer.max_len)
+        if model.identifier.startswith('roberta') or model.identifier.startswith('xlm'):
+            block_size -= 2
         # train
         train_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
                                     file_path=self.train_data_file, block_size=block_size)
