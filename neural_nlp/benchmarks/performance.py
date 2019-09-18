@@ -225,7 +225,8 @@ class _PerformanceBenchmark:
         lm_head = lm_head.to(device)
         model._model.to(device)
         tokenizer = model.tokenizer
-        block_size = tokenizer.max_len_single_sentence
+        block_size = tokenizer.max_len_single_sentence if hasattr(tokenizer, 'max_len_single_sentence') \
+            else tokenizer.max_len
         # train
         train_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
                                     file_path=self.train_data_file, block_size=block_size)
