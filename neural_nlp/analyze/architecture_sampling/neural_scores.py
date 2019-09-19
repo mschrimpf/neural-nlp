@@ -15,7 +15,8 @@ from tqdm import tqdm
 import architecture_sampling
 from architecture_sampling import utils
 from architecture_sampling.evaluate import onmt
-from neural_nlp.analyze.architecture_sampling import load_model, retrieve_log_value
+from neural_nlp.analyze.architecture_sampling import load_model
+from neural_nlp.analyze.architecture_sampling import retrieve_log_value
 from neural_nlp.benchmarks import benchmark_pool
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 from result_caching import store
@@ -23,19 +24,21 @@ from result_caching import store
 _logger = logging.getLogger(__name__)
 
 
-def score_all_models(zoo_dir):
+def score_all_models(zoo_dir, benchmark='Pereira2018-encoding-min'):
     zoo_dir = Path(zoo_dir)
     model_dirs = list(zoo_dir.iterdir())
+    scores = {}
     for model_dir in tqdm(model_dirs, desc='models'):
         try:
             perplexity = retrieve_log_value(model_dir)
             if np.isnan(perplexity) or perplexity > 20:
                 warnings.warn(f"Ignoring {model_dir} due to poor perplexity ({perplexity})")
                 continue
-            score = score_model(model_dir)
-            print(f"{model_dir} -> {score}")
+            score = _score_model(model_dir, benchmark=benchmark)
+            scores[model_dir] = score
         except FileNotFoundError as e:
             warnings.warn(f"Ignoring {model_dir} due to {e}")
+    return scores
 
 
 @store(identifier_ignore=['sentences', 'index_dict'])
@@ -106,7 +109,6 @@ def _score_model(model_dir, benchmark='Pereira2018-decoding'):
     _logger.info('Running benchmark')
     benchmark = benchmark_pool[benchmark]()
     score = benchmark(activations_model)
-    print(score)
     return score
 
 
