@@ -11,7 +11,7 @@ from architecture_sampling import utils
 from architecture_sampling.evaluate import onmt
 from architecture_sampling.evaluate.onmt import nmt_criterion
 from architecture_sampling.evaluate.onmt.evaluate import evaluate_data
-from neural_nlp.analyze.architecture_sampling import load_model, retrieve_log_value
+from neural_nlp.analyze.sampled_architectures import load_model, retrieve_log_value
 
 _logger = logging.getLogger(__name__)
 

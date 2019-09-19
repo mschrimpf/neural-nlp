@@ -15,8 +15,8 @@ from tqdm import tqdm
 import architecture_sampling
 from architecture_sampling import utils
 from architecture_sampling.evaluate import onmt
-from neural_nlp.analyze.architecture_sampling import load_model
-from neural_nlp.analyze.architecture_sampling import retrieve_log_value
+from neural_nlp.analyze.sampled_architectures import load_model
+from neural_nlp.analyze.sampled_architectures import retrieve_log_value
 from neural_nlp.benchmarks import benchmark_pool
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 from result_caching import store
