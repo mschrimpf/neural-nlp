@@ -10,7 +10,8 @@ from matplotlib import pyplot
 from pathlib import Path
 
 from neural_nlp import score
-from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models
+from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
+    _score_model as score_architecture_model
 
 logger = logging.getLogger(__name__)
 seaborn.set()
@@ -85,6 +86,17 @@ def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-
     fig, ax = _bars(architectures, scores, ylabel=f"MT model scores on {benchmark}")
     ax.set_ylim([ax.get_ylim()[0], 0.3])
     _savefig(fig, savename=f"{zoo_name}-{benchmark}")
+
+
+def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
+    mt_score = score_architecture_model('/braintree/data2/active/users/msch/zoo.wmt17/'  # this is actually -mt
+                                        'eb082aa158bb3ae2f9c5c3d4c5ff7bae2f93f901',
+                                        benchmark=benchmark)
+    lm_score = score(model='lm_1b', benchmark=benchmark)
+    fig, ax = _bars(['MT: WMT\'17', 'LM: 1B'], [mt_score, lm_score], fig_kwargs=dict(figsize=(5, 5)))
+    ax.set_ylim([ax.get_ylim()[0], 0.3])
+    ax.set_title('LSTM trained on Machine Translation/Language Modeling')
+    _savefig(fig, 'lstm_mt_lm')
 
 
 def _savefig(fig, savename):
