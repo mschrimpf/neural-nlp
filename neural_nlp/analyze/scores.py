@@ -10,6 +10,7 @@ from matplotlib import pyplot
 from pathlib import Path
 
 from neural_nlp import score
+from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models
 
 logger = logging.getLogger(__name__)
 seaborn.set()
@@ -20,15 +21,20 @@ models = [
 ]
 
 
-def bars(benchmark='Pereira2018-encoding'):
+def bar_models(benchmark='Pereira2018-encoding'):
     scores = [score(benchmark=benchmark, model=model) for model in models]
+    fig, ax = _bars(models, scores, ylabel=f"model scores on {benchmark}")
+    _savefig(fig, savename=benchmark)
+
+
+def _bars(x, scores, ylabel=None):
     y, yerr = [s.sel(aggregation='center') for s in scores], [s.sel(aggregation='error') for s in scores]
 
     fig, ax = pyplot.subplots()
-    ax.bar(models, y, yerr=yerr)
-    ax.set_ylabel(f"model scores on {benchmark}")
-    pyplot.savefig(Path(__file__).parent / 'scores' / f"{benchmark}.png")
-    return fig
+    ax.bar(x, y, yerr=yerr)
+    ax.set_xticklabels(x, rotation=90, rotation_mode='anchor')
+    ax.set_ylabel(ylabel)
+    return fig, ax
 
 
 def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False):
@@ -66,6 +72,24 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     pyplot.savefig(savepath)
     logger.info(f"Saved to {savepath}")
     return fig
+
+
+def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-lm',
+                          benchmark='Pereira2018-encoding-min'):
+    scores = score_all_models(zoo_dir, benchmark=benchmark, perplexity_threshold=20)
+    model_dirs, scores = list(scores.keys()), list(scores.values())
+    architectures = [model_dir.name[:5] for model_dir in model_dirs]
+    zoo_name = Path(zoo_dir).name
+    fig, ax = _bars(architectures, scores, ylabel=f"MT model scores on {benchmark}")
+    ax.set_ylim([ax.get_ylim()[0], 0.3])
+    _savefig(fig, savename=f"{zoo_name}-{benchmark}")
+
+
+def _savefig(fig, savename):
+    fig.tight_layout()
+    savepath = Path(__file__).parent / 'scores' / f"{savename}.png"
+    logger.info(f"Saving to {savepath}")
+    fig.savefig(savepath)
 
 
 if __name__ == '__main__':
