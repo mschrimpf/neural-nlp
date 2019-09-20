@@ -24,20 +24,21 @@ from result_caching import store
 _logger = logging.getLogger(__name__)
 
 
-def score_all_models(zoo_dir, benchmark='Pereira2018-encoding-min'):
+def score_all_models(zoo_dir, benchmark='Pereira2018-encoding-min', perplexity_threshold=20):
     zoo_dir = Path(zoo_dir)
     model_dirs = list(zoo_dir.iterdir())
     scores = {}
     for model_dir in tqdm(model_dirs, desc='models'):
         try:
             perplexity = retrieve_log_value(model_dir)
-            if np.isnan(perplexity) or perplexity > 20:
-                warnings.warn(f"Ignoring {model_dir} due to poor perplexity ({perplexity})")
+            if perplexity_threshold and (np.isnan(perplexity) or perplexity > perplexity_threshold):
+                _logger.debug(f"Ignoring {model_dir} due to poor perplexity ({perplexity})")
                 continue
+            _logger.debug(f"Scoring {model_dir} with ppl {perplexity}")
             score = _score_model(model_dir, benchmark=benchmark)
             scores[model_dir] = score
         except FileNotFoundError as e:
-            warnings.warn(f"Ignoring {model_dir} due to {e}")
+            _logger.warning(f"Ignoring {model_dir} due to {e}")
     return scores
 
 
