@@ -62,11 +62,13 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     correlation, p = scipy.stats.pearsonr(x, y)
     b, m = polyfit(x, y, 1)
     ax.plot(ax.get_xlim(), b + m * np.array(ax.get_xlim()))
-    ax.text(ax.get_xlim()[1] * (0.9 if not flip_x else 1.1), ax.get_ylim()[0] * 1.1,
-            f"r={correlation:.2f}" if p < 0.05 else 'r n.s.')
+    ax.text(ax.get_xlim()[1] * (0.8 if not flip_x else 1.2), ax.get_ylim()[0] * 1.1,
+            (f"r={(correlation * (-1 if flip_x else 1)):.2f}" +
+             '*' * max([i for i in range(5) if p <= 0.5 / (10 ** i)]))
+            if p < 0.05 else f"n.s., p={p:.2f}")
 
-    ax.set_xlabel(f"model scores on {benchmark1}")
-    ax.set_ylabel(f"model scores on {benchmark2}")
+    ax.set_xlabel(benchmark1)
+    ax.set_ylabel(benchmark2)
 
     savepath = Path(__file__).parent / 'scores' / f"{benchmark1}__{benchmark2}.png"
     pyplot.savefig(savepath)
