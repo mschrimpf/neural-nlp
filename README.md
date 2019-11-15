@@ -3,9 +3,11 @@
 
 ## Installation
 ```bash
-conda env create -f environment.yml
-conda activate neural-nlp
+git clone https://github.com/mschrimpf/neural-nlp.git
+cd neural-nlp
+pip install -e .
 ```
+You might have to install nltk by hand / with conda.
 
 ## Retrieve models and stimuli
 ```bash
