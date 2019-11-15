@@ -7,7 +7,6 @@ with open('README.md') as readme_file:
     readme = readme_file.read()
 
 requirements = [
-    "python>=3.6",
     "tensorflow",
     "numpy",
     "matplotlib",
@@ -18,17 +17,17 @@ requirements = [
     "gensim",
     "theano",
     "pytest",
-    "git+https://github.com/brain-score/brain-score.git@e97478f",
-    "git+https://github.com/brain-score/result_caching.git",
+    "brain-score @ git+https://github.com/brain-score/brain-score.git@e97478f",
+    "result_caching @ git+https://github.com/brain-score/result_caching.git",
     "netCDF4",
     "pillow",
     "llist",
-    "git+https://github.com/mschrimpf/skip-thoughts.git@7d46c14",
-    "git+https://github.com/mschrimpf/lm_1b.git@dd4061b",
+    "skip-thoughts @ git+https://github.com/mschrimpf/skip-thoughts.git@7d46c14",
+    "lm_1b @ git+https://github.com/mschrimpf/lm_1b.git@dd4061b",
     "nbsvm",
     # the following require pytorch>=0.4 which is incompatible with `architecture_sampling` which requires =0.2.0
-    "git+https://github.com/williamrainer/OpenNMT-py.git@cdc8f37",
-    "git+https://github.com/pytorch/text.git",
+    "OpenNMT-py @ git+https://github.com/williamrainer/OpenNMT-py.git@cdc8f37",
+    "text @ git+https://github.com/pytorch/text.git",
 
     "pytorch-transformers",
 ]
