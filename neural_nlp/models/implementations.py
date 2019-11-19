@@ -502,7 +502,7 @@ class Glove(KeyedVectorModel):
         super(Glove, self).__init__(identifier='glove', weights_file=word2vec_weightsfile)
 
 
-class RecursiveNeuralTensorNetwork(Model):
+class RecursiveNeuralTensorNetwork(BrainModel):
     """
     http://www.aclweb.org/anthology/D13-1170
     """
