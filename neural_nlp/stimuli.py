@@ -69,6 +69,13 @@ class NaturalisticStoriesNeural:
         return (sentences_meta['reducedSentence'] if self._reduced else sentences_meta['fullSentence']).dropna().values
 
 
+class ConceptSimilarity:
+    def __call__(self):
+        with open(os.path.join(_data_dir, 'concept-similarity', 'words.txt')) as f:
+            words = f.read().splitlines()
+        return words
+
+
 def load_stimuli(stimulus_set_name):
     return _mappings[stimulus_set_name]()
 
