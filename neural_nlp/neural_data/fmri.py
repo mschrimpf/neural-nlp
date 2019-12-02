@@ -31,9 +31,8 @@ def load_Pereira2018():
     experiment2, experiment3 = "243sentences.mat", "384sentences.mat"
     stimuli = {}  # experiment -> stimuli
     assemblies = []
-    for subject_directory in tqdm(list(data_dir.iterdir()), desc="subjects"):
-        if not subject_directory.is_dir():
-            continue
+    subject_directories = [d for d in data_dir.iterdir() if d.is_dir()]
+    for subject_directory in tqdm(subject_directories, desc="subjects"):
         for experiment_filename in [experiment2, experiment3]:
             data_file = subject_directory / f"examples_{experiment_filename}"
             if not data_file.is_file():
@@ -79,8 +78,10 @@ def load_Pereira2018():
                 for copy_coord in ['experiment', 'story', 'passage_index', 'passage_label', 'passage_category']:
                     stimuli[experiment_filename][copy_coord] = assembly[copy_coord].values
 
+    _logger.debug(f"Merging {len(assemblies)} assemblies")
     assembly = merge_data_arrays(assemblies)
 
+    _logger.debug("Creating StimulusSet")
     combined_stimuli = {}
     for key in stimuli[experiment2]:
         combined_stimuli[key] = np.concatenate((stimuli[experiment2][key], stimuli[experiment3][key]))
