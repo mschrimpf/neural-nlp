@@ -12,6 +12,8 @@ import pandas as pd
 from numpy.random import RandomState
 from tqdm import tqdm
 
+import pickle
+
 from brainscore.utils import LazyLoad
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
@@ -521,6 +523,7 @@ class RecursiveNeuralTensorNetwork(Model):
         assert len(result) == 1
         result = result[[column for column in result if column.startswith('activation')]]
         return result.values
+#        return result.values
 
 
 def load_model(model_name):
@@ -528,12 +531,13 @@ def load_model(model_name):
 
 
 model_pool = {
+    'topicETM': LazyLoad(TopicETM),
     'random-gaussian': LazyLoad(GaussianRandom),
     'skip-thoughts': LazyLoad(SkipThoughts),
     'lm_1b': LazyLoad(LM1B),
     'word2vec': LazyLoad(Word2Vec),
     'glove': LazyLoad(Glove),
-    'rntn': LazyLoad(RecursiveNeuralTensorNetwork),
+#    'rntn': LazyLoad(RecursiveNeuralTensorNetwork),
     'transformer-wordmean': LazyLoad(Transformer_WordMean),
     'transformer-wordall': LazyLoad(Transformer_WordAll),
     'transformer-wordlast': LazyLoad(Transformer_WordLast),
