@@ -8,6 +8,7 @@ import pandas as pd
 from result_caching import store
 from pathlib import Path
 import scipy.io as sio
+import fire
 
 # neural_data_dir = Path(os.getcwd()) / 'ressources' / 'neural_data' / 'ecog' / 'Fedorenko2016' # TO DO create a setup file
 
@@ -118,5 +119,6 @@ def load_Fedorenko2016():
 
 
 if __name__ == '__main__':
-    data = load()
+    data = load_Fedorenko2016()
     pass
+
