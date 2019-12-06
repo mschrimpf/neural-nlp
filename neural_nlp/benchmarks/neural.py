@@ -411,39 +411,41 @@ class FedorenkoBenchmark:
             regression=self._regression, correlation=self._correlation,
             crossvalidation_kwargs=dict(split_coord='timepoint1', stratification_coord='timepoint1'))
 
-    @property
-    @store()
+# Remove the ceiling
+    # @property
+    # @store()
+    # def ceiling(self):
+    #     cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='timepoint1', splits=2) # still assuming a stratification cord along the word/timepoint dimension
+    #
+    #     def ceiling_apply(train_source, train_target, test_source, test_target):
+    #         self._regression.fit(train_source, train_target)
+    #         prediction = self._regression.predict(test_source)
+    #         score = self._correlation(prediction, test_target)
+    #         return score
+    #
+    #     subjects = list(sorted(set(self._target_assembly['subject_UID'].values))) # the subjectUID from the ECoG assembly packaging
+    #     split_scores = []
+    #
+    #     for heldout_subject in tqdm(subjects, desc='subject holdout'):
+    #         subject_pool = list(sorted(set(subjects) - {heldout_subject}))
+    #         indexer_pool = DataArray(np.zeros(len(subject_pool)), coords={'subject_UID': subject_pool},
+    #                                  dims=['subject_UID']).stack(neuroid=['subject_UID'])
+    #         heldout_indexer = DataArray(np.zeros(1), coords={'subject_UID': [heldout_subject]},
+    #                                     dims=['subject_UID']).stack(neuroid=['subject_UID'])
+    #         subject_pool = subset(self._target_assembly, indexer_pool, dims_must_match=False)
+    #         heldout = subset(self._target_assembly, heldout_indexer, dims_must_match=False)
+    #         split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
+    #         split_score = split_score.expand_dims('heldout_subject')
+    #         split_score['heldout_subject'] = [heldout_subject]
+    #         split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
+    #         split_scores.append(split_score)
+    #     consistency = Score.merge(*split_scores)
+    #     error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
+    #     consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
+    #     consistency.loc[{'aggregation': 'error'}] = error
+    #     return consistency
     def ceiling(self):
-        cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='timepoint1', splits=2) # still assuming a stratification cord along the word/timepoint dimension
-
-        def ceiling_apply(train_source, train_target, test_source, test_target):
-            self._regression.fit(train_source, train_target)
-            prediction = self._regression.predict(test_source)
-            score = self._correlation(prediction, test_target)
-            return score
-
-        subjects = list(sorted(set(self._target_assembly['subject_UID'].values))) # the subjectUID from the ECoG assembly packaging
-        split_scores = []
-        
-        for heldout_subject in tqdm(subjects, desc='subject holdout'):
-            subject_pool = list(sorted(set(subjects) - {heldout_subject}))
-            indexer_pool = DataArray(np.zeros(len(subject_pool)), coords={'subject_UID': subject_pool},
-                                     dims=['subject_UID']).stack(neuroid=['subject_UID'])
-            heldout_indexer = DataArray(np.zeros(1), coords={'subject_UID': [heldout_subject]},
-                                        dims=['subject_UID']).stack(neuroid=['subject_UID'])
-            subject_pool = subset(self._target_assembly, indexer_pool, dims_must_match=False)
-            heldout = subset(self._target_assembly, heldout_indexer, dims_must_match=False)
-            split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
-            split_score = split_score.expand_dims('heldout_subject')
-            split_score['heldout_subject'] = [heldout_subject]
-            split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
-            split_scores.append(split_score)
-        consistency = Score.merge(*split_scores)
-        error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
-        consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
-        consistency.loc[{'aggregation': 'error'}] = error
-        return consistency        
-        
+        return None
         
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -523,3 +525,7 @@ benchmark_pool = {
     'Fedorenko2016': FedorenkoBenchmark,
     'Fedorenko2016Mean': FedorenkoBenchmarkMean,
 }
+
+# Added dec 5th
+# if __name__ == '__main__':
+#     FedorenkoBenchmark()
