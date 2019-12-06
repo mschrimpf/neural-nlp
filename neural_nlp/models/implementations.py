@@ -65,13 +65,17 @@ class GaussianRandom:
 class TopicETM:
     """https://arxiv.org/abs/1907.04907"""
 
-    def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', 'normalized_betas_50K.npy')
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
+    def __init__(self, weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt'),
+                 vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl'),
+                 num_topics = 100):
         
         super().__init__()
         
-        self.weights = np.load(weights_file)
+        self.num_topics = num_topics
+        
+        self.weights = torch.load(weights_file, map_location='cpu')
+        self.weights = self.weights.numpy()
+        
         with open(vocab_file,'rb') as f:
              self.vocab = pickle.load(f)
         
@@ -97,7 +101,7 @@ class TopicETM:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
                 self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,)))
+                feature_vectors.append(np.zeros((self.num_topics,)))
         return feature_vectors
     
     def _get_activations(self, sentences, layers):
@@ -113,11 +117,13 @@ class TopicETM:
 class TopicETM_NotNormalized:
     """https://arxiv.org/abs/1907.04907"""
 
-    def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt')
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
+    def __init__(self, weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt'),
+                 vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl'),
+                 num_topics = 100):
         
         super().__init__()
+        
+        self.num_topics = num_topics
         
         self.weights = torch.load(weights_file, map_location='cpu')
         self.weights = self.weights.numpy()
@@ -147,7 +153,7 @@ class TopicETM_NotNormalized:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
                 self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,)))
+                feature_vectors.append(np.zeros((self.num_topics,)))
         return feature_vectors
     
     def _get_activations(self, sentences, layers):
@@ -163,11 +169,13 @@ class TopicETM_NotNormalized:
 class TopicETM_Softmax:
     """https://arxiv.org/abs/1907.04907"""
 
-    def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt')
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
+    def __init__(self, weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt'),
+                 vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl'),
+                 num_topics = 100):
         
         super().__init__()
+        
+        self.num_topics = num_topics
         
         self.weights = torch.load(weights_file, map_location='cpu')
         self.weights = self.weights.numpy()
@@ -199,7 +207,7 @@ class TopicETM_Softmax:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
                 self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,)))
+                feature_vectors.append(np.zeros((self.num_topics,)))
         return feature_vectors
     
     def _get_activations(self, sentences, layers):
@@ -658,7 +666,7 @@ class Glove(KeyedVectorModel):
         super(Glove, self).__init__(identifier='glove', weights_file=word2vec_weightsfile)
 
 
-class RecursiveNeuralTensorNetwork(Model):
+class RecursiveNeuralTensorNetwork(BrainModel):
     """
     http://www.aclweb.org/anthology/D13-1170
     """
