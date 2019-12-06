@@ -23,7 +23,7 @@ stim_data_dir = '/om/user/gretatu/neural-nlp/ressources/stimuli/sentences_8'
 _logger = logging.getLogger(__name__)
 
 
-@store()
+# @store() Disable the storing, since it is a very small file
 def load_Fedorenko2016():
     # Argument: 
     filepaths_neural = glob(os.path.join(neural_data_dir, '*.mat'))
@@ -85,18 +85,20 @@ def load_Fedorenko2016():
     subject5 = np.repeat(5, 18)
 
     subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5], axis=0)
-    
+
+    word_number = list(range(np.shape(ecog_mtrix_T)[0]))
+
     # Add a pd df as the stimulus_set
-    zipped_lst = list(zip(sentenceID, sentence_words))  
-    df_stimulus_set = pd.DataFrame(zipped_lst, columns = ['stimulus_id', 'word'])  
+    zipped_lst = list(zip(sentenceID, word_number, sentence_words))
+    df_stimulus_set = pd.DataFrame(zipped_lst, columns = ['sentence_id', 'stimulus_id', 'word'])
     
    
     # xarray - currently two dims
     assembly = xr.DataArray(ecog_mtrix_T, # Do we want the avg word response too?
                     dims =('timepoint', 'electrode'),
-                    coords = {'timepoint1': ('timepoint', list(range(np.shape(ecog_mtrix_T)[0]))),
+                    coords = {'stimulus_id': ('timepoint', word_number),
                              'word': ('timepoint', sentence_words), 
-                             'stimulus_id': ('timepoint', sentenceID), 
+                             'sentence_id': ('timepoint', sentenceID),
                              'electrode1': ('electrode', list(range(np.shape(ecog_mtrix_T)[1]))),
                              'subject_UID': ('electrode', subjectID), # Name is subject_UID for consistency
                              })   

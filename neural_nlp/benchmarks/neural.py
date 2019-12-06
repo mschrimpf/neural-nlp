@@ -385,11 +385,11 @@ class PereiraRDM(_PereiraBenchmark):
 def read_words(candidate, stimulus_set): # This is a new version of the listen_to_stories function
     # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
     activations = []
-    for word in ordered_set(stimulus_set['word'].values):
-        word_stimuli = stimulus_set[stimulus_set['word'] == word]
-#        story_stimuli.name = f"{stimulus_set.name}-{story}"
-        word_activations = candidate(stimuli=word_stimuli)
-        activations.append(word_activations)
+    for sentence in ordered_set(stimulus_set['sentence_id'].values):
+        sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence]
+        sentence_stimuli.name = f"{stimulus_set.name}-{sentence}"
+        sentence_activations = candidate(stimuli=sentence_stimuli)
+        activations.append(sentence_activations)
     model_activations = merge_data_arrays(activations)
     # merging does not maintain stimulus order. the following orders again
     idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
@@ -405,17 +405,17 @@ class FedorenkoBenchmark:
         assembly = load_Fedorenko2016() 
         self._target_assembly = assembly
         
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='timepoint1')) # word
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='timepoint1'))
+        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')) # word
+        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='timepoint1', stratification_coord='timepoint1'))
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
 
 # Remove the ceiling
     # @property
     # @store()
     # def ceiling(self):
-    #     cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='timepoint1', splits=2) # still assuming a stratification cord along the word/timepoint dimension
+    #     cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='stimulus_id', splits=2) # still assuming a stratification cord along the word/timepoint dimension
     #
     #     def ceiling_apply(train_source, train_target, test_source, test_target):
     #         self._regression.fit(train_source, train_target)
@@ -453,7 +453,7 @@ class FedorenkoBenchmark:
         stimulus_set = self._target_assembly.attrs['stimulus_set']
         
         model_activations = read_words(candidate, stimulus_set)
-        assert (model_activations['timepoint1'].values == self._target_assembly['timepoint1'].values).all()
+        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
 
     
@@ -466,11 +466,11 @@ class FedorenkoBenchmarkMean:
         # avg code 
         # packaging file, change the benchmark to include averaging. 
         
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='timepoint1')) # word
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='timepoint1'))
+        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')) # word
+        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='timepoint1', stratification_coord='timepoint1'))
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
     
     def __call__(self, candidate):
         
@@ -479,7 +479,7 @@ class FedorenkoBenchmarkMean:
         stimulus_set = self._target_assembly.attrs['stimulus_set']
         
         model_activations = read_words(candidate, stimulus_set)
-        assert (model_activations['timepoint1'].values == self._target_assembly['timepoint1'].values).all()
+        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         
         # average here, can I simply hard code the averaging across sentences?
         # model_activations = 
