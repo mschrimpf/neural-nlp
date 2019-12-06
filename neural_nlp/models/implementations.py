@@ -66,8 +66,8 @@ class TopicETM:
     """https://arxiv.org/abs/1907.04907"""
 
     def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'normalized_betas.npy')
-        vocab_file = os.path.join(_ressources_dir, 'vocab.pkl')
+        weights_file = os.path.join(_ressources_dir, 'topicETM', 'normalized_betas_50K.npy')
+        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
         
         super().__init__()
         
@@ -92,23 +92,18 @@ class TopicETM:
     def _encode_sentence(self, sentence):
         words = sentence.split()
         feature_vectors = []        
-                 
         for word in words:
             if word in self.vocab:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
                 self._logger.warning(f"Word {word} not present in model")
-                #feature_vectors.append(np.zeros([1,50]))
-        #### BREAK & check Shape
-        #print(feature_vectors)
-        #feature_vectors = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in feature_vectors]
-
-        #sentence_enc = np.mean(feature_vectors, axis=0)
+                feature_vectors.append(np.zeros((100,)))
         return feature_vectors
     
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['projection'])
         encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
+        encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
         return {'projection': encoding}
                 
     available_layers = ['projection']
