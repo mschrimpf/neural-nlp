@@ -61,55 +61,6 @@ class GaussianRandom:
         return {self._layer_name: self._rng.standard_normal((len(sentences), self._num_samples))}
 
     
-    
-class TopicETM:
-    """https://arxiv.org/abs/1907.04907"""
-
-    def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'normalized_betas_50K.npy')
-        vocab_file = os.path.join(_ressources_dir, 'vocab_50K.pkl')
-        
-        super().__init__()
-        
-        self.weights = np.load(weights_file)
-        with open(vocab_file,'rb') as f:
-             self.vocab = pickle.load(f)
-        
-        wordEmb_TopicSpace = {}
-        for elm in tqdm(self.vocab, desc='vocab'):
-            i = self.vocab.index(elm) # get index of word
-            wordEmb_TopicSpace[elm] = self.weights[:,i]
-        self.wordEmb_TopicSpace = wordEmb_TopicSpace
-        self._extractor = ActivationsExtractorHelper(identifier='topicETM', get_activations=self._get_activations,
-                                                     reset=lambda: None)
-        self._extractor.insert_attrs(self)
-        self._extractor.register_activations_hook(word_mean)
-        self._logger = logging.getLogger(self.__class__.__name__)
-
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)       
-        
-    def _encode_sentence(self, sentence):
-        words = sentence.split()
-        feature_vectors = []        
-        for word in words:
-            if word in self.vocab:
-                feature_vectors.append(self.wordEmb_TopicSpace[word])
-            else:
-                self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,))) # added
-        return feature_vectors
-    
-    def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, ['projection'])
-        encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
-        encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
-        return {'projection': encoding}
-                
-    available_layers = ['projection']
-    default_layers = available_layers
-
-    
 class SkipThoughts:
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
@@ -582,7 +533,6 @@ def load_model(model_name):
 
 
 model_pool = {
-    'topicETM': LazyLoad(TopicETM),
     'random-gaussian': LazyLoad(GaussianRandom),
     'skip-thoughts': LazyLoad(SkipThoughts),
     'lm_1b': LazyLoad(LM1B),
@@ -596,7 +546,6 @@ model_pool = {
     'transformer-pad_zero': LazyLoad(Transformer_PadZero),
 }
 model_layers = {
-    'topicETM': TopicETM.default_layers,
     'random-gaussian': GaussianRandom.default_layers,
     'skip-thoughts': SkipThoughts.default_layers,
     'lm_1b': LM1B.default_layers,
