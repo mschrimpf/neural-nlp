@@ -47,7 +47,7 @@ class ActivationsExtractorHelper:
 
         activations = self.from_sentences(sentences=stimulus_set['sentence'].values, layers=layers,
                                           stimuli_identifier=stimuli_identifier)
-        activations = attach_stimulus_set_meta(activations, stimulus_set)
+        # activations = attach_stimulus_set_meta(activations, stimulus_set)
         return activations
 
     def from_sentences(self, sentences, layers, stimuli_identifier=None):
@@ -99,7 +99,7 @@ class ActivationsExtractorHelper:
         return handle
 
     def _package(self, layer_activations, sentences):
-        shapes = [a.shape for a in layer_activations.values()]
+        shapes = [np.array(a).shape for a in layer_activations.values()]
         self._logger.debug('Activations shapes: {}'.format(shapes))
         self._logger.debug("Packaging individual layers")
         layer_assemblies = [self._package_layer(single_layer_activations, layer=layer, sentences=sentences) for
@@ -126,12 +126,17 @@ class ActivationsExtractorHelper:
         return model_assembly
 
     def _package_layer(self, layer_activations, layer, sentences):
+        layer_activations = np.concatenate(layer_activations, axis=0)
         assert layer_activations.shape[0] == len(sentences)
-        activations = flatten(layer_activations)  # collapse for single neuroid dim
+        assert len(sentences) == 1
+        assert len(layer_activations.shape) == 3
+        activations = layer_activations.squeeze(axis=0)
+        # activations = flatten(layer_activations)  # collapse for single neuroid dim
+        words = sentences[0].split(' ')
         layer_assembly = NeuroidAssembly(
             activations,
-            coords={'stimulus_sentence': ('presentation', sentences),
-                    'sentence_num': ('presentation', list(range(len(sentences)))),
+            coords={'stimulus_sentence': ('presentation', np.repeat(sentences, len(words))),
+                    'word': ('presentation', words),
                     'neuroid_num': ('neuroid', list(range(activations.shape[1]))),
                     'model': ('neuroid', [self.identifier] * activations.shape[1]),
                     'layer': ('neuroid', [layer] * activations.shape[1]),

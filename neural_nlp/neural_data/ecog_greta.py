@@ -1,3 +1,4 @@
+from neural_nlp.stimuli import StimulusSet
 import xarray as xr
 import logging
 import os
@@ -21,7 +22,6 @@ print('--------- Neural data directory: --------- \n', neural_data_dir)
 stim_data_dir = '/om/user/gretatu/neural-nlp/ressources/stimuli/sentences_8'
 
 _logger = logging.getLogger(__name__)
-
 
 # @store() Disable the storing, since it is a very small file
 def load_Fedorenko2016():
@@ -86,39 +86,37 @@ def load_Fedorenko2016():
 
     subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5], axis=0)
 
+    # Create a list for each word number
     word_number = list(range(np.shape(ecog_mtrix_T)[0]))
 
     # Add a pd df as the stimulus_set
     zipped_lst = list(zip(sentenceID, word_number, sentence_words))
-    df_stimulus_set = pd.DataFrame(zipped_lst, columns = ['sentence_id', 'stimulus_id', 'word'])
-    
+    df_stimulus_set = StimulusSet(zipped_lst, columns = ['sentence_id', 'stimulus_id', 'word'])
+    df_stimulus_set.name = 'Fedorenko2016.ecog'
    
-    # xarray - currently two dims
+    # xarray
+    electrode_numbers = list(range(np.shape(ecog_mtrix_T)[1]))
     assembly = xr.DataArray(ecog_mtrix_T, # Do we want the avg word response too?
-                    dims =('timepoint', 'electrode'),
-                    coords = {'stimulus_id': ('timepoint', word_number),
-                             'word': ('timepoint', sentence_words), 
-                             'sentence_id': ('timepoint', sentenceID),
-                             'electrode1': ('electrode', list(range(np.shape(ecog_mtrix_T)[1]))),
-                             'subject_UID': ('electrode', subjectID), # Name is subject_UID for consistency
+                    dims =('presentation', 'neuroid'),
+                    coords = {'stimulus_id': ('presentation', word_number),
+                             'word': ('presentation', sentence_words),
+                             'sentence_id': ('presentation', sentenceID),
+                             'electrode': ('neuroid', electrode_numbers),
+                             'neuroid_id': ('neuroid', electrode_numbers),
+                             'subject_UID': ('neuroid', subjectID), # Name is subject_UID for consistency
                              })   
-                                                     
-                              
-    
+
     assembly.attrs['stimulus_set'] = df_stimulus_set # Add the stimulus_set dataframe
     
     # Trying to add the stimulus_UID as an attribute or additional coordinate?
     # assembly.assign_coords['subject_UID'] = subjectID
-    
-    
+
     # TO-DO: add avg sentence representations? 
 #                              'sentence_number': ('sentence', list(range(int((np.shape(ecog_mtrix_T)[0]/8))))),
 #                              'avg_sentence_response': ('sentence', sent_avg_ecog)
-    
     data = assembly if data is None else xr.concat(data, assembly)
         
     return data
-
 
 if __name__ == '__main__':
     data = load_Fedorenko2016()

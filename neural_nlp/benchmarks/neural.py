@@ -385,10 +385,14 @@ class PereiraRDM(_PereiraBenchmark):
 def read_words(candidate, stimulus_set): # This is a new version of the listen_to_stories function
     # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
     activations = []
-    for sentence in ordered_set(stimulus_set['sentence_id'].values):
-        sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence]
-        sentence_stimuli.name = f"{stimulus_set.name}-{sentence}"
+    for i, sentence_id in enumerate(ordered_set(stimulus_set['sentence_id'].values)):
+        sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence_id]
+        sentence_stimuli = StimulusSet({'sentence': ' '.join(sentence_stimuli['word']),
+                                        'sentence_id': list(set(sentence_stimuli['sentence_id']))})
+        sentence_stimuli.name = f"{stimulus_set.name}-{sentence_id}"
         sentence_activations = candidate(stimuli=sentence_stimuli)
+        sentence_activations['stimulus_id'] = ('presentation', 8 * i + np.arange(0, 8))
+        sentence_activations['sentence_id'] = ('presentation', [sentence_id] * 8)
         activations.append(sentence_activations)
     model_activations = merge_data_arrays(activations)
     # merging does not maintain stimulus order. the following orders again
@@ -409,7 +413,8 @@ class FedorenkoBenchmark:
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
+            # crossvalidation_kwargs=dict(split_coord='sentence_id', stratification_coord=None))
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id', train_size=.8))
 
 # Remove the ceiling
     # @property
