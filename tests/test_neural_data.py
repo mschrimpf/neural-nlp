@@ -1,9 +1,8 @@
+import numpy as np
 from pytest import approx
 
 from neural_nlp import neural_data
-import numpy as np
-
-from neural_nlp.neural_data.fmri import load_Pereira2018
+from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank
 
 
 class TestLoadRdmSentences(object):
@@ -55,9 +54,22 @@ class TestLoadRdmTimepoints:
 
 def test_Pereira():
     assembly = load_Pereira2018()
-    assert set(assembly['experiment'].values) == set(assembly['story'].values) == {'243sentences', '384sentences'}
+    assert set(assembly['experiment'].values) == {'243sentences', '384sentences'}
     assert len(assembly['presentation']) == 243 + 384
+    assert len(assembly['neuroid']) == 1592159
     assert len(set(assembly['subject'].values)) == 9
     subject_assembly = assembly.sel(subject='P01')
     assert not np.isnan(subject_assembly).any()
     assert subject_assembly.values.sum() == approx(101003052.8293553)
+
+
+def test_PereiraBlank():
+    assembly = load_Pereira2018_Blank()
+    assert set(assembly['experiment'].values) == {'243sentences', '384sentences'}
+    assert len(assembly['presentation']) == 243 + 384
+    assert len(set(assembly['subject'].values)) == 10
+    assert len(set(assembly['neuroid_id'].values)) == 310125
+    assert set(assembly['atlas'].values) == {'language', 'MD', 'DMN', 'auditory', 'visual'}
+    subject_assembly = assembly.sel(subject='018', atlas='auditory', atlas_selection_lower=90)
+    assert not np.isnan(subject_assembly).any()  # note though that other atlases have nan values from the data itself
+    assert np.nansum(assembly.values) == approx(-38516843.18636856)

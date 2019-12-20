@@ -26,6 +26,75 @@ _logger = logging.getLogger(__name__)
 
 
 @store()
+def load_Pereira2018_Blank():
+    reference_data = load_Pereira2018()
+
+    data_dir = neural_data_dir / "Pereira2018_Blank"
+    experiments = {'n72': "243sentences", 'n96': "384sentences"}
+    assemblies = []
+    subjects = ['018', '199', '215', '288', '289', '296', '343', '366', '407', '426']
+    for subject in tqdm(subjects, desc="subjects"):
+        subject_assemblies = []
+        for experiment_filepart, experiment_name in experiments.items():
+            filepath = data_dir / f"{subject}_complang_passages_{experiment_filepart}_persent.mat"
+            if not filepath.is_file():
+                _logger.debug(f"Subject {subject} did not run {experiment_name}: {filepath} does not exist")
+                continue
+            data = scipy.io.loadmat(str(filepath))
+
+            # construct assembly
+            assembly = data['data']
+            neuroid_meta = data['meta']
+
+            expanded_assembly = []
+            voxel_nums, atlases, atlas_selections, atlas_filter_lower, rois = [], [], [], [], []
+            for voxel_num in range(assembly.shape[1]):
+                for atlas_iter, atlas_selection in enumerate(neuroid_meta['atlases'][0, 0][:, 0]):
+                    multimask = neuroid_meta['roiMultimask'][0, 0][atlas_iter, 0][voxel_num, 0]
+                    if np.isnan(multimask):
+                        continue
+                    atlas_selection = atlas_selection[0].split('_')
+                    filter_lower = re.match(r'from([0-9]{2})to100prcnt', atlas_selection[-1])
+                    atlas_filter_lower.append(int(filter_lower.group(1)))
+                    atlas, selection = atlas_selection[0], '_'.join(atlas_selection[1:])
+                    atlases.append(atlas)
+                    atlas_selections.append(selection)
+                    multimask = int(multimask) - 1  # Matlab 1-based to Python 0-based indexing
+                    rois.append(neuroid_meta['rois'][0, 0][atlas_iter, 0][multimask, 0][0])
+                    voxel_nums.append(voxel_num)
+                    expanded_assembly.append(assembly[:, voxel_num])
+            assembly = np.stack(expanded_assembly).T
+            assert assembly.shape[1] == len(atlases) == len(atlas_selections) == len(rois)
+            indices_in_3d = neuroid_meta['indicesIn3D'][0, 0][:, 0]
+            indices_in_3d = [indices_in_3d[voxel_num] for voxel_num in voxel_nums]
+
+            # put it all together
+            assembly = NeuroidAssembly(assembly, coords={
+                **{coord: (dims, value) for coord, dims, value in walk_coords(
+                    reference_data.sel(experiment=experiment_name)['presentation'])},
+                **{'experiment': ('presentation', [experiment_name] * assembly.shape[0]),
+                   'subject': ('neuroid', [subject] * assembly.shape[1]),
+                   'voxel_num': ('neuroid', voxel_nums),
+                   'atlas': ('neuroid', atlases),
+                   'atlas_selection': ('neuroid', atlas_selections),
+                   'atlas_selection_lower': ('neuroid', atlas_filter_lower),
+                   'roi': ('neuroid', rois),
+                   'indices_in_3d': ('neuroid', indices_in_3d),
+                   }}, dims=['presentation', 'neuroid'])
+            assembly['neuroid_id'] = 'neuroid', _build_id(assembly, ['subject', 'voxel_num'])
+            subject_assemblies.append(assembly)
+        assembly = merge_data_arrays(subject_assemblies)
+        assemblies.append(assembly)
+
+    _logger.debug(f"Merging {len(assemblies)} assemblies")
+    assembly = merge_data_arrays(assemblies)
+
+    _logger.debug("Creating StimulusSet")
+    assembly.attrs['stimulus_set'] = reference_data.stimulus_set
+    return assembly
+
+
+@store()
 def load_Pereira2018():
     data_dir = neural_data_dir / "Pereira2018"
     experiment2, experiment3 = "243sentences.mat", "384sentences.mat"
