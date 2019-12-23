@@ -1,11 +1,10 @@
-import logging
 import warnings
 
 import itertools
+import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly
 from tqdm import tqdm
-from sklearn.linear_model import Ridge
 from xarray import DataArray
 
 from brainscore.benchmarks import Benchmark
@@ -15,21 +14,13 @@ from brainscore.metrics.regression import pls_regression, linear_regression, pea
     CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
     apply_aggregate
-from brainscore.metrics.xarray_utils import XarrayRegression
-from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018
 from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
+from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018_Blank
 from neural_nlp.stimuli import load_stimuli, StimulusSet
 from neural_nlp.utils import ordered_set
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
-
-
-def cg_regression(xarray_kwargs=None):
-    regression = Ridge()  # solver='sparse_cg')
-    xarray_kwargs = xarray_kwargs or {}
-    regression = XarrayRegression(regression, **xarray_kwargs)
-    return regression
 
 
 class Invert:
@@ -292,29 +283,30 @@ class VoxelPCABenchmark:
 
 class _PereiraBenchmark(Benchmark):
     def __init__(self, metric):
-        self._target_assembly = load_Pereira2018()
+        self._target_assembly = load_Pereira2018_Blank()
+        self._target_assembly = self._target_assembly.sel(atlas_selection_lower=90)
         self._metric = metric
-        self._cross_subject = CartesianProduct(dividers=['subject'])
+        self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     def __call__(self, candidate):
         stimulus_set = self._target_assembly.attrs['stimulus_set']
         model_activations = listen_to_stories(candidate, stimulus_set)
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
-        _logger.info('Scoring across subjects')
-        subject_scores = self._cross_subject(self._target_assembly, apply=
-        lambda subject_assembly: self._apply_subject(model_activations, subject_assembly))
-        score = apply_aggregate(lambda scores: scores.median('subject'), subject_scores)
-        return score
+        _logger.info('Scoring across experiments & atlases')
+        cross_scores = self._cross(self._target_assembly, apply=
+        lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
+        return cross_scores
 
-    def _apply_subject(self, source_assembly, subject_assembly):
-        subject_assembly = subject_assembly.dropna('presentation')  # some subjects have only done one experiment
-        assert len(subject_assembly['presentation']) in [243, 384, 243 + 384]
-        assert not np.isnan(subject_assembly).any()
-        source_assembly = source_assembly[{'presentation': [stimulus_id in subject_assembly['stimulus_id'].values
+    def _apply_cross(self, source_assembly, cross_assembly):
+        cross_assembly = cross_assembly.dropna('neuroid')  # some subjects have only done one experiment
+        assert len(cross_assembly['presentation']) in [243, 384]
+        assert not np.isnan(cross_assembly).any()
+        source_assembly = source_assembly[{'presentation': [stimulus_id in cross_assembly['stimulus_id'].values
                                                             for stimulus_id in source_assembly['stimulus_id'].values]}]
-        return self._metric(source_assembly, subject_assembly)
+        return self._metric(source_assembly, cross_assembly)
 
+    @property
     def ceiling(self):
         return None
 
@@ -351,8 +343,8 @@ class PereiraEncodingMin(_PereiraBenchmark):
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=2))
         super(PereiraEncodingMin, self).__init__(metric=metric)
-        self._target_assembly = self._target_assembly.sel(subject='M02')
-        self._target_assembly['subject'] = 'neuroid', ['M02'] * len(self._target_assembly['neuroid'])
+        self._target_assembly = self._target_assembly.sel(subject='018')
+        self._target_assembly['subject'] = 'neuroid', ['018'] * len(self._target_assembly['neuroid'])
         self._target_assembly = NeuroidAssembly(self._target_assembly)  # re-index with subject
 
 
@@ -382,7 +374,8 @@ class PereiraRDM(_PereiraBenchmark):
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
         super(PereiraRDM, self).__init__(metric=metric)
 
-def read_words(candidate, stimulus_set): # This is a new version of the listen_to_stories function
+
+def read_words(candidate, stimulus_set):  # This is a new version of the listen_to_stories function
     # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
     activations = []
     for sentence in ordered_set(stimulus_set['sentence_id'].values):
@@ -396,119 +389,79 @@ def read_words(candidate, stimulus_set): # This is a new version of the listen_t
            itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
     assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
     model_activations = model_activations[{'presentation': idx}]
-    
+
     return model_activations
-        
-        
+
+
 class FedorenkoBenchmark:
     def __init__(self, bold_shift=None):
-        assembly = load_Fedorenko2016() 
+        assembly = load_Fedorenko2016()
         self._target_assembly = assembly
-        
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')) # word
+
+        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
 
-# Remove the ceiling
-    # @property
-    # @store()
-    # def ceiling(self):
-    #     cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='stimulus_id', splits=2) # still assuming a stratification cord along the word/timepoint dimension
-    #
-    #     def ceiling_apply(train_source, train_target, test_source, test_target):
-    #         self._regression.fit(train_source, train_target)
-    #         prediction = self._regression.predict(test_source)
-    #         score = self._correlation(prediction, test_target)
-    #         return score
-    #
-    #     subjects = list(sorted(set(self._target_assembly['subject_UID'].values))) # the subjectUID from the ECoG assembly packaging
-    #     split_scores = []
-    #
-    #     for heldout_subject in tqdm(subjects, desc='subject holdout'):
-    #         subject_pool = list(sorted(set(subjects) - {heldout_subject}))
-    #         indexer_pool = DataArray(np.zeros(len(subject_pool)), coords={'subject_UID': subject_pool},
-    #                                  dims=['subject_UID']).stack(neuroid=['subject_UID'])
-    #         heldout_indexer = DataArray(np.zeros(1), coords={'subject_UID': [heldout_subject]},
-    #                                     dims=['subject_UID']).stack(neuroid=['subject_UID'])
-    #         subject_pool = subset(self._target_assembly, indexer_pool, dims_must_match=False)
-    #         heldout = subset(self._target_assembly, heldout_indexer, dims_must_match=False)
-    #         split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
-    #         split_score = split_score.expand_dims('heldout_subject')
-    #         split_score['heldout_subject'] = [heldout_subject]
-    #         split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
-    #         split_scores.append(split_score)
-    #     consistency = Score.merge(*split_scores)
-    #     error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
-    #     consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
-    #     consistency.loc[{'aggregation': 'error'}] = error
-    #     return consistency
     def ceiling(self):
         return None
-        
+
     def __call__(self, candidate):
         _logger.info('Computing activations')
-        
+
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-        
+
         model_activations = read_words(candidate, stimulus_set)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
 
-    
-    
+
 class FedorenkoBenchmarkMean:
     def __init__(self, bold_shift=None):
-        assembly = load_Fedorenko2016() 
+        assembly = load_Fedorenko2016()
         self._target_assembly = assembly
-                
+
         # avg code 
         # packaging file, change the benchmark to include averaging. 
-        
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')) # word
+
+        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
-    
+
     def __call__(self, candidate):
-        
         _logger.info('Computing activations')
-        
+
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-        
+
         model_activations = read_words(candidate, stimulus_set)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        
+
         # average here, can I simply hard code the averaging across sentences?
         # model_activations = 
-        
-        print('Model activations:   ', model_activations)
-        
-        return self._metric(model_activations, self._target_assembly)
-        
-        
-#         scores = []
-#         for story, story_assembly in self._target_assemblies.items():
-#             stimulus_set = load_stimuli(f'naturalistic-neural-reduced.{story}')
-#             source_assembly = candidate(stimuli=stimulus_set)
-#             story_assembly_rdm = self._metric._rdm(story_assembly)
-#             score = self._metric(source_assembly, story_assembly_rdm)
-#             score = score.expand_dims('story')
-#             score['story'] = [story]
-#             scores.append(score)
-#         score = Score.merge(*scores)
-#         score = apply_aggregate(lambda score: score.mean('story'), score)
-#         return score
 
-    
+        print('Model activations:   ', model_activations)
+
+        return self._metric(model_activations, self._target_assembly)
+
+    #         scores = []
+    #         for story, story_assembly in self._target_assemblies.items():
+    #             stimulus_set = load_stimuli(f'naturalistic-neural-reduced.{story}')
+    #             source_assembly = candidate(stimuli=stimulus_set)
+    #             story_assembly_rdm = self._metric._rdm(story_assembly)
+    #             score = self._metric(source_assembly, story_assembly_rdm)
+    #             score = score.expand_dims('story')
+    #             score['story'] = [story]
+    #             scores.append(score)
+    #         score = Score.merge(*scores)
+    #         score = apply_aggregate(lambda score: score.mean('story'), score)
+    #         return score
+
     def ceiling(self):
         return None
-    
-    
-    
-    
+
 
 benchmark_pool = {
     'voxel-encoding': StoriesVoxelEncoding,
@@ -518,14 +471,9 @@ benchmark_pool = {
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
     'Pereira2018-encoding-min': PereiraEncodingMin,
-    'Pereira2018-encoding-cg': PereiraEncodingCG,
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
     'transformer-wordmean': StoriesTransformerWordmeanBenchmark,
     'Fedorenko2016': FedorenkoBenchmark,
     'Fedorenko2016Mean': FedorenkoBenchmarkMean,
 }
-
-# Added dec 5th
-# if __name__ == '__main__':
-#     FedorenkoBenchmark()
