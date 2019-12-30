@@ -290,7 +290,7 @@ class _PereiraBenchmark(Benchmark):
 
     def __call__(self, candidate):
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-        model_activations = listen_to_stories(candidate, stimulus_set)
+        model_activations = listen_to(candidate, stimulus_set)
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
         _logger.info('Scoring across experiments & atlases')
@@ -309,14 +309,40 @@ class _PereiraBenchmark(Benchmark):
     @property
     def ceiling(self):
         return None
+        # @store()
+        cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='story', splits=2)
+
+        def ceiling_apply(train_source, train_target, test_source, test_target):
+            self._metric.regression.fit(train_source, train_target)
+            prediction = self._metric.regression.predict(test_source)
+            score = self._metric.correlation(prediction, test_target)
+            return score
+
+        assembly = self._target_assembly.dropna('presentation')  # use only stimuli that all subjects have seen
+        subjects = list(sorted(set(assembly['subject'].values)))
+        split_scores = []
+        for heldout_subject in tqdm(subjects, desc='subject holdout'):
+            subject_pool = set(subjects) - {heldout_subject}
+            subject_pool = assembly[{'neuroid': [subject in subject_pool for subject in assembly['subject'].values]}]
+            heldout = assembly[{'neuroid': [subject == heldout_subject for subject in assembly['subject'].values]}]
+            split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
+            split_score = split_score.expand_dims('heldout_subject')
+            split_score['heldout_subject'] = [heldout_subject]
+            split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
+            split_scores.append(split_score)
+        consistency = Score.merge(*split_scores)
+        error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
+        consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
+        consistency.loc[{'aggregation': 'error'}] = error
+        return consistency
 
 
-def listen_to_stories(candidate, stimulus_set):
+def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
     activations = []
-    for story in ordered_set(stimulus_set['story'].values):
-        story_stimuli = stimulus_set[stimulus_set['story'] == story]
+    for story in ordered_set(stimulus_set[reset_column].values):
+        story_stimuli = stimulus_set[stimulus_set[reset_column] == story]
         story_stimuli.name = f"{stimulus_set.name}-{story}"
-        story_activations = candidate(stimuli=story_stimuli)
+        story_activations = candidate(stimuli=story_stimuli, average_sentence=average_sentence)
         activations.append(story_activations)
     model_activations = merge_data_arrays(activations)
     # merging does not maintain stimulus order. the following orders again
@@ -375,25 +401,7 @@ class PereiraRDM(_PereiraBenchmark):
         super(PereiraRDM, self).__init__(metric=metric)
 
 
-def read_words(candidate, stimulus_set):  # This is a new version of the listen_to_stories function
-    # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
-    activations = []
-    for sentence in ordered_set(stimulus_set['sentence_id'].values):
-        sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence]
-        sentence_stimuli.name = f"{stimulus_set.name}-{sentence}"
-        sentence_activations = candidate(stimuli=sentence_stimuli)
-        activations.append(sentence_activations)
-    model_activations = merge_data_arrays(activations)
-    # merging does not maintain stimulus order. the following orders again
-    idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
-           itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
-    assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
-    model_activations = model_activations[{'presentation': idx}]
-
-    return model_activations
-
-
-class FedorenkoBenchmark:
+class Fedorenko2016Encoding:
     def __init__(self, bold_shift=None):
         assembly = load_Fedorenko2016()
         self._target_assembly = assembly
@@ -402,65 +410,39 @@ class FedorenkoBenchmark:
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id', train_size=.8))
 
     def ceiling(self):
         return None
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
-
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-
-        model_activations = read_words(candidate, stimulus_set)
+        model_activations = self._read_words(candidate, stimulus_set)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
 
+    @classmethod
+    def _read_words(cls, candidate, stimulus_set):  # This is a new version of the listen_to_stories function
+        # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
+        activations = []
+        for i, sentence_id in enumerate(ordered_set(stimulus_set['sentence_id'].values)):
+            sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence_id]
+            sentence_stimuli = StimulusSet({'sentence': ' '.join(sentence_stimuli['word']),
+                                            'sentence_id': list(set(sentence_stimuli['sentence_id']))})
+            sentence_stimuli.name = f"{stimulus_set.name}-{sentence_id}"
+            sentence_activations = candidate(stimuli=sentence_stimuli, average_sentence=False)
+            sentence_activations['stimulus_id'] = ('presentation', 8 * i + np.arange(0, 8))
+            sentence_activations['sentence_id'] = ('presentation', [sentence_id] * 8)
+            activations.append(sentence_activations)
+        model_activations = merge_data_arrays(activations)
+        # merging does not maintain stimulus order. the following orders again
+        idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
+               itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
+        assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
+        model_activations = model_activations[{'presentation': idx}]
 
-class FedorenkoBenchmarkMean:
-    def __init__(self, bold_shift=None):
-        assembly = load_Fedorenko2016()
-        self._target_assembly = assembly
-
-        # avg code 
-        # packaging file, change the benchmark to include averaging. 
-
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-        self._metric = CrossRegressedCorrelation(
-            regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='stimulus_id'))
-
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-
-        stimulus_set = self._target_assembly.attrs['stimulus_set']
-
-        model_activations = read_words(candidate, stimulus_set)
-        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-
-        # average here, can I simply hard code the averaging across sentences?
-        # model_activations = 
-
-        print('Model activations:   ', model_activations)
-
-        return self._metric(model_activations, self._target_assembly)
-
-    #         scores = []
-    #         for story, story_assembly in self._target_assemblies.items():
-    #             stimulus_set = load_stimuli(f'naturalistic-neural-reduced.{story}')
-    #             source_assembly = candidate(stimuli=stimulus_set)
-    #             story_assembly_rdm = self._metric._rdm(story_assembly)
-    #             score = self._metric(source_assembly, story_assembly_rdm)
-    #             score = score.expand_dims('story')
-    #             score['story'] = [story]
-    #             scores.append(score)
-    #         score = Score.merge(*scores)
-    #         score = apply_aggregate(lambda score: score.mean('story'), score)
-    #         return score
-
-    def ceiling(self):
-        return None
+        return model_activations
 
 
 benchmark_pool = {
@@ -474,6 +456,5 @@ benchmark_pool = {
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
     'transformer-wordmean': StoriesTransformerWordmeanBenchmark,
-    'Fedorenko2016': FedorenkoBenchmark,
-    'Fedorenko2016Mean': FedorenkoBenchmarkMean,
+    'Fedorenko2016-encoding': Fedorenko2016Encoding,
 }
