@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import fire
 import itertools
 import logging
@@ -9,6 +11,7 @@ import sys
 from matplotlib import pyplot
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
+from scipy.stats import pearsonr
 from tqdm import tqdm
 
 from neural_nlp import score
@@ -16,7 +19,6 @@ from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_mod
     _score_model as score_architecture_model
 
 logger = logging.getLogger(__name__)
-seaborn.set()
 
 models = ('glove',
           'lm_1b',
@@ -125,13 +127,38 @@ def collect_scores(benchmark, models):
     return data
 
 
+def fmri_experiment_correlations():
+    scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    experiment2_scores = scores[scores['experiment'] == '384sentences']
+    experiment3_scores = scores[scores['experiment'] == '243sentences']
+    r, p = pearsonr(experiment2_scores['score'], experiment3_scores['score'])
+    fig, ax = pyplot.subplots(figsize=(6, 6))
+    ax.errorbar(x=experiment2_scores['score'], xerr=experiment2_scores['error'],
+                y=experiment3_scores['score'], yerr=experiment3_scores['error'],
+                fmt=' ', alpha=.5)
+    ax.plot(ax.get_xlim(), ax.get_ylim(), linestyle='dashed', color='black')
+    ax.set_xlabel('scores on 384sentences')
+    ax.set_ylabel('scores on 243sentences')
+    ax.text(0.9, 0.1, "r: " + (f"{r:.2f}" if p < .05 else "n.s."), ha='center', va='center', transform=ax.transAxes)
+    ticks = np.arange(0, 0.35, 0.05)
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ticklabels = ["0" if tick == 0 else f"{tick:.1f}"[1:] if Decimal(f"{tick:.2f}") % Decimal(".1") == 0 else ""
+                  for tick in ticks]
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    fig.tight_layout()
+    _savefig(fig, 'fmri-correlations')
+
+
 def _savefig(fig, savename):
     fig.tight_layout()
-    savepath = Path(__file__).parent / 'scores' / f"{savename}.png"
+    savepath = Path(__file__).parent / f"{savename}.png"
     logger.info(f"Saving to {savepath}")
     fig.savefig(savepath)
 
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    seaborn.set(context='talk')
     fire.Fire()
