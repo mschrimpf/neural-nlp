@@ -69,8 +69,9 @@ class ActivationsExtractorHelper:
         self._logger.info('Running sentences')
         self.reset()
         layer_activations = self.get_activations(sentences, layers=layers)
+        # OUTCOMMENT TO MAKE topicETM run! (two lines)
         for hook in self._activations_hooks.copy().values():
-            layer_activations = hook(layer_activations)
+            layer_activations = hook(layer_activations) #layer_activations = hook(layer_activations)
         self._logger.info('Packaging into assembly')
         return self._package(layer_activations, sentences)
 
@@ -129,17 +130,18 @@ class ActivationsExtractorHelper:
         layer_activations = np.concatenate(layer_activations, axis=0)
         assert layer_activations.shape[0] == len(sentences)
         assert len(sentences) == 1
+        print('LAYER ACTIVATIONS SHAPE!!!! \n', layer_activations.shape)
         assert len(layer_activations.shape) == 3
         activations = layer_activations.squeeze(axis=0)
-        # activations = flatten(layer_activations)  # collapse for single neuroid dim
+#        activations = flatten(layer_activations)  # collapse for single neuroid dim. WAS OUTCOMMENTED
         words = sentences[0].split(' ')
         layer_assembly = NeuroidAssembly(
             activations,
-            coords={'stimulus_sentence': ('presentation', np.repeat(sentences, len(words))),
-                    'word': ('presentation', words),
-                    'neuroid_num': ('neuroid', list(range(activations.shape[1]))),
-                    'model': ('neuroid', [self.identifier] * activations.shape[1]),
-                    'layer': ('neuroid', [layer] * activations.shape[1]),
+            coords={'stimulus_sentence': ('presentation', np.repeat(sentences, len(words))), # The dim has to be eight here
+                    'word': ('presentation', words), # was words
+                    'neuroid_num': ('neuroid', list(range(activations.shape[1]))), # was 1
+                    'model': ('neuroid', [self.identifier] * activations.shape[1]), # was 1
+                    'layer': ('neuroid', [layer] * activations.shape[1]), # was 1
                     },
             dims=['presentation', 'neuroid']
         )
