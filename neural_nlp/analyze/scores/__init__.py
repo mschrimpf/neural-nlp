@@ -30,6 +30,7 @@ models = ('glove',
           'xlm', 'xlm-clm',
           'roberta')
 
+fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 
 def bar_models(benchmark='Pereira2018-encoding'):
     scores = [score(benchmark=benchmark, model=model) for model in models]
@@ -149,6 +150,53 @@ def fmri_experiment_correlations():
     ax.set_yticklabels(ticklabels)
     fig.tight_layout()
     _savefig(fig, 'fmri-correlations')
+
+
+def fmri_brain_network_correlations():
+    scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    # build correlation matrix
+    correlations = np.zeros((len(fmri_atlases), len(fmri_atlases)))
+    for i_x, i_y in itertools.combinations(list(range(len(fmri_atlases))), 2):
+        benchmark_x, benchmark_y = fmri_atlases[i_x], fmri_atlases[i_y]
+        x_data = scores[scores['atlas'] == benchmark_x]
+        y_data = scores[scores['atlas'] == benchmark_y]
+        x_data, y_data = align_both(x_data, y_data, on='model')
+        x, xerr = x_data['score'].values.squeeze(), x_data['error'].values.squeeze()
+        y, yerr = y_data['score'].values.squeeze(), y_data['error'].values.squeeze()
+        r, p = pearsonr(x, y)
+        significance_threshold = .05
+        if p >= significance_threshold:
+            r = 0
+        correlations[i_x, i_y] = correlations[i_y, i_x] = r
+    for i in range(len(fmri_atlases)):  # set diagonal to 1
+        correlations[i, i] = 1
+
+    # plot
+    fig, ax = pyplot.subplots(figsize=(6, 6))
+    ax.grid(False)
+    ax.imshow(correlations, cmap=pyplot.get_cmap('Greens'), vmin=.85)
+    for x, y in itertools.product(*[list(range(s)) for s in correlations.shape]):
+        r = correlations[x, y]
+        r = f"{r:.2f}" if r != 0 else 'n.s.'
+        ax.text(x, y, r, ha='center', va='center', fontdict=dict(fontsize=10), color='white')
+    # ticks
+    ax.set_xticks(range(len(fmri_atlases)))
+    ax.set_xticklabels(fmri_atlases, rotation=90)
+    ax.set_yticks(range(len(fmri_atlases)))
+    ax.set_yticklabels(fmri_atlases)
+    ax.xaxis.tick_top()
+    ax.tick_params(axis=u'both', which=u'both',
+                   length=0)  # hide tick marks, but not text https://stackoverflow.com/a/29988431/2225200
+    # save
+    fig.tight_layout()
+    _savefig(fig, 'brain_network_correlations')
+
+
+def align_both(data1, data2, on):
+    data1 = data1[data1[on].isin(data2[on])]
+    data2 = data2[data2[on].isin(data1[on])]
+    data1 = data1.set_index(on).reindex(index=data2[on]).reset_index()
+    return data1, data2
 
 
 def _savefig(fig, savename):

@@ -6,9 +6,7 @@ import sys
 from matplotlib import pyplot
 from pathlib import Path
 
-from neural_nlp.analyze.scores import models as all_models, collect_scores
-
-seaborn.set(context='talk')
+from neural_nlp.analyze.scores import models as all_models, fmri_atlases, collect_scores
 
 
 def best(models=all_models, benchmark='Pereira2018-encoding'):
@@ -19,8 +17,7 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
     # ordering
     mean_scores = data.groupby('model')['score'].mean()
     models = mean_scores.sort_values().index.values
-    atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
-    assert set(data['atlas'].values) == set(atlases)
+    assert set(data['atlas'].values) == set(fmri_atlases)
     experiments = ('384sentences', '243sentences')
     assert set(data['experiment'].values) == set(experiments)
     # plot
@@ -29,7 +26,7 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
         ax.set_title(experiment)
         experiment_scores = data[data['experiment'] == experiment]
         offset = len(models) / 2
-        x = np.arange(start=0, stop=len(atlases) * step, step=step)
+        x = np.arange(start=0, stop=len(fmri_atlases) * step, step=step)
         for model_iter, model in enumerate(models):
             model_scores = experiment_scores[experiment_scores['model'] == model]
             y, yerr = model_scores['score'], model_scores['error']
@@ -48,7 +45,7 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
         if ax_iter == 0:
             ax.set_xticklabels([])
         else:
-            ax.set_xticklabels(atlases, fontdict=dict(fontsize=14))
+            ax.set_xticklabels(fmri_atlases, fontdict=dict(fontsize=14))
 
     fig.subplots_adjust(wspace=0, hspace=.2)
     pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
@@ -62,4 +59,5 @@ def collect_best_scores(benchmark, models):
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    seaborn.set(context='talk')
     fire.Fire()
