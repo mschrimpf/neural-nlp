@@ -1,13 +1,15 @@
-import numpy as np
-from numpy.polynomial.polynomial import polyfit
-import logging
-import sys
-
 import fire
+import itertools
+import logging
+import numpy as np
+import pandas as pd
 import scipy.stats
 import seaborn
+import sys
 from matplotlib import pyplot
+from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
+from tqdm import tqdm
 
 from neural_nlp import score
 from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
@@ -97,6 +99,25 @@ def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
     ax.set_ylim([ax.get_ylim()[0], 0.3])
     ax.set_title('LSTM trained on Machine Translation/Language Modeling')
     _savefig(fig, 'lstm_mt_lm')
+
+
+def collect_scores(benchmark, models):
+    store_file = Path(__file__).parent / f'scores-{benchmark}.csv'
+    if store_file.is_file():
+        return pd.read_csv(store_file)
+    data = []
+    for model in tqdm(models, desc='model scores'):
+        model_scores = score(benchmark=benchmark, model=model)
+        for experiment, atlas, layer in itertools.product(
+                model_scores['experiment'].values, model_scores['atlas'].values, model_scores['layer'].values):
+            current_score = model_scores.sel(atlas=atlas, experiment=experiment, layer=layer)
+            data.append({'experiment': experiment, 'atlas': atlas, 'benchmark': benchmark,
+                         'model': model, 'layer': layer,
+                         'score': current_score.sel(aggregation='center').values.tolist(),
+                         'error': current_score.sel(aggregation='error').values.tolist()})
+    data = pd.DataFrame(data)
+    data.to_csv(store_file)
+    return data
 
 
 def _savefig(fig, savename):

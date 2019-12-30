@@ -1,15 +1,15 @@
+import sys
+
+import logging
+
 import fire
-import itertools
 import numpy as np
-import pandas as pd
 import seaborn
 from matplotlib import pyplot
 from pathlib import Path
-from tqdm import tqdm
 
 from brainscore.metrics.utils import unique_ordered
-from neural_nlp import score
-from neural_nlp.analyze.scores import models as all_models
+from neural_nlp.analyze.scores import models as all_models, collect_scores
 
 seaborn.set(context='talk')
 
@@ -56,27 +56,11 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
 
 
 def collect_best_scores(benchmark, models):
-    store_file = Path(__file__).parent / f'scores-{benchmark}.csv'
-    if store_file.is_file():
-        return pd.read_csv(store_file)
-    data = []
-    for model in tqdm(models, desc='model scores'):
-        model_scores = score(benchmark=benchmark, model=model)
-        for experiment, atlas in itertools.product(model_scores['experiment'].values, model_scores['atlas'].values):
-            current_score = model_scores.sel(atlas=atlas, experiment=experiment)
-            max_score = current_score.sel(aggregation='center').values.max()
-            is_max_score = current_score.sel(aggregation='center') == max_score
-            best_layer = current_score['layer'].values[is_max_score.values]
-            assert len(best_layer) == 1, "multiple best layers not implemented"
-            best_layer = best_layer[0]
-            best_score = current_score.sel(layer=best_layer)
-            data.append({'experiment': experiment, 'atlas': atlas, 'model': model, 'benchmark': benchmark,
-                         'score': best_score.sel(aggregation='center').values,
-                         'error': best_score.sel(aggregation='error').values})
-    data = pd.DataFrame(data)
-    data.to_csv(store_file)
-    return data
+    scores = collect_scores(benchmark=benchmark, models=models)
+    scores = scores.loc[scores.groupby(['model', 'experiment', 'atlas'])['score'].idxmax()]  # max layer
+    return scores
 
 
 if __name__ == '__main__':
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     fire.Fire()
