@@ -116,15 +116,16 @@ def collect_scores(benchmark, models):
     data = []
     for model in tqdm(models, desc='model scores'):
         model_scores = score(benchmark=benchmark, model=model)
-        for experiment, atlas, layer in itertools.product(
-                model_scores['experiment'].values, model_scores['atlas'].values, model_scores['layer'].values):
-            current_score = model_scores.sel(atlas=atlas, experiment=experiment, layer=layer)
-            data.append({'experiment': experiment, 'atlas': atlas, 'benchmark': benchmark,
-                         'model': model, 'layer': layer,
-                         'score': current_score.sel(aggregation='center').values.tolist(),
-                         'error': current_score.sel(aggregation='error').values.tolist()})
+        adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
+        for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
+            adjunct_values = dict(zip(adjunct_columns, adjunct_values))
+            current_score = model_scores.sel(**adjunct_values)
+            data.append({**adjunct_values, **{
+                'benchmark': benchmark, 'model': model,
+                'score': current_score.sel(aggregation='center').values.tolist(),
+                'error': current_score.sel(aggregation='error').values.tolist()}})
     data = pd.DataFrame(data)
-    data.to_csv(store_file)
+    data.to_csv(store_file, index=False)
     return data
 
 
