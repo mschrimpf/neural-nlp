@@ -41,7 +41,9 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
                         rotation=90, rotation_mode='anchor', fontdict=dict(fontsize=8), color='white')
         ax.set_ylabel("Predictivity (Pearson r)", fontdict=dict(fontsize=10))
         ax.set_ylim([0, ylim])
-        ax.set_yticklabels(['.2', '.3'], fontdict=dict(fontsize=14))
+        ax.set_yticks(np.arange(0, ylim, .1))
+        ax.set_yticklabels(["0" if label == 0 else f"{label:.1f}"[1:] if label % 0.2 == 0 else ""
+                            for label in ax.get_yticks()], fontdict=dict(fontsize=14))
         ax.set_xticks(x)
         ax.tick_params(axis="x", pad=-5)
         if ax_iter == 0:
@@ -49,7 +51,7 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
         else:
             ax.set_xticklabels(atlases, fontdict=dict(fontsize=14))
 
-    pyplot.tight_layout()
+    fig.subplots_adjust(wspace=0, hspace=.2)
     pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
 
 
