@@ -18,10 +18,15 @@ from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_mod
 logger = logging.getLogger(__name__)
 seaborn.set()
 
-models = [
-    'glove', 'lm_1b',
-    'bert', 'openaigpt', 'gpt2', 'transfoxl', 'xlnet', 'xlm', 'roberta',
-]
+models = ('glove',
+          'lm_1b',
+          'bert',
+          'gpt2',
+          'openaigpt',
+          'transfoxl',
+          'xlnet',
+          'xlm', 'xlm-clm',
+          'roberta')
 
 
 def bar_models(benchmark='Pereira2018-encoding'):
