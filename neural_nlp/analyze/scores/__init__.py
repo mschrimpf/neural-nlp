@@ -53,6 +53,13 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     scores2 = [score(benchmark=benchmark2, model=model) for model in models]
 
     def get_center_err(s):
+        if hasattr(s, 'experiment'):
+            s = s.mean('experiment')
+        if hasattr(s, 'atlas'):
+            s = s.mean('atlas')
+        if hasattr(s, 'layer'):
+            max_score = s.sel(aggregation='center').max()
+            s = s[{'layer': (s.sel(aggregation='center') == max_score).values}].squeeze('layer')
         if hasattr(s, 'aggregation'):
             return s.sel(aggregation='center').values.tolist(), s.sel(aggregation='error').values.tolist()
         if hasattr(s, 'measure'):
@@ -65,7 +72,7 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     fig, ax = pyplot.subplots()
     ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='.')
     for model, _x, _y in zip(models, x, y):
-        ax.text(_x, _y, model)
+        ax.text(_x, _y, model, fontdict=dict(fontsize=10))
 
     if flip_x:
         ax.set_xlim(list(reversed(ax.get_xlim())))
@@ -81,10 +88,7 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     ax.set_xlabel(benchmark1)
     ax.set_ylabel(benchmark2)
 
-    savepath = Path(__file__).parent / 'scores' / f"{benchmark1}__{benchmark2}.png"
-    pyplot.savefig(savepath)
-    logger.info(f"Saved to {savepath}")
-    return fig
+    _savefig(fig, f"{benchmark1}__{benchmark2}")
 
 
 def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-lm',
