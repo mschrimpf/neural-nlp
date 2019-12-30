@@ -1,14 +1,11 @@
-import sys
-
-import logging
-
 import fire
+import logging
 import numpy as np
 import seaborn
+import sys
 from matplotlib import pyplot
 from pathlib import Path
 
-from brainscore.metrics.utils import unique_ordered
 from neural_nlp.analyze.scores import models as all_models, collect_scores
 
 seaborn.set(context='talk')
@@ -19,14 +16,16 @@ def best(models=all_models, benchmark='Pereira2018-encoding'):
     width = 0.5
     step = (len(models) + 1) * width
     ylim = 0.35
-    # model ordering
+    # ordering
     mean_scores = data.groupby('model')['score'].mean()
     models = mean_scores.sort_values().index.values
-    # plot
     atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
     assert set(data['atlas'].values) == set(atlases)
+    experiments = ('384sentences', '243sentences')
+    assert set(data['experiment'].values) == set(experiments)
+    # plot
     fig, axes = pyplot.subplots(nrows=2)
-    for ax_iter, (experiment, ax) in enumerate(zip(unique_ordered(data['experiment'].values), axes)):
+    for ax_iter, (experiment, ax) in enumerate(zip(experiments, axes)):
         ax.set_title(experiment)
         experiment_scores = data[data['experiment'] == experiment]
         offset = len(models) / 2
