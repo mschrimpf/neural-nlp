@@ -253,11 +253,15 @@ class LM1B:
         self._extractor = ActivationsExtractorHelper(identifier='lm_1b', get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
-        self._extractor.register_activations_hook(word_last)
         self._logger = logging.getLogger(self.__class__.__name__)
 
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        if average_sentence:
+            handle = self._extractor.register_activations_hook(word_last)
+        result = self._extractor(*args, **kwargs)
+        if average_sentence:
+            handle.remove()
+        return result
 
     def _get_activations(self, sentences, layers):
         from lm_1b import lm_1b_eval
@@ -286,7 +290,8 @@ class LM1B:
                                                              self._encoder.t['inputs_in']: inputs,
                                                              self._encoder.t['targets_in']: targets,
                                                              self._encoder.t['target_weights_in']: weights})
-                embeddings.append(lstm_emb)
+                if i > 0:  # 0 is <S>
+                    embeddings.append(lstm_emb)
             sentences_embeddings.append(embeddings)
             sentences_word_ids.append(word_ids)
         # `sentences_embeddings` shape is now: sentences x words x layers x *layer_shapes
@@ -469,19 +474,25 @@ class Transformer(PytorchWrapper):
 
 
 class _PytorchTransformerWrapper(BrainModel):
-    def __init__(self, identifier, tokenizer, model, layers, tokenizer_special_tokens=()):
+    def __init__(self, identifier, tokenizer, model, layers, sentence_average, tokenizer_special_tokens=()):
         super(_PytorchTransformerWrapper, self).__init__()
         self.default_layers = self.available_layers = layers
         self._model = model
         self._model_container = self.ModelContainer(tokenizer, model, layers, tokenizer_special_tokens)
+        self._sentence_average = sentence_average
         self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._model_container,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
 
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
+    def __call__(self, *args, average_sentence=True, **kwargs):
         self._model.eval()
         if self.mode == BrainModel.Modes.recording:
-            return self._extractor(*args, **kwargs)
+            if average_sentence:
+                handle = self._extractor.register_activations_hook(self._sentence_average)
+            result = self._extractor(*args, **kwargs)
+            if average_sentence:
+                handle.remove()
+            return result
         elif self.mode == BrainModel.Modes.general_features:
             # (input_ids, position_ids=position_ids, token_type_ids=token_type_ids, head_mask=head_mask)
             transformer_outputs = self._model(*args, **kwargs)
@@ -606,11 +617,15 @@ class KeyedVectorModel:
         self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
-        self._extractor.register_activations_hook(word_mean)
         self._logger = logging.getLogger(self.__class__.__name__)
 
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        if average_sentence:
+            handle = self._extractor.register_activations_hook(word_mean)
+        result = self._extractor(*args, **kwargs)
+        if average_sentence:
+            handle.remove()
+        return result
 
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['projection'])
@@ -810,8 +825,7 @@ for untrained in False, True:
             transformer = _PytorchTransformerWrapper(identifier=identifier,
                                                      tokenizer=tokenizer,
                                                      tokenizer_special_tokens=tokenizer_special_tokens,
-                                                     model=model, layers=layers)
-            transformer._extractor.register_activations_hook(word_last)
+                                                     model=model, layers=layers, sentence_average=word_last)
             return transformer
 
 
