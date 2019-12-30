@@ -127,10 +127,10 @@ class ActivationsExtractorHelper:
         return model_assembly
 
     def _package_layer(self, layer_activations, layer, sentences):
-        layer_activations = np.concatenate(layer_activations, axis=0)
+        layer_activations = np.concatenate(layer_activations, axis=0) 
         assert layer_activations.shape[0] == len(sentences)
         assert len(sentences) == 1
-        print('LAYER ACTIVATIONS SHAPE!!!! \n', layer_activations.shape)
+        # print('Layer activations shape: \n', layer_activations.shape)
         assert len(layer_activations.shape) == 3
         activations = layer_activations.squeeze(axis=0)
 #        activations = flatten(layer_activations)  # collapse for single neuroid dim. WAS OUTCOMMENTED
@@ -138,10 +138,10 @@ class ActivationsExtractorHelper:
         layer_assembly = NeuroidAssembly(
             activations,
             coords={'stimulus_sentence': ('presentation', np.repeat(sentences, len(words))), # The dim has to be eight here
-                    'word': ('presentation', words), # was words
-                    'neuroid_num': ('neuroid', list(range(activations.shape[1]))), # was 1
-                    'model': ('neuroid', [self.identifier] * activations.shape[1]), # was 1
-                    'layer': ('neuroid', [layer] * activations.shape[1]), # was 1
+                    'word': ('presentation', words),
+                    'neuroid_num': ('neuroid', list(range(activations.shape[1]))),
+                    'model': ('neuroid', [self.identifier] * activations.shape[1]),
+                    'layer': ('neuroid', [layer] * activations.shape[1]),
                     },
             dims=['presentation', 'neuroid']
         )
