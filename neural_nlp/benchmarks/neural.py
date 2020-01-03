@@ -405,22 +405,22 @@ class Fedorenko2016Encoding:
     def __init__(self, bold_shift=None):
         assembly = load_Fedorenko2016()
         self._target_assembly = assembly
+        self._metric = metric
 
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-        self._metric = CrossRegressedCorrelation(
-            regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id', train_size=.8))
-
+    @property
+    @store()
     def ceiling(self):
-        return None
+        return holdout_subject_ceiling(self, subject_column='subject_UID')
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
         stimulus_set = self._target_assembly.attrs['stimulus_set']
         model_activations = self._read_words(candidate, stimulus_set)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        return self._metric(model_activations, self._target_assembly)
+        return self.compare(model_activations)
+
+    def compare(self, candidate_assembly):
+        return self._metric(candidate_assembly, self._target_assembly)
 
     @classmethod
     def _read_words(cls, candidate, stimulus_set):  # This is a new version of the listen_to_stories function
@@ -443,6 +443,42 @@ class Fedorenko2016Encoding:
         model_activations = model_activations[{'presentation': idx}]
 
         return model_activations
+
+
+def Fedorenko2016Encoding(**kwargs):
+    regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
+    correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+    metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
+                                       crossvalidation_kwargs=dict(
+                                           splits=3, train_size=.8,
+                                           split_coord='stimulus_id', stratification_coord='sentence_id'))
+    return _Fedorenko2016(metric=metric, **kwargs)
+
+
+def holdout_subject_ceiling(benchmark, subject_column='subject'):
+    assembly = benchmark._target_assembly.copy()
+    subjects = set(assembly[subject_column].values)
+    scores = []
+    for subject in tqdm(subjects, desc='heldout subject'):
+        # temporarily set self assembly to subject assembly
+        subject_assembly = assembly[{'neuroid': [subject_value == subject
+                                                 for subject_value in assembly[subject_column].values]}]
+        benchmark._target_assembly = subject_assembly
+        # run subject pool as neural candidate
+        subject_pool = subjects - {subject}
+        pool_assembly = assembly[{'neuroid': [subject in subject_pool for subject in assembly[subject_column].values]}]
+        score = benchmark.compare(pool_assembly)
+        # store scores
+        score = score.expand_dims(subject_column, _apply_raw=False)
+        score.__setitem__(subject_column, [subject], _apply_raw=False)
+        scores.append(score)
+    benchmark._target_assembly = assembly  # reset to original
+
+    scores = Score.merge(*scores)
+    error = standard_error_of_the_mean(scores.sel(aggregation='center'), subject_column)
+    scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
+    scores.loc[{'aggregation': 'error'}] = error
+    return scores
 
 
 benchmark_pool = {
