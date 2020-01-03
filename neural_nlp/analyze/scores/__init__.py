@@ -116,7 +116,9 @@ def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
 def collect_scores(benchmark, models):
     store_file = Path(__file__).parent / f'scores-{benchmark}.csv'
     if store_file.is_file():
-        return pd.read_csv(store_file)
+        data = pd.read_csv(store_file)
+        data = data[data['model'].isin(models)]
+        return data
     data = []
     for model in tqdm(models, desc='model scores'):
         model_scores = score(benchmark=benchmark, model=model)
