@@ -12,9 +12,7 @@ from neural_nlp.analyze.scores import models as all_models, fmri_atlases, collec
 def fmri_best(models=all_models, benchmark='Pereira2018-encoding'):
     data = collect_best_scores(benchmark, models)
     ylim = 0.40
-    # ordering
-    mean_scores = data.groupby('model')['score'].mean()
-    models = mean_scores.sort_values().index.values
+    models = model_ordering(models, benchmark='Pereira2018-encoding')  # order by best scores
     assert set(data['atlas'].values) == set(fmri_atlases)
     data['atlas_order'] = [fmri_atlases.index(atlas) for atlas in data['atlas']]  # ensure atlases are same order
     data = data.sort_values('atlas_order').drop('atlas_order', axis=1)
@@ -46,10 +44,7 @@ def fmri_best(models=all_models, benchmark='Pereira2018-encoding'):
 
 
 def ecog_best(models=all_models, benchmark='Fedorenko2016-encoding'):
-    # ordering
-    fmri_data = collect_best_scores(benchmark='Pereira2018-encoding', models=models)
-    mean_scores = fmri_data.groupby('model')['score'].mean()
-    models = mean_scores.sort_values().index.values
+    models = model_ordering(models, benchmark='Pereira2018-encoding')
     # plot
     data = collect_best_scores(benchmark, models=models)
     ylim = 0.30
@@ -67,6 +62,13 @@ def ecog_best(models=all_models, benchmark='Fedorenko2016-encoding'):
     ax.set_xticklabels([])
     fig.tight_layout()
     pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
+
+
+def model_ordering(models, benchmark):
+    fmri_data = collect_best_scores(benchmark=benchmark, models=models)
+    mean_scores = fmri_data.groupby('model')['score'].mean()
+    models = mean_scores.sort_values().index.values
+    return models
 
 
 def _plot_bars(ax, models, get_model_score, ylim, width=0.5, text_kwargs=None):
