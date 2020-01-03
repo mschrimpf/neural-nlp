@@ -214,6 +214,23 @@ def align_both(data1, data2, on):
     return data1, data2
 
 
+def untrained_vs_trained(benchmark='Pereira2018-encoding'):
+    trained_models = ['bert', 'gpt2', 'gpt2-medium',
+                      'openaigpt', 'transfoxl', 'xlnet', 'xlm', 'xlm-clm', 'roberta']
+    direct_mappings = {'xlm-clm': 'xlm-untrained'}
+    untrained_models = [direct_mappings[model] if model in direct_mappings else f"{model}-untrained"
+                        for model in trained_models]
+    trained_scores = [score(benchmark=benchmark, model=model) for model in trained_models]
+    untrained_scores = [score(benchmark=benchmark, model=model) for model in untrained_models]
+    fig, ax = _plot_scores1_2(untrained_scores, trained_scores, score_annotations=trained_models,
+                              xlabel="untrained", ylabel="trained")
+    lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1])]
+    ax.set_xlim(lims)
+    ax.set_ylim(lims)
+    ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
+    _savefig(fig, savename=f"untrained_trained-{benchmark}")
+
+
 def _savefig(fig, savename):
     fig.tight_layout()
     savepath = Path(__file__).parent / f"{savename}.png"
