@@ -20,15 +20,23 @@ from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_mod
 
 logger = logging.getLogger(__name__)
 
-models = ('glove',
-          'lm_1b',
-          'bert',
-          'gpt2',
-          'openaigpt',
-          'transfoxl',
-          'xlnet',
-          'xlm', 'xlm-clm',
-          'roberta')
+model_colors = {
+    'glove': 'violet',
+    'lm_1b': 'goldenrod',
+    'transfoxl': 'peru',
+    'bert': 'orangered',
+    'roberta': 'brown',
+    'openaigpt': 'steelblue',
+    'gpt2': 'c',
+    'gpt2-medium': 'teal',
+    'gpt2-large': 'darkslategray',
+    # 'gpt2-xl': 'darkcyan',
+    'xlnet': 'gray',
+    'xlm': 'green',
+    'xlm-clm': 'darkgreen',
+}
+
+models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 
