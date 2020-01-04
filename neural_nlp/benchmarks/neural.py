@@ -307,34 +307,26 @@ class _PereiraBenchmark(Benchmark):
         return self._metric(source_assembly, cross_assembly)
 
     @property
+    @store()
     def ceiling(self):
-        return None
-        # @store()
-        cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='story', splits=2)
+        def compare(pool_candidate, subject_target):
+            cross = CartesianProduct(dividers=['atlas'])  # no experiment
+            scores = cross(subject_target, apply=
+            lambda cross_assembly: self._apply_cross(pool_candidate, cross_assembly))
+            return scores
 
-        def ceiling_apply(train_source, train_target, test_source, test_target):
-            self._metric.regression.fit(train_source, train_target)
-            prediction = self._metric.regression.predict(test_source)
-            score = self._metric.correlation(prediction, test_target)
-            return score
-
-        assembly = self._target_assembly.dropna('presentation')  # use only stimuli that all subjects have seen
-        subjects = list(sorted(set(assembly['subject'].values)))
-        split_scores = []
-        for heldout_subject in tqdm(subjects, desc='subject holdout'):
-            subject_pool = set(subjects) - {heldout_subject}
-            subject_pool = assembly[{'neuroid': [subject in subject_pool for subject in assembly['subject'].values]}]
-            heldout = assembly[{'neuroid': [subject == heldout_subject for subject in assembly['subject'].values]}]
-            split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
-            split_score = split_score.expand_dims('heldout_subject')
-            split_score['heldout_subject'] = [heldout_subject]
-            split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
-            split_scores.append(split_score)
-        consistency = Score.merge(*split_scores)
-        error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
-        consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
-        consistency.loc[{'aggregation': 'error'}] = error
-        return consistency
+        experiment_scores = []
+        for experiment in ordered_set(self._target_assembly['experiment'].values):
+            experiment_assembly = self._target_assembly[{'presentation': [
+                experiment_value == experiment for experiment_value in self._target_assembly['experiment'].values]}]
+            experiment_assembly = experiment_assembly.dropna('neuroid')  # drop subjects that haven't done this one
+            scores = holdout_subject_ceiling(experiment_assembly, metric=compare)
+            scores = scores.expand_dims('experiment')
+            scores['experiment'] = [experiment]
+            experiment_scores.append(scores)
+        scores = Score.merge(*experiment_scores)
+        scores = scores.mean('experiment').mean('atlas')
+        return scores
 
 
 def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
@@ -410,17 +402,15 @@ class Fedorenko2016Encoding:
     @property
     @store()
     def ceiling(self):
-        return holdout_subject_ceiling(self, subject_column='subject_UID')
+        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
+                                       metric=self._metric)
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
         stimulus_set = self._target_assembly.attrs['stimulus_set']
         model_activations = self._read_words(candidate, stimulus_set)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        return self.compare(model_activations)
-
-    def compare(self, candidate_assembly):
-        return self._metric(candidate_assembly, self._target_assembly)
+        return self._metric(model_activations, self._target_assembly)
 
     @classmethod
     def _read_words(cls, candidate, stimulus_set):  # This is a new version of the listen_to_stories function
@@ -455,24 +445,20 @@ def Fedorenko2016Encoding(**kwargs):
     return _Fedorenko2016(metric=metric, **kwargs)
 
 
-def holdout_subject_ceiling(benchmark, subject_column='subject'):
-    assembly = benchmark._target_assembly.copy()
+def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
     subjects = set(assembly[subject_column].values)
     scores = []
     for subject in tqdm(subjects, desc='heldout subject'):
-        # temporarily set self assembly to subject assembly
         subject_assembly = assembly[{'neuroid': [subject_value == subject
                                                  for subject_value in assembly[subject_column].values]}]
-        benchmark._target_assembly = subject_assembly
         # run subject pool as neural candidate
         subject_pool = subjects - {subject}
         pool_assembly = assembly[{'neuroid': [subject in subject_pool for subject in assembly[subject_column].values]}]
-        score = benchmark.compare(pool_assembly)
+        score = metric(pool_assembly, subject_assembly)
         # store scores
         score = score.expand_dims(subject_column, _apply_raw=False)
         score.__setitem__(subject_column, [subject], _apply_raw=False)
         scores.append(score)
-    benchmark._target_assembly = assembly  # reset to original
 
     scores = Score.merge(*scores)
     error = standard_error_of_the_mean(scores.sel(aggregation='center'), subject_column)
