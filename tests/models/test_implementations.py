@@ -6,8 +6,8 @@ from neural_nlp.models.implementations import load_model
 
 
 class TestActivations:
-    @pytest.mark.parametrize("num_sentences", [1, 3, 10, 57])  # 57 because 57*num_words_in_sentence > 512 embedding
-    @pytest.mark.parametrize("model, num_layers", [
+    model_layers = [
+        ('topicETM', 1),
         ('word2vec', 1),
         ('glove', 1),
         ('lm_1b', 2),
@@ -21,12 +21,15 @@ class TestActivations:
         ('xlnet', 13),
         ('xlm', 7),
         ('roberta', 13),
-    ])
+    ]
+
+    @pytest.mark.parametrize("num_sentences", [1, 3, 10, 57])  # 57 because 57*num_words_in_sentence > 512 embedding
+    @pytest.mark.parametrize("model, num_layers", model_layers)
     def test_sentences(self, model, num_layers, num_sentences):
         sentence = 'The quick brown fox jumps over the lazy dog'
         sentences = [sentence] * num_sentences
         model = load_model(model)
-        activations = model(sentences, model.default_layers)
+        activations = model(sentences, layers=model.default_layers)
         assert isinstance(activations, NeuroidAssembly)
         assert 2 == len(activations.shape)
         assert num_layers == len(np.unique(activations['layer']))
@@ -35,8 +38,19 @@ class TestActivations:
         base_shape = activations.sel(layer=layers[0]).shape
         assert all([activations.sel(layer=layer).shape == base_shape for layer in layers])
 
+    @pytest.mark.parametrize('num_words', [8])
+    @pytest.mark.parametrize("model", [model for model, num_layers in model_layers])
+    def test_words(self, model, num_words):
+        words = ['The', 'quick', 'brown', 'fox', 'jumps', 'over', 'the', 'lazy', 'dog']
+        assert num_words <= len(words)
+        sentence = ' '.join(words[:num_words])
+        model = load_model(model)
+        activations = model([sentence], layers=model.default_layers, average_sentence=False)
+        assert num_words == len(activations['presentation'])
+
+
     @pytest.mark.parametrize("model", [
-        'bert-wordmean',
+        'bert',
     ])
     def test_story(self, model):
         story = [
