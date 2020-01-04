@@ -40,26 +40,17 @@ models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 
-def bar_models(benchmark='Pereira2018-encoding'):
-    scores = [score(benchmark=benchmark, model=model) for model in models]
-    fig, ax = _bars(models, scores, ylabel=f"model scores on {benchmark}")
-    _savefig(fig, savename=benchmark)
-
-
-def _bars(x, scores, ylabel=None):
-    y, yerr = [s.sel(aggregation='center') for s in scores], [s.sel(aggregation='error') for s in scores]
-
-    fig, ax = pyplot.subplots()
-    ax.bar(x, y, yerr=yerr)
-    ax.set_xticklabels(x, rotation=90, rotation_mode='anchor')
-    ax.set_ylabel(ylabel)
-    return fig, ax
-
 
 def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False):
     scores1 = [score(benchmark=benchmark1, model=model) for model in models]
     scores2 = [score(benchmark=benchmark2, model=model) for model in models]
+    savename = f"{benchmark1}__{benchmark2}"
+    fig, ax = _plot_scores1_2(scores1, scores2, score_annotations=models,
+                              xlabel=benchmark1, ylabel=benchmark2, flip_x=flip_x)
+    _savefig(fig, savename=savename)
 
+
+def _plot_scores1_2(scores1, scores2, score_annotations=None, xlabel=None, ylabel=None, flip_x=False):
     def get_center_err(s):
         if hasattr(s, 'experiment'):
             s = s.mean('experiment')
@@ -79,24 +70,28 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     y, yerr = [get_center_err(s)[0] for s in scores2], [get_center_err(s)[1] for s in scores2]
     fig, ax = pyplot.subplots()
     ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='.')
-    for model, _x, _y in zip(models, x, y):
-        ax.text(_x, _y, model, fontdict=dict(fontsize=10))
+    if score_annotations:
+        for annotation, _x, _y in zip(score_annotations, x, y):
+            ax.text(_x, _y, annotation, fontdict=dict(fontsize=10))
 
     if flip_x:
         ax.set_xlim(list(reversed(ax.get_xlim())))
 
-    correlation, p = scipy.stats.pearsonr(x, y)
+    correlation, p = pearsonr(x, y)
     b, m = polyfit(x, y, 1)
     ax.plot(ax.get_xlim(), b + m * np.array(ax.get_xlim()))
-    ax.text(ax.get_xlim()[1] * (0.8 if not flip_x else 1.2), ax.get_ylim()[0] * 1.1,
-            (f"r={(correlation * (-1 if flip_x else 1)):.2f}" +
-             '*' * max([i for i in range(5) if p <= 0.5 / (10 ** i)]))
+    ax.text(0.9, 0.1, ha='center', va='center', transform=ax.transAxes,
+            s=(f"r={(correlation * (-1 if flip_x else 1)):.2f}" +
+               significance_stars(p))
             if p < 0.05 else f"n.s., p={p:.2f}")
 
-    ax.set_xlabel(benchmark1)
-    ax.set_ylabel(benchmark2)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    return fig, ax
 
-    _savefig(fig, f"{benchmark1}__{benchmark2}")
+
+def significance_stars(p):
+    return '*' * max([i for i in range(5) if p <= 0.5 / (10 ** i)])
 
 
 def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-lm',
@@ -155,15 +150,15 @@ def fmri_experiment_correlations():
     ax.plot(ax.get_xlim(), ax.get_ylim(), linestyle='dashed', color='black')
     ax.set_xlabel('scores on 384sentences')
     ax.set_ylabel('scores on 243sentences')
-    ax.text(0.9, 0.1, "r: " + (f"{r:.2f}" if p < .05 else "n.s."), ha='center', va='center', transform=ax.transAxes)
-    ticks = np.arange(0, 0.35, 0.05)
+    ax.text(0.8, 0.1, "r: " + ((f"{r:.2f}" + significance_stars(p)) if p < .05 else "n.s."),
+            ha='center', va='center', transform=ax.transAxes)
+    ticks = np.arange(0, 0.4, 0.05)
     ax.set_xticks(ticks)
     ax.set_yticks(ticks)
     ticklabels = ["0" if tick == 0 else f"{tick:.1f}"[1:] if Decimal(f"{tick:.2f}") % Decimal(".1") == 0 else ""
                   for tick in ticks]
     ax.set_xticklabels(ticklabels)
     ax.set_yticklabels(ticklabels)
-    fig.tight_layout()
     _savefig(fig, 'fmri-correlations')
 
 
@@ -235,7 +230,7 @@ def _savefig(fig, savename):
     fig.tight_layout()
     savepath = Path(__file__).parent / f"{savename}.png"
     logger.info(f"Saving to {savepath}")
-    fig.savefig(savepath)
+    fig.savefig(savepath, dpi=600)
 
 
 if __name__ == '__main__':
