@@ -1,26 +1,24 @@
 import copy
-import logging
 import os
+import pickle
 import tempfile
 from collections import OrderedDict
 from enum import Enum
 from importlib import import_module
 
 import itertools
+import logging
 import numpy as np
 import pandas as pd
 from numpy.random import RandomState
+from pathlib import Path
 from tqdm import tqdm
-
-import pickle
-import torch
-from scipy.special import softmax
 
 from brainscore.utils import LazyLoad
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 
-_ressources_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'ressources', 'models')
+_ressources_dir = (Path(__file__).parent / '..' / '..' / 'ressources' / 'models').resolve()
 
 
 class BrainModel:
@@ -60,38 +58,39 @@ class GaussianRandom:
         assert layer_names == [self._layer_name]
         return {self._layer_name: self._rng.standard_normal((len(sentences), self._num_samples))}
 
-    
-    
+
 class TopicETM:
     """https://arxiv.org/abs/1907.04907"""
 
     def __init__(self):
+        super().__init__()
         weights_file = os.path.join(_ressources_dir, 'topicETM', 'normalized_betas_50K.npy')
         vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
-        
-        super().__init__()
-        
         self.weights = np.load(weights_file)
-        with open(vocab_file,'rb') as f:
-             self.vocab = pickle.load(f)
-        
+        with open(vocab_file, 'rb') as f:
+            self.vocab = pickle.load(f)
+
         wordEmb_TopicSpace = {}
         for elm in tqdm(self.vocab, desc='vocab'):
-            i = self.vocab.index(elm) # get index of word
-            wordEmb_TopicSpace[elm] = self.weights[:,i]
+            i = self.vocab.index(elm)  # get index of word
+            wordEmb_TopicSpace[elm] = self.weights[:, i]
         self.wordEmb_TopicSpace = wordEmb_TopicSpace
         self._extractor = ActivationsExtractorHelper(identifier='topicETM', get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
-        self._extractor.register_activations_hook(word_mean)
         self._logger = logging.getLogger(self.__class__.__name__)
 
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)       
-        
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        if average_sentence:
+            handle = self._extractor.register_activations_hook(word_mean)
+        result = self._extractor(*args, **kwargs)
+        if average_sentence:
+            handle.remove()
+        return result
+
     def _encode_sentence(self, sentence):
         words = sentence.split()
-        feature_vectors = []        
+        feature_vectors = []
         for word in words:
             if word in self.vocab:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
@@ -99,119 +98,17 @@ class TopicETM:
                 self._logger.warning(f"Word {word} not present in model")
                 feature_vectors.append(np.zeros((100,)))
         return feature_vectors
-    
+
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['projection'])
         encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
         encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
         return {'projection': encoding}
-                
-    available_layers = ['projection']
-    default_layers = available_layers
-    
-    
-class TopicETM_NotNormalized:
-    """https://arxiv.org/abs/1907.04907"""
 
-    def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt')
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
-        
-        super().__init__()
-        
-        self.weights = torch.load(weights_file, map_location='cpu')
-        self.weights = self.weights.numpy()
-        
-        with open(vocab_file,'rb') as f:
-             self.vocab = pickle.load(f)
-        
-        wordEmb_TopicSpace = {}
-        for elm in tqdm(self.vocab, desc='vocab'):
-            i = self.vocab.index(elm) # get index of word
-            wordEmb_TopicSpace[elm] = self.weights[:,i]
-        self.wordEmb_TopicSpace = wordEmb_TopicSpace
-        self._extractor = ActivationsExtractorHelper(identifier='topicETM-notnormalized', get_activations=self._get_activations,
-                                                     reset=lambda: None)
-        self._extractor.insert_attrs(self)
-        self._extractor.register_activations_hook(word_mean)
-        self._logger = logging.getLogger(self.__class__.__name__)
-
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)       
-        
-    def _encode_sentence(self, sentence):
-        words = sentence.split()
-        feature_vectors = []        
-        for word in words:
-            if word in self.vocab:
-                feature_vectors.append(self.wordEmb_TopicSpace[word])
-            else:
-                self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,)))
-        return feature_vectors
-    
-    def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, ['projection'])
-        encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
-        encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
-        return {'projection': encoding}
-                
-    available_layers = ['projection']
-    default_layers = available_layers
-    
-    
-class TopicETM_Softmax:
-    """https://arxiv.org/abs/1907.04907"""
-
-    def __init__(self):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', 'betas_50K_100.pt')
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
-        
-        super().__init__()
-        
-        self.weights = torch.load(weights_file, map_location='cpu')
-        self.weights = self.weights.numpy()
-        self.weights = softmax(self.weights, axis=0) # softmax along columns
-        print('Column sums:', np.sum(self.weights,axis=0))
-        
-        with open(vocab_file,'rb') as f:
-             self.vocab = pickle.load(f)
-        
-        wordEmb_TopicSpace = {}
-        for elm in tqdm(self.vocab, desc='vocab'):
-            i = self.vocab.index(elm) # get index of word
-            wordEmb_TopicSpace[elm] = self.weights[:,i]
-        self.wordEmb_TopicSpace = wordEmb_TopicSpace
-        self._extractor = ActivationsExtractorHelper(identifier='topicETM-softmax', get_activations=self._get_activations,
-                                                     reset=lambda: None)
-        self._extractor.insert_attrs(self)
-        self._extractor.register_activations_hook(word_mean)
-        self._logger = logging.getLogger(self.__class__.__name__)
-
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)       
-        
-    def _encode_sentence(self, sentence):
-        words = sentence.split()
-        feature_vectors = []        
-        for word in words:
-            if word in self.vocab:
-                feature_vectors.append(self.wordEmb_TopicSpace[word])
-            else:
-                self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,)))
-        return feature_vectors
-    
-    def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, ['projection'])
-        encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
-        encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
-        return {'projection': encoding}
-                
     available_layers = ['projection']
     default_layers = available_layers
 
-    
+
 class SkipThoughts:
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
