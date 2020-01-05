@@ -81,12 +81,8 @@ class TopicETM:
         self._logger = logging.getLogger(self.__class__.__name__)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        if average_sentence:
-            handle = self._extractor.register_activations_hook(word_mean)
-        result = self._extractor(*args, **kwargs)
-        if average_sentence:
-            handle.remove()
-        return result
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
 
     def _encode_sentence(self, sentence):
         words = sentence.split()
@@ -124,12 +120,21 @@ class SkipThoughts:
                                                      reset=lambda: None)  # TODO: no idea how to reset state in theano.
         self._extractor.insert_attrs(self)
 
-    def __call__(self, *args, **kwargs):  # cannot assign __call__ as attribute due to Python convention
-        return self._extractor(*args, **kwargs)
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
 
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['encoder'])
-        encoding = self._encoder.encode(sentences)
+        encoding = []
+        for sentence_iter, sentence in enumerate(sentences):
+            sentence_words = []
+            encoding.append([])
+            for word in sentence.split(' '):
+                sentence_words.append(word)
+                word_embeddings = self._encoder.encode([' '.join(sentence_words)])
+                encoding[sentence_iter].append(word_embeddings)
+            encoding[sentence_iter] = np.array(encoding[sentence_iter]).transpose([1, 0, 2])
         return {'encoder': encoding}
 
     available_layers = ['encoder']
@@ -153,12 +158,8 @@ class LM1B:
         self._logger = logging.getLogger(self.__class__.__name__)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        if average_sentence:
-            handle = self._extractor.register_activations_hook(word_last)
-        result = self._extractor(*args, **kwargs)
-        if average_sentence:
-            handle.remove()
-        return result
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
 
     def _get_activations(self, sentences, layers):
         from lm_1b import lm_1b_eval
@@ -384,12 +385,8 @@ class _PytorchTransformerWrapper(BrainModel):
     def __call__(self, *args, average_sentence=True, **kwargs):
         self._model.eval()
         if self.mode == BrainModel.Modes.recording:
-            if average_sentence:
-                handle = self._extractor.register_activations_hook(self._sentence_average)
-            result = self._extractor(*args, **kwargs)
-            if average_sentence:
-                handle.remove()
-            return result
+            return _call_conditional_average(*args, extractor=self._extractor, average_sentence=average_sentence,
+                                             sentence_averaging=self._sentence_average, **kwargs)
         elif self.mode == BrainModel.Modes.general_features:
             # (input_ids, position_ids=position_ids, token_type_ids=token_type_ids, head_mask=head_mask)
             transformer_outputs = self._model(*args, **kwargs)
@@ -517,12 +514,8 @@ class KeyedVectorModel:
         self._logger = logging.getLogger(self.__class__.__name__)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        if average_sentence:
-            handle = self._extractor.register_activations_hook(word_mean)
-        result = self._extractor(*args, **kwargs)
-        if average_sentence:
-            handle.remove()
-        return result
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
 
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['projection'])
@@ -589,6 +582,15 @@ class RecursiveNeuralTensorNetwork(BrainModel):
         assert len(result) == 1
         result = result[[column for column in result if column.startswith('activation')]]
         return result.values
+
+
+def _call_conditional_average(*args, extractor, average_sentence, sentence_averaging, **kwargs):
+    if average_sentence:
+        handle = extractor.register_activations_hook(sentence_averaging)
+    result = extractor(*args, **kwargs)
+    if average_sentence:
+        handle.remove()
+    return result
 
 
 def load_model(model_name):

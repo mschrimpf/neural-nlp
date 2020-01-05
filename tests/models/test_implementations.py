@@ -9,6 +9,7 @@ class TestActivations:
     model_layers = [
         ('topicETM', 1),
         ('word2vec', 1),
+        ('skip-thoughts', 1),
         ('glove', 1),
         ('lm_1b', 2),
         ('transformer-subsample_random', 2 * 6),
