@@ -14,9 +14,10 @@ from pathlib import Path
 from scipy.stats import pearsonr
 from tqdm import tqdm
 
-from neural_nlp import score
+from neural_nlp import score, model_layers
 from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
     _score_model as score_architecture_model
+from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,21 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding'):
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
     _savefig(fig, savename=f"untrained_trained-{benchmark}")
+
+
+def num_features_vs_score(benchmark='Pereira2018-encoding', models=models):
+    num_features = []
+    for model in models:
+        # mock-run stimuli that are already stored
+        mock_extractor = ActivationsExtractorHelper(get_activations=None, reset=None)
+        features = mock_extractor._from_sentences_stored(
+            layers=model_layers[model], sentences=None,
+            identifier=model, stimuli_identifier='Pereira2018-243sentences.astronaut')
+        num_features.append(len(features['neuroid']))
+    scores = [score(benchmark=benchmark, model=model) for model in models]
+    fig, ax = _plot_scores1_2(num_features, scores, score_annotations=models,
+                              xlabel="number of features", ylabel=benchmark)
+    _savefig(fig, savename=f"num_features-{benchmark}")
 
 
 def _savefig(fig, savename):
