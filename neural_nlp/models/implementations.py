@@ -222,82 +222,6 @@ def word_mean(layer_activations):
     return layer_activations
 
 
-def subsample_random(sentence_activations, num_components=1000):
-    for layer, layer_activations in sentence_activations.items():
-        subsampled_layer_activations = []
-        for activations in layer_activations:
-            activations = activations.reshape(activations.shape[0], -1)
-            indices = np.random.randint(activations.shape[1], size=num_components)
-            activations = activations[:, indices]
-            subsampled_layer_activations.append(activations)
-        sentence_activations[layer] = np.concatenate(subsampled_layer_activations)
-    return sentence_activations
-
-
-def pad_zero(sentence_activations):
-    for layer, layer_activations in sentence_activations.items():
-        per_word_features = layer_activations[0].shape[-1]
-        max_num_features = max(a.shape[1] for a in layer_activations)
-        max_num_features = max_num_features * per_word_features
-
-        padded_layer_activations = []
-        for activations in layer_activations:
-            activations = activations.reshape(activations.shape[0], -1)
-            activations = np.pad(activations, pad_width=((0, 0), (0, max_num_features - activations.size)),
-                                 mode='constant', constant_values=0)
-            padded_layer_activations.append(activations)
-        sentence_activations[layer] = np.array(padded_layer_activations)
-    return sentence_activations
-
-
-def Transformer_WordAll():
-    """
-    use representations for all the words. Due to different sentence lengths,
-    this will most likely only work with sub-sampling.
-    However, even then we're subsampling at different locations, making this unlikely to yield reliable representations.
-    :return:
-    """
-    transformer = Transformer()
-
-    def combine_word_activations(layer_activations):
-        for layer, activations in layer_activations.items():
-            activations = [a.reshape(a.shape[0], -1) for a in activations]
-            layer_activations[layer] = np.concatenate(activations)
-        return layer_activations
-
-    transformer.register_activations_hook(combine_word_activations)
-    transformer._extractor.identifier += '-wordall'
-    return transformer
-
-
-def Transformer_WordLast():
-    transformer = Transformer()
-    transformer.register_activations_hook(word_last)
-    transformer._extractor.identifier += '-wordlast'
-    return transformer
-
-
-def Transformer_WordMean():
-    transformer = Transformer()
-    transformer.register_activations_hook(word_mean)
-    transformer._extractor.identifier += '-wordmean'
-    return transformer
-
-
-def Transformer_SubsampleRandom():
-    transformer = Transformer()
-    transformer.register_activations_hook(subsample_random)
-    transformer._extractor.identifier += '-subsample_random'
-    return transformer
-
-
-def Transformer_PadZero():
-    transformer = Transformer()
-    transformer.register_activations_hook(pad_zero)
-    transformer._extractor.identifier += '-pad_zero'
-    return transformer
-
-
 class Transformer(PytorchWrapper):
     """
     https://arxiv.org/pdf/1706.03762.pdf
@@ -317,6 +241,10 @@ class Transformer(PytorchWrapper):
         model_container = self.TransformerContainer(translator, opt)
         super(Transformer, self).__init__(model=model_container, identifier='transformer',
                                           reset=lambda: None)  # transformer is feed-forward
+
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
 
     class TransformerContainer:
         def __init__(self, translator, opt):
@@ -350,7 +278,7 @@ class Transformer(PytorchWrapper):
     """
     For each of the 6 encoder blocks, we're using two layers,
     one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
-    
+
     The encoder is implemented as follows:
     ```
     input_norm = self.layer_norm(inputs)
@@ -598,35 +526,23 @@ def load_model(model_name):
 
 
 model_pool = {
-    'topicETM-softmax': LazyLoad(TopicETM_Softmax),
-    'topicETM-notnormalized':LazyLoad(TopicETM_NotNormalized),
-    'topicETM': LazyLoad(TopicETM),
     'random-gaussian': LazyLoad(GaussianRandom),
     'skip-thoughts': LazyLoad(SkipThoughts),
     'lm_1b': LazyLoad(LM1B),
     'word2vec': LazyLoad(Word2Vec),
     'glove': LazyLoad(Glove),
     'rntn': LazyLoad(RecursiveNeuralTensorNetwork),
-    'transformer-wordmean': LazyLoad(Transformer_WordMean),
-    'transformer-wordall': LazyLoad(Transformer_WordAll),
-    'transformer-wordlast': LazyLoad(Transformer_WordLast),
-    'transformer-subsample_random': LazyLoad(Transformer_SubsampleRandom),
-    'transformer-pad_zero': LazyLoad(Transformer_PadZero),
+    'transformer': LazyLoad(Transformer),
+    'topicETM': LazyLoad(TopicETM),
 }
 model_layers = {
-    'topicETM-softmax': TopicETM_Softmax.default_layers,
-    'topicETM-notnormalized': TopicETM_NotNormalized.default_layers,
-    'topicETM': TopicETM.default_layers,
     'random-gaussian': GaussianRandom.default_layers,
     'skip-thoughts': SkipThoughts.default_layers,
     'lm_1b': LM1B.default_layers,
     'word2vec': Word2Vec.default_layers,
     'glove': Glove.default_layers,
-    'transformer-wordmean': Transformer.default_layers,
-    'transformer-wordall': Transformer.default_layers,
-    'transformer-wordlast': Transformer.default_layers,
-    'transformer-subsample_random': Transformer.default_layers,
-    'transformer-pad_zero': Transformer.default_layers,
+    'transformer': Transformer.default_layers,
+    'topicETM': TopicETM.default_layers,
 }
 
 SPIECE_UNDERLINE = u'▁'  # define directly to avoid having to import (from pytorch_transformers.tokenization_xlnet)
