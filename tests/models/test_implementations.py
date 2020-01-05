@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from brainio_base.assemblies import NeuroidAssembly
 
-from neural_nlp.models.implementations import load_model
+from neural_nlp.models.implementations import load_model, transformer_configurations
 
 
 class TestActivations:
@@ -12,19 +12,15 @@ class TestActivations:
         ('skip-thoughts', 1),
         ('glove', 1),
         ('lm_1b', 2),
-        ('transformer-subsample_random', 2 * 6),
-        ('transformer-pad_zero', 2 * 6),
-        ('transformer-wordmean', 2 * 6),
-        ('bert', 13),
-        ('openaigpt', 13),
-        ('gpt2', 13),
-        ('transfoxl', 19),
-        ('xlnet', 13),
-        ('xlm', 7),
-        ('roberta', 13),
+        ('transformer', 2 * 6),
     ]
+    for (identifier, _, _, _, _, _, layers) in transformer_configurations:
+        model_layers.append((identifier, len(layers)))
+
+    models = [model for model, num_layers in model_layers]
 
     @pytest.mark.parametrize("num_sentences", [1, 3, 10, 57])  # 57 because 57*num_words_in_sentence > 512 embedding
+    @pytest.mark.parametrize("num_sentences", [3])
     @pytest.mark.parametrize("model, num_layers", model_layers)
     def test_sentences(self, model, num_layers, num_sentences):
         sentence = 'The quick brown fox jumps over the lazy dog'
@@ -40,7 +36,7 @@ class TestActivations:
         assert all([activations.sel(layer=layer).shape == base_shape for layer in layers])
 
     @pytest.mark.parametrize('num_words', [8])
-    @pytest.mark.parametrize("model", [model for model, num_layers in model_layers])
+    @pytest.mark.parametrize("model", models)
     def test_words(self, model, num_words):
         words = ['The', 'quick', 'brown', 'fox', 'jumps', 'over', 'the', 'lazy', 'dog']
         assert num_words <= len(words)
@@ -49,10 +45,7 @@ class TestActivations:
         activations = model([sentence], layers=model.default_layers, average_sentence=False)
         assert num_words == len(activations['presentation'])
 
-
-    @pytest.mark.parametrize("model", [
-        'bert',
-    ])
+    @pytest.mark.parametrize("model", models)
     def test_story(self, model):
         story = [
             'If you were to journey to the North of England you would come to a valley that is surrounded by moors as high as',

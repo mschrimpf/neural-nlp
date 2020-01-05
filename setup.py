@@ -29,7 +29,7 @@ requirements = [
     "OpenNMT-py @ git+https://github.com/williamrainer/OpenNMT-py.git@cdc8f37",
     "text @ git+https://github.com/pytorch/text.git",
 
-    "pytorch-transformers",
+    "transformers",
 ]
 
 test_requirements = [
