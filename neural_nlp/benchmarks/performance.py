@@ -7,8 +7,6 @@ import random
 import numpy as np
 import torch
 from pathlib import Path
-from pytorch_transformers import AdamW, WarmupLinearSchedule
-from tensorboardX import SummaryWriter
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler
@@ -66,13 +64,9 @@ class TextDataset(Dataset):
             tokenized_text = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(text))
             tokenized_text = np.array(tokenized_text)  # ~10 sec with numpy, ~40 hours without
 
-            progress = tqdm(total=len(tokenized_text), desc='truncate text into blocks')
-            while len(tokenized_text) >= block_size:  # Truncate in block of block_size
-                block = tokenized_text[:block_size].tolist()
-                self.examples.append(tokenizer.add_special_tokens_single_sentence(block))
-                tokenized_text = tokenized_text[block_size:]
-                progress.update(len(block))
-            progress.close()
+            # Truncate in block of block_size
+            for i in tqdm(range(0, len(tokenized_text) - block_size + 1, block_size), desc='truncate text into blocks'):
+                self.examples.append(tokenizer.build_inputs_with_special_tokens(tokenized_text[i: i + block_size]))
             # Note that we are loosing the last truncated example here for the sake of simplicity (no padding)
             # If your dataset is small, first you should loook for a bigger one :-) and second you
             # can change this behavior by adding (model specific) padding.
@@ -102,6 +96,8 @@ def train(model, train_dataset, val_dataset, device='cuda',
           gradient_accumulation_steps=1, num_train_epochs=50, max_grad_norm=1.0,
           logging_steps=50):
     """ Train the model """
+    from transformers import AdamW, get_linear_schedule_with_warmup
+    from tensorboardX import SummaryWriter
     tb_writer = SummaryWriter()
 
     train_sampler = RandomSampler(train_dataset)
@@ -120,7 +116,7 @@ def train(model, train_dataset, val_dataset, device='cuda',
     ]
     # features model's parameters are already disabled in LMHead.forward
     optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_epsilon)
-    scheduler = WarmupLinearSchedule(optimizer, warmup_steps=warmup_steps, t_total=t_total)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=t_total)
 
     # Train!
     logger.info("***** Running training *****")
@@ -224,11 +220,12 @@ class _PerformanceBenchmark:
         lm_head = lm_head.to(device)
         model._model.to(device)
         tokenizer = model.tokenizer
-        block_size = min(2048,
-                         tokenizer.max_len_single_sentence if hasattr(tokenizer, 'max_len_single_sentence')
-                         else tokenizer.max_len)
+        block_size = tokenizer.max_len_single_sentence if hasattr(tokenizer, 'max_len_single_sentence') \
+            else tokenizer.max_len
         if model.identifier.startswith('roberta') or model.identifier.startswith('xlm'):
             block_size -= 2
+        if model.identifier.startswith('transfo'):
+            block_size = 256  # can't fit on our gpus otherwise
         # train
         train_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
                                     file_path=self.train_data_file, block_size=block_size)
