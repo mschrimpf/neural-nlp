@@ -226,6 +226,7 @@ class _PerformanceBenchmark:
             block_size -= 2
         if model.identifier.startswith('transfo'):
             block_size = 256  # can't fit on our gpus otherwise
+        block_size = max(block_size, 1024)
         # train
         train_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
                                     file_path=self.train_data_file, block_size=block_size)
