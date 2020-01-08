@@ -1,9 +1,7 @@
 import logging
-
 from tqdm import tqdm
 
 from brainscore.metrics import Score
-from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import models
 from neural_nlp.benchmarks import benchmark_pool
 from neural_nlp.models import get_activations, model_layers, model_pool, SubsamplingHook
@@ -21,19 +19,42 @@ def score(benchmark, model, layers=None, model_impl=None, subsample=None, bold_s
     layers = layers or model_layers[model]
 
     _logger.info('Loading benchmark')
-    benchmark = benchmark_pool[benchmark](bold_shift=bold_shift)
-    if hasattr(benchmark, 'ceiling'):  # not yet implemented for all
-        print(benchmark.ceiling)
+    benchmark_impl = benchmark_pool[benchmark]()
 
     _logger.info('Running')
+    # shortcut for behavioral benchmarks
+    if benchmark in ['wikitext-2']:
+        return benchmark_impl(model_impl)
+
     layer_scores = []
-    for layer in tqdm(layers, desc='layers'):
-        candidate = lambda stimuli: model_impl(layers=[layer], stimuli=stimuli)
-        layer_score = benchmark(candidate)
+    for i, layer in tqdm(enumerate(layers), desc='layers'):
+        candidate = FixedLayer(model_impl, layer, prerun=layers if i == 0 else None)  # prerun everything for 1st layer
+        layer_score = benchmark_impl(candidate)
         layer_score = layer_score.expand_dims('layer')
         layer_score['layer'] = [layer]
         layer_scores.append(layer_score)
     layer_scores = Score.merge(*layer_scores)
     layer_scores = layer_scores.sel(layer=layers)  # preserve layer ordering
-    score = apply_aggregate(lambda score: score.max('layer'), layer_scores)
-    return score
+    layer_scores.attrs['model'] = model
+    layer_scores.attrs['benchmark'] = benchmark
+    return layer_scores
+
+
+class FixedLayer:
+    def __init__(self, model, layer, prerun=None):
+        self._model = model
+        self._layer = layer
+        self._prerun = prerun
+
+    def __call__(self, *args, **kwargs):
+        if self._prerun:  # avoid wasting computation: prerun all the layers to have them stored
+            self._model(*args, **kwargs, layers=self._prerun)
+        return self._model(*args, **kwargs, layers=[self._layer])
+
+    def __getattr__(self, item):
+        return self._model.__getattr__(item)
+
+    def __setattr__(self, item, value):
+        if item in ['_model', '_layer']:
+            return super(FixedLayer, self).__setattr__(item, value)
+        return self._model.__setattr__(item, value)
