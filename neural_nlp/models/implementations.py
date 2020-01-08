@@ -10,7 +10,6 @@ import itertools
 import logging
 import numpy as np
 import pandas as pd
-from numpy.random import RandomState
 from pathlib import Path
 from tqdm import tqdm
 
@@ -41,22 +40,24 @@ class BrainModel:
         raise NotImplementedError()
 
 
-class GaussianRandom:
-    _layer_name = 'random'
-    available_layers = [_layer_name]
+class SentenceLength(BrainModel):
+    available_layers = ['sentence-length']
     default_layers = available_layers
 
-    def __init__(self, num_samples=1000):
-        """
-        :param num_samples: how many samples to draw for each sentence
-        """
-        self._rng = RandomState()
-        self._num_samples = num_samples
-        super(GaussianRandom, self).__init__()
+    def __init__(self):
+        super(SentenceLength, self).__init__()
+        self._extractor = ActivationsExtractorHelper(identifier='sentence-length',
+                                                     get_activations=self._get_activations, reset=lambda: None)
 
-    def _get_activations(self, sentences, layer_names):
-        assert layer_names == [self._layer_name]
-        return {self._layer_name: self._rng.standard_normal((len(sentences), self._num_samples))}
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        if not average_sentence:
+            raise ValueError("This model only works on a sentence-level")
+        return self._extractor(*args, **kwargs)
+
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, self.available_layers)
+        sentence_lengths = [len(sentence.split(' ')) for sentence in sentences]
+        return {self.available_layers[0]: np.array(sentence_lengths)}
 
 
 class TopicETM:
@@ -527,17 +528,16 @@ def load_model(model_name):
 
 
 model_pool = {
-    'random-gaussian': LazyLoad(GaussianRandom),
+    'sentence-length': LazyLoad(SentenceLength),
     'skip-thoughts': LazyLoad(SkipThoughts),
     'lm_1b': LazyLoad(LM1B),
     'word2vec': LazyLoad(Word2Vec),
     'glove': LazyLoad(Glove),
-    'rntn': LazyLoad(RecursiveNeuralTensorNetwork),
     'transformer': LazyLoad(Transformer),
     'topicETM': LazyLoad(TopicETM),
 }
 model_layers = {
-    'random-gaussian': GaussianRandom.default_layers,
+    'sentence-length': SentenceLength.default_layers,
     'skip-thoughts': SkipThoughts.default_layers,
     'lm_1b': LM1B.default_layers,
     'word2vec': Word2Vec.default_layers,

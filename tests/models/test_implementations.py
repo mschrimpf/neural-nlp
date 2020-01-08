@@ -2,26 +2,15 @@ import numpy as np
 import pytest
 from brainio_base.assemblies import NeuroidAssembly
 
-from neural_nlp.models.implementations import load_model, transformer_configurations
+from neural_nlp.models.implementations import load_model, model_pool, model_layers
 
 
 class TestActivations:
-    model_layers = [
-        ('topicETM', 1),
-        ('word2vec', 1),
-        ('skip-thoughts', 1),
-        ('glove', 1),
-        ('lm_1b', 2),
-        ('transformer', 2 * 6),
-    ]
-    for (identifier, _, _, _, _, _, layers) in transformer_configurations:
-        model_layers.append((identifier, len(layers)))
-
-    models = [model for model, num_layers in model_layers]
+    models = list(model_pool.keys())
+    model_num_layers = [(model, len(model_layers[model])) for model in models]
 
     @pytest.mark.parametrize("num_sentences", [1, 3, 10, 57])  # 57 because 57*num_words_in_sentence > 512 embedding
-    @pytest.mark.parametrize("num_sentences", [3])
-    @pytest.mark.parametrize("model, num_layers", model_layers)
+    @pytest.mark.parametrize("model, num_layers", model_num_layers)
     def test_sentences(self, model, num_layers, num_sentences):
         sentence = 'The quick brown fox jumps over the lazy dog'
         sentences = [sentence] * num_sentences
