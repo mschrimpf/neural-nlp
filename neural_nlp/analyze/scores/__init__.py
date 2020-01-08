@@ -291,18 +291,25 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding'):
     _savefig(fig, savename=f"untrained_trained-{benchmark}")
 
 
-def num_features_vs_score(benchmark='Pereira2018-encoding', models=models):
-    num_features = []
+def num_features_vs_score(benchmark='Pereira2018-encoding', models=models, per_layer=False):
+    num_features, scores, colors = [], [], None
     for model in models:
+        model_score = score(benchmark=benchmark, model=model)
         # mock-run stimuli that are already stored
         mock_extractor = ActivationsExtractorHelper(get_activations=None, reset=None)
         features = mock_extractor._from_sentences_stored(
             layers=model_layers[model], sentences=None,
             identifier=model, stimuli_identifier='Pereira2018-243sentences.astronaut')
-        num_features.append(len(features['neuroid']))
-    scores = [score(benchmark=benchmark, model=model) for model in models]
-    fig, ax = _plot_scores1_2(num_features, scores, score_annotations=models,
-                              xlabel="number of features", ylabel=benchmark)
+        if per_layer:
+            colors = []
+            for layer in model_layers[model]:
+                num_features.append(len(features.sel(layer=layer)['neuroid']))
+                scores.append(model_score.sel(layer=layer, drop=True))
+                colors.append(model_colors[model])
+        else:
+            num_features.append(len(features['neuroid']))
+            scores.append(model_score)
+    fig, ax = _plot_scores1_2(num_features, scores, color=colors, xlabel="number of features", ylabel=benchmark)
     _savefig(fig, savename=f"num_features-{benchmark}")
 
 
