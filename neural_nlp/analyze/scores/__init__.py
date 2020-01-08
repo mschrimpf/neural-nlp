@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal
 
 import fire
@@ -5,7 +6,6 @@ import itertools
 import logging
 import numpy as np
 import pandas as pd
-import scipy.stats
 import seaborn
 import sys
 from matplotlib import pyplot
@@ -18,40 +18,94 @@ from neural_nlp import score, model_layers
 from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
     _score_model as score_architecture_model
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
+from result_caching import NotCachedError
 
 logger = logging.getLogger(__name__)
 
 model_colors = {
-    'glove': 'violet',
-    'lm_1b': 'goldenrod',
-    'transfoxl': 'peru',
-    'bert': 'orangered',
-    'roberta': 'brown',
-    'openaigpt': 'steelblue',
-    'gpt2': 'c',
-    'gpt2-medium': 'teal',
-    'gpt2-large': 'darkslategray',
-    # 'gpt2-xl': 'darkcyan',
-    'xlnet': 'gray',
-    'xlm': 'green',
-    'xlm-clm': 'darkgreen',
+    # controls / embeddings
+    'sentence-length': 'lightgray',
+    'word2vec': 'silver',
+    'skip-thoughts': 'darkgray',
+    'glove': 'gray',
+    # semantic?
+    'topicETM': 'bisque',
+    # LSTMs
+    'lm_1b': 'slategrey',
+    # naive transformer
+    'transformer': 'rosybrown',
+    # BERT
+    'bert-base-uncased': 'tomato',
+    'bert-base-multilingual-cased': 'r',
+    'bert-large-uncased': 'orangered',
+    'bert-large-uncased-whole-word-masking': 'red',
+    'distilbert-base-uncased': 'salmon',
+    # RoBERTa
+    'distilroberta-base': 'firebrick',
+    'roberta-base': 'brown',
+    'roberta-large': 'maroon',
+    # GPT
+    'distilgpt2': 'lightblue',
+    'openaigpt': 'cadetblue',
+    'gpt2': 'steelblue',
+    'gpt2-medium': 'c',
+    'gpt2-large': 'teal',
+    'gpt2-xl': 'darkslategray',
+    # Transformer-XL
+    'transfo-xl-wt103': 'peru',
+    # XLNet
+    'xlnet-base-cased': 'yellow',
+    'xlnet-large-cased': 'gold',
+    # XLM
+    'xlm-mlm-en-2048': 'orange',
+    'xlm-mlm-enfr-1024': 'darkorange',
+    'xlm-mlm-xnli15-1024': 'goldenrod',
+    'xlm-clm-enfr-1024': 'chocolate',
+    'xlm-mlm-100-1280': 'darkgoldenrod',
+    # CTRL
+    'ctrl': 'blue',
+    # AlBERT
+    'albert-base-v1': 'limegreen',
+    'albert-base-v2': 'limegreen',
+    'albert-large-v1': 'forestgreen',
+    'albert-large-v2': 'forestgreen',
+    'albert-xlarge-v1': 'green',
+    'albert-xlarge-v2': 'green',
+    'albert-xxlarge-v1': 'darkgreen',
+    'albert-xxlarge-v2': 'darkgreen',
+    # T5
+    't5-small': 'mediumpurple',
+    't5-base': 'blueviolet',
+    't5-large': 'mediumorchid',
+    't5-3b': 'darkviolet',
+    't5-11b': 'rebeccapurple',
+    # XLM-RoBERTa
+    'xlm-roberta-base': 'magenta', 'xlm-roberta-large': 'm',
 }
-
 models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 
 
 def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False):
-    scores1 = [score(benchmark=benchmark1, model=model) for model in models]
-    scores2 = [score(benchmark=benchmark2, model=model) for model in models]
+    scores1, scores2, run_models = [], [], []
+    os.environ['RESULTCACHING_CACHEDONLY'] = '1'
+    for model in models:
+        try:
+            score1 = score(benchmark=benchmark1, model=model)
+            score2 = score(benchmark=benchmark2, model=model)
+            scores1.append(score1)
+            scores2.append(score2)
+            run_models.append(model)
+        except NotCachedError:
+            continue
     savename = f"{benchmark1}__{benchmark2}"
-    fig, ax = _plot_scores1_2(scores1, scores2, score_annotations=models,
+    fig, ax = _plot_scores1_2(scores1, scores2, score_annotations=run_models,
                               xlabel=benchmark1, ylabel=benchmark2, flip_x=flip_x)
     _savefig(fig, savename=savename)
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None, xlabel=None, ylabel=None, flip_x=False):
+def _plot_scores1_2(scores1, scores2, score_annotations=None, xlabel=None, ylabel=None, flip_x=False, **kwargs):
     def get_center_err(s):
         if hasattr(s, 'experiment'):
             s = s.mean('experiment')
@@ -65,12 +119,14 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, xlabel=None, ylabe
         if hasattr(s, 'measure'):
             ppl = s.sel(measure='test_perplexity').values.tolist()
             return np.log(ppl), 0
+        if isinstance(s, (int, float)):
+            return s, 0
         raise ValueError(f"Unknown score structure: {s}")
 
     x, xerr = [get_center_err(s)[0] for s in scores1], [get_center_err(s)[1] for s in scores1]
     y, yerr = [get_center_err(s)[0] for s in scores2], [get_center_err(s)[1] for s in scores2]
     fig, ax = pyplot.subplots()
-    ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='.')
+    ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='.', **kwargs)
     if score_annotations:
         for annotation, _x, _y in zip(score_annotations, x, y):
             ax.text(_x, _y, annotation, fontdict=dict(fontsize=10))
@@ -125,7 +181,11 @@ def collect_scores(benchmark, models):
         return data
     data = []
     for model in tqdm(models, desc='model scores'):
-        model_scores = score(benchmark=benchmark, model=model)
+        os.environ['RESULTCACHING_CACHEDONLY'] = '1'
+        try:
+            model_scores = score(benchmark=benchmark, model=model)
+        except NotCachedError:
+            continue
         adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
         for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
             adjunct_values = dict(zip(adjunct_columns, adjunct_values))
@@ -211,14 +271,18 @@ def align_both(data1, data2, on):
 
 
 def untrained_vs_trained(benchmark='Pereira2018-encoding'):
-    trained_models = ['bert', 'gpt2', 'gpt2-medium',
-                      'openaigpt', 'transfoxl', 'xlnet', 'xlm', 'xlm-clm', 'roberta']
-    direct_mappings = {'xlm-clm': 'xlm-untrained'}
-    untrained_models = [direct_mappings[model] if model in direct_mappings else f"{model}-untrained"
-                        for model in trained_models]
-    trained_scores = [score(benchmark=benchmark, model=model) for model in trained_models]
-    untrained_scores = [score(benchmark=benchmark, model=model) for model in untrained_models]
-    fig, ax = _plot_scores1_2(untrained_scores, trained_scores, score_annotations=trained_models,
+    os.environ['RESULTCACHING_CACHEDONLY'] = '1'
+    trained_scores, untrained_scores, run_models = [], [], []
+    for model in models:
+        try:
+            trained_score = score(benchmark=benchmark, model=model)
+            untrained_score = score(benchmark=benchmark, model=f"{model}-untrained")
+            trained_scores.append(trained_score)
+            untrained_scores.append(untrained_score)
+            run_models.append(model)
+        except NotCachedError:
+            continue
+    fig, ax = _plot_scores1_2(untrained_scores, trained_scores, score_annotations=run_models,
                               xlabel="untrained", ylabel="trained")
     lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1])]
     ax.set_xlim(lims)
