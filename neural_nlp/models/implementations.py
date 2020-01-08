@@ -662,6 +662,32 @@ for (identifier, num_layers), version in itertools.product([
         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L335
         layers=('embeddings',) + tuple(f'encoder.albert_layer_groups.{i}' for i in range(num_layers))
     ))
+
+
+# t5
+class _T5Wrapper:
+    def __init__(self, model):
+        self._model = model
+
+    def __call__(self, tokens_tensor):
+        # the decoder_input_ids are not right, but we only retrieve encoder features anyway
+        return self._model(encoder_input_ids=tokens_tensor, decoder_input_ids=tokens_tensor)
+
+
+for identifier, num_layers in [
+    ('t5-small', 6),
+    ('t5-base', 12),
+    ('t5-large', 24),
+    ('t5-3b', 24),
+    ('t5-11b', 24),
+]:
+    transformer_configurations.append(dict(
+        prefix='T5', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_t5.py#L773
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_t5.py#L605
+        layers=('shared',) + tuple(f'encoder.block.{i}' for i in range(num_layers)),
+        model_wrapper=_T5Wrapper,
+    ))
 # xlm-roberta
 for identifier, num_layers in [
     ('xlm-roberta-base', 12),
@@ -704,6 +730,9 @@ for untrained in False, True:
                 state_dict = model.state_dict()  # force loading of initial
             model = model_ctr.from_pretrained(configuration['weight_identifier'],
                                               output_hidden_states=True, state_dict=state_dict)
+            model_wrapper = configuration.get('model_wrapper', None)
+            if model_wrapper:
+                model = model_wrapper(model)
             transformer = _PytorchTransformerWrapper(
                 identifier=identifier,
                 tokenizer=tokenizer, tokenizer_special_tokens=configuration.get('tokenizer_special_tokens', ()),
