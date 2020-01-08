@@ -548,6 +548,17 @@ model_layers = {
 
 SPIECE_UNDERLINE = u'▁'  # define directly to avoid having to import (from pytorch_transformers.tokenization_xlnet)
 transformer_configurations = []
+"""
+Each model configuration is a dictionary with the following keys:
+- identifier: if empty, use weight_identifier)
+- weight_identifier: which pretrained weights to use
+- prefix: the model's string prefix from which to build <prefix>Config, <prefix>Model, and <prefix>Tokenizer 
+    if they are not defined.
+- config_ctr: the importable class name of the model's config class
+- model_ctr: the importable class name of the model's model class
+- tokenizer_ctr: the importable class name of the model's tokenizer class
+- layers: a list of layers from which we will retrieve activations
+"""
 # bert
 for identifier, num_layers in [
     ('bert-base-uncased', 12),
@@ -555,19 +566,18 @@ for identifier, num_layers in [
     ('bert-large-uncased', 24),
     ('bert-large-uncased-whole-word-masking', 24),
 ]:
-    transformer_configurations.append(
-        (identifier, 'BertConfig', 'BertModel', 'BertTokenizer', (), identifier,
-         # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
-         # output == layer_norm(fc(attn) + attn)
-         ('embedding',) + tuple(f'encoder.layer.{i}.output' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='Bert', weight_identifier=identifier,
+        # https://github.com/huggingface/pytorch-pretrained-BERT/blob/78462aad6113d50063d8251e27dbaadb7f44fbf0/pytorch_pretrained_bert/modeling.py#L480
+        # output == layer_norm(fc(attn) + attn)
+        layers=('embedding',) + tuple(f'encoder.layer.{i}.output' for i in range(num_layers))
+    ))
 # openaigpt
-transformer_configurations.append(
-    ('openaigpt',
-     'OpenAIGPTConfig', 'OpenAIGPTModel', 'OpenAIGPTTokenizer', ('</w>',), 'openai-gpt',
-     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_openai.py#L517
-     ('drop',) + tuple(f'encoder.h.{i}.ln_2' for i in range(12))
-     ))
+transformer_configurations.append(dict(
+    prefix='OpenAIGPT', weight_identifier='openaigpt', tokenizer_special_tokens=('</w>',),
+    # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_openai.py#L517
+    layers=('drop',) + tuple(f'encoder.h.{i}.ln_2' for i in range(12))
+))
 # gpt2
 for identifier, num_layers in [
     ('gpt2', 12),
@@ -576,28 +586,27 @@ for identifier, num_layers in [
     ('gpt2-xl', 48),
     ('distilgpt2', 6),
 ]:
-    transformer_configurations.append(
-        (identifier, 'GPT2Config', 'GPT2Model', 'GPT2Tokenizer', ('ġ',), identifier,
-         # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
-         ('drop',) + tuple(f'encoder.h.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='GPT2', weight_identifier=identifier, tokenizer_special_tokens=('ġ',),
+        # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_gpt2.py#L514
+        layers=('drop',) + tuple(f'encoder.h.{i}' for i in range(num_layers))
+    ))
 # transformer xl
-transformer_configurations.append(
-    ('transfo-xl-wt103',
-     'TransfoXLConfig', 'TransfoXLModel', 'TransfoXLTokenizer', (), 'transfo-xl-wt103',
-     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_transfo_xl.py#L1161
-     ('drop',) + tuple(f'encoder.layers.{i}' for i in range(18))
-     ))
+transformer_configurations.append(dict(
+    prefix='TransfoXL', weight_identifier='transfo-xl-wt103',
+    # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_transfo_xl.py#L1161
+    layers=('drop',) + tuple(f'encoder.layers.{i}' for i in range(18))
+))
 # xlnet
 for identifier, num_layers in [
     ('xlnet-base-cased', 12),
     ('xlnet-large-cased', 24),
 ]:
-    transformer_configurations.append(
-        (identifier, 'XLNetConfig', 'XLNetModel', 'XLNetTokenizer', (SPIECE_UNDERLINE,), identifier,
-         # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlnet.py#L962
-         ('drop',) + tuple(f'encoder.layer.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='XLNet', tokenizer_special_tokens=(SPIECE_UNDERLINE,), weight_identifier=identifier,
+        # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlnet.py#L962
+        layers=('drop',) + tuple(f'encoder.layer.{i}' for i in range(num_layers))
+    ))
 # xlm
 for identifier, num_layers in [
     ('xlm-mlm-en-2048', 12),
@@ -606,40 +615,39 @@ for identifier, num_layers in [
     ('xlm-clm-enfr-1024', 6),
     ('xlm-mlm-100-1280', 16),
 ]:
-    transformer_configurations.append(
-        (identifier, 'XLMConfig', 'XLMModel', 'XLMTokenizer', ('</w>',), identifier,
-         # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlm.py#L638
-         ('dropout',) + tuple(f'encoder.layer_norm2.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='XLM', tokenizer_special_tokens=('</w>',), weight_identifier=identifier,
+        # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_xlm.py#L638
+        layers=('dropout',) + tuple(f'encoder.layer_norm2.{i}' for i in range(num_layers))
+    ))
 # roberta
 for identifier, num_layers in [
     ('roberta-base', 12),
     ('roberta-large', 24),
     ('distilroberta-base', 6),
 ]:
-    transformer_configurations.append(
-        (identifier, 'RobertaConfig', 'RobertaModel', 'RobertaTokenizer', ('ġ',), identifier,
-         # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_roberta.py#L174
-         ('embedding',) + tuple(f'encoder.layer.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='Roberta', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
+        # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_roberta.py#L174
+        layers=('embedding',) + tuple(f'encoder.layer.{i}' for i in range(num_layers))
+    ))
 # distilbert
 for identifier, num_layers in [
     ('distilbert-base-uncased', 6),
 ]:
-    transformer_configurations.append(
-        (identifier, 'DistilBertConfig', 'DistilBertModel', 'DistilBertTokenizer', ('ġ',), identifier,
-         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_distilbert.py#L482
-         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_distilbert.py#L258
-         ('embeddings',) + tuple(f'transformer.layer.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='DistilBert', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_distilbert.py#L482
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_distilbert.py#L258
+        layers=('embeddings',) + tuple(f'transformer.layer.{i}' for i in range(num_layers))
+    ))
 # ctrl
-transformer_configurations.append(
-    ('ctrl',
-     'CTRLConfig', 'CTRLModel', 'CTRLTokenizer', ('ġ',), 'ctrl',
-     # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_ctrl.py#L388
-     # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_ctrl.py#L408
-     ('w',) + tuple(f'h.{i}' for i in range(48))
-     ))
+transformer_configurations.append(dict(
+    prefix='CTRL', tokenizer_special_tokens=('ġ',), weight_identifier='ctrl',
+    # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_ctrl.py#L388
+    # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_ctrl.py#L408
+    layers=('w',) + tuple(f'h.{i}' for i in range(48))
+))
 # albert
 for (identifier, num_layers), version in itertools.product([
     ('albert-base', 12),
@@ -648,53 +656,61 @@ for (identifier, num_layers), version in itertools.product([
     ('albert-xxlarge', 12),
 ], [1, 2]):
     identifier = f"{identifier}-v{version}"
-    transformer_configurations.append(
-        (identifier, 'AlbertConfig', 'AlbertModel', 'AlbertTokenizer', ('ġ',), identifier,
-         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L557
-         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L335
-         ('embeddings',) + tuple(f'encoder.albert_layer_groups.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='AlbertTokenizer', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L557
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L335
+        layers=('embeddings',) + tuple(f'encoder.albert_layer_groups.{i}' for i in range(num_layers))
+    ))
 # xlm-roberta
 for identifier, num_layers in [
     ('xlm-roberta-base', 12),
     ('xlm-roberta-large', 24),
 ]:
-    transformer_configurations.append(
-        (identifier, 'XLMRobertaConfig', 'XLMRobertaModel', 'XLMRobertaTokenizer', ('ġ',), identifier,
-         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_xlm_roberta.py#L119
-         ('embedding',) + tuple(f'encoder.layer.{i}' for i in range(num_layers))
-         ))
+    transformer_configurations.append(dict(
+        prefix='XLMRoberta', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
+        # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_xlm_roberta.py#L119
+        layers=('embedding',) + tuple(f'encoder.layer.{i}' for i in range(num_layers))
+    ))
 
 for untrained in False, True:
-    for (identifier,
-         config_ctr, model_ctr, tokenizer_ctr, tokenizer_special_tokens, pretrained_weights,
-         layers) in transformer_configurations:
+    for configuration in transformer_configurations:
+        configuration = copy.deepcopy(configuration)
+        # either use the defined identifier or the weights used
+        identifier = configuration.get('identifier', configuration['weight_identifier'])
 
         if untrained:
             identifier += '-untrained'
+            configuration['trained'] = False
+
+        # either use the defined values for config, model and tokenizer or build from prefix
+        configuration['config_ctr'] = configuration.get('config_ctr', configuration['prefix'] + 'Config')
+        configuration['model_ctr'] = configuration.get('model_ctr', configuration['prefix'] + 'Model')
+        configuration['tokenizer_ctr'] = configuration.get('tokenizer_ctr', configuration['prefix'] + 'Tokenizer')
 
 
-        def ModelInstantiation(identifier=identifier, config_ctr=config_ctr, model_ctr=model_ctr,
-                               tokenizer_ctr=tokenizer_ctr, tokenizer_special_tokens=tokenizer_special_tokens,
-                               pretrained_weights=pretrained_weights, layers=layers,
-                               untrained=untrained):
+        def ModelInstantiation(identifier=identifier, configuration=frozenset(configuration.items())):
+            configuration = dict(configuration)  # restore from frozen
             module = import_module('transformers')
-            config_ctr = getattr(module, config_ctr)
-            model_ctr, tokenizer_ctr = getattr(module, model_ctr), getattr(module, tokenizer_ctr)
+            config_ctr = getattr(module, configuration['config_ctr'])
+            model_ctr = getattr(module, configuration['model_ctr'])
+            tokenizer_ctr = getattr(module, configuration['tokenizer_ctr'])
             # Load pre-trained model tokenizer (vocabulary) and model
-            config = config_ctr.from_pretrained(pretrained_weights)
-            tokenizer = tokenizer_ctr.from_pretrained(pretrained_weights)
+            config = config_ctr.from_pretrained(configuration['weight_identifier'])
+            tokenizer = tokenizer_ctr.from_pretrained(configuration['weight_identifier'])
             state_dict = None
-            if untrained:
+            if not configuration.get('trained', True):  # if untrained
                 model = model_ctr(config=config)
                 state_dict = model.state_dict()  # force loading of initial
-            model = model_ctr.from_pretrained(pretrained_weights, output_hidden_states=True, state_dict=state_dict)
-            transformer = _PytorchTransformerWrapper(identifier=identifier,
-                                                     tokenizer=tokenizer,
-                                                     tokenizer_special_tokens=tokenizer_special_tokens,
-                                                     model=model, layers=layers, sentence_average=word_last)
+            model = model_ctr.from_pretrained(configuration['weight_identifier'],
+                                              output_hidden_states=True, state_dict=state_dict)
+            transformer = _PytorchTransformerWrapper(
+                identifier=identifier,
+                tokenizer=tokenizer, tokenizer_special_tokens=configuration.get('tokenizer_special_tokens', ()),
+                model=model, layers=configuration['layers'],
+                sentence_average=word_last)
             return transformer
 
 
         model_pool[identifier] = LazyLoad(ModelInstantiation)
-        model_layers[identifier] = list(layers)
+        model_layers[identifier] = list(configuration['layers'])
