@@ -657,7 +657,7 @@ for (identifier, num_layers), version in itertools.product([
 ], [1, 2]):
     identifier = f"{identifier}-v{version}"
     transformer_configurations.append(dict(
-        prefix='AlbertTokenizer', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
+        prefix='Albert', tokenizer_special_tokens=('ġ',), weight_identifier=identifier,
         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L557
         # https://github.com/huggingface/transformers/blob/80faf22b4ac194061a08fde09ad8b202118c151e/src/transformers/modeling_albert.py#L335
         layers=('embeddings',) + tuple(f'encoder.albert_layer_groups.{i}' for i in range(num_layers))
@@ -672,6 +672,11 @@ class _T5Wrapper:
     def __call__(self, tokens_tensor):
         # the decoder_input_ids are not right, but we only retrieve encoder features anyway
         return self._model(encoder_input_ids=tokens_tensor, decoder_input_ids=tokens_tensor)
+
+    def __getattr__(self, item):  # forward attribute retrieval
+        if item == '_model':
+            return super(_T5Wrapper, self).__getattr__(item)
+        return getattr(self._model, item)
 
 
 for identifier, num_layers in [
