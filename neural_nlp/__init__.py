@@ -27,7 +27,7 @@ def score(benchmark, model, layers=None, model_impl=None, subsample=None, bold_s
         return benchmark_impl(model_impl)
 
     layer_scores = []
-    for i, layer in tqdm(enumerate(layers), desc='layers'):
+    for i, layer in enumerate(tqdm(layers, desc='layers')):
         candidate = FixedLayer(model_impl, layer, prerun=layers if i == 0 else None)  # prerun everything for 1st layer
         layer_score = benchmark_impl(candidate)
         layer_score = layer_score.expand_dims('layer')
