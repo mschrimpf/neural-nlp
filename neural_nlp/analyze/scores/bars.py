@@ -12,14 +12,39 @@ from neural_nlp.analyze.scores import models as all_models, fmri_atlases, collec
 def fmri_best(models=all_models, benchmark='Pereira2018-encoding'):
     data = collect_best_scores(benchmark, models)
     ylim = 0.40
-    models = model_ordering(models, benchmark='Pereira2018-encoding')  # order by best scores
+    models = [model for model in models if model in data['model'].values]
+    assert set(data['atlas'].values) == set(fmri_atlases)
+    experiments = ('384sentences', '243sentences')
+    assert set(data['experiment'].values) == set(experiments)
+    # plot
+    fig, ax = pyplot.subplots(figsize=(6, 4))
+
+    def get_model_score(model):
+        model_scores = data[data['model'] == model]
+        assert set(model_scores['atlas']) == set(fmri_atlases)
+        model_scores = model_scores.mean()  # mean across experiments & atlases
+        y, yerr = model_scores['score'], model_scores['error']
+        return [y], [yerr]
+
+    _plot_bars(ax, models=models, get_model_score=get_model_score, ylim=ylim)
+    ax.tick_params(axis='x', which='both', length=0)  # hide ticks
+    ax.set_xticklabels([])
+
+    fig.subplots_adjust(wspace=0, hspace=.2)
+    pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
+
+
+def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
+    data = collect_best_scores(benchmark, models)
+    ylim = 0.40
+    models = [model for model in models if model in data['model'].values]
     assert set(data['atlas'].values) == set(fmri_atlases)
     data['atlas_order'] = [fmri_atlases.index(atlas) for atlas in data['atlas']]  # ensure atlases are same order
     data = data.sort_values('atlas_order').drop('atlas_order', axis=1)
     experiments = ('384sentences', '243sentences')
     assert set(data['experiment'].values) == set(experiments)
     # plot
-    fig, axes = pyplot.subplots(nrows=2)
+    fig, axes = pyplot.subplots(figsize=(18, 6), nrows=2)
     for ax_iter, (experiment, ax) in enumerate(zip(experiments, axes)):
         ax.set_xlabel(experiment, fontdict=dict(fontsize=20))  # "title" at the bottom
         experiment_scores = data[data['experiment'] == experiment]
@@ -40,15 +65,15 @@ def fmri_best(models=all_models, benchmark='Pereira2018-encoding'):
             ax.set_xticklabels([])
 
     fig.subplots_adjust(wspace=0, hspace=.2)
-    pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
+    pyplot.savefig(Path(__file__).parent / f'bars-network-{benchmark}.png', dpi=600)
 
 
 def ecog_best(models=all_models, benchmark='Fedorenko2016-encoding'):
-    models = model_ordering(models, benchmark='Pereira2018-encoding')
     # plot
     data = collect_best_scores(benchmark, models=models)
+    models = [model for model in models if model in data['model'].values]
     ylim = 0.30
-    fig, ax = pyplot.subplots(figsize=(3, 4))
+    fig, ax = pyplot.subplots(figsize=(5, 4))
     ax.set_title('ECoG')
 
     def get_model_score(model):
