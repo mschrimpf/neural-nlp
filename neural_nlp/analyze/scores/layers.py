@@ -1,26 +1,42 @@
 import fire
 import numpy as np
+import seaborn
 from matplotlib import pyplot
 from pathlib import Path
 
+from neural_nlp import model_layers
 from neural_nlp.analyze.scores import collect_scores, models as all_models, fmri_atlases, model_colors
-import seaborn
-
 from neural_nlp.analyze.scores.bars import model_ordering
 
 
 def layer_preference_per_region(models=None):
-    models = models or [model for model in all_models if model != 'glove']  # glove has only 1 layer
+    models = models or [model for model in all_models if len(model_layers[model]) > 1]  # need at least 2 layers to plot
     models = model_ordering(models, benchmark='Pereira2018-encoding')  # order by best scores
     data = collect_scores(benchmark='Pereira2018-encoding', models=models)
     data = data.groupby(['benchmark', 'model', 'atlas', 'layer'], sort=False)[['score', 'error']].mean().reset_index()
 
-    models_group1 = ['lm_1b', 'openaigpt', 'gpt2', 'gpt2-medium', 'gpt2-large']
-    models_group2 = [model for model in models if model not in models_group1]
-    model_groups = [models_group1, models_group2]
-    ylims = [0.4, 0.3]
+    model_groups = [
+        # BERT
+        ['bert-base-uncased', 'bert-base-multilingual-cased', 'bert-large-uncased',
+         'bert-large-uncased-whole-word-masking', 'distilbert-base-uncased'],
+        # GPT
+        ['openaigpt', 'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'],
+        # Transfo-XL + XLNet
+        ['transfo-xl-wt103', 'xlnet-base-cased', 'xlnet-large-cased'],
+        # XLM
+        ['xlm-mlm-en-2048', 'xlm-mlm-enfr-1024', 'xlm-mlm-xnli15-1024', 'xlm-clm-enfr-1024', 'xlm-mlm-100-1280'],
+        # RoBERTa
+        ['roberta-base', 'roberta-large', 'distilroberta-base'],
+        # AlBERT
+        ['albert-base-v1', 'albert-base-v2', 'albert-large-v1', 'albert-large-v2',
+         'albert-xlarge-v1', 'albert-xlarge-v2', 'albert-xxlarge-v1', 'albert-xxlarge-v2'],
+        # T5
+        ['t5-small', 't5-base', 't5-large', 't5-3b', 't5-11b'],
+    ]
+    model_groups.append([model for model in models if not any(model in group for group in model_groups)])
+    ylims = [0.35] * 8
     assert set(data['atlas']) == set(fmri_atlases)
-    fig, axes = pyplot.subplots(figsize=(20, 12), nrows=2, ncols=len(fmri_atlases))
+    fig, axes = pyplot.subplots(figsize=(20, 6 * len(model_groups)), nrows=len(model_groups), ncols=len(fmri_atlases))
     for model_group_iter, (models, ylim) in enumerate(zip(model_groups, ylims)):
         for atlas_iter, atlas in enumerate(fmri_atlases):
             ax = axes[model_group_iter, atlas_iter]
@@ -41,7 +57,8 @@ def layer_preference_per_region(models=None):
         # legend
         handles, labels = ax.get_legend_handles_labels()
         legend = fig.legend(handles, labels, ncol=len(labels),
-                            bbox_to_anchor=(0.5, -.05 + 0.49 * (len(model_groups) - model_group_iter)), loc='center')
+                            # bbox_to_anchor=(0.5, -.05 + 0.49 * (len(model_groups) - model_group_iter)), loc='center')
+                            bbox_to_anchor=(0.5, -0.025 + 0.125 * (len(model_groups) - model_group_iter)), loc='center')
         for legend_handle in legend.legendHandles:
             legend_handle.set_alpha(1)
     # xlabel
