@@ -33,7 +33,7 @@ class Invert:
 
 
 class StoriesTransformerWordmeanBenchmark:
-    def __init__(self, bold_shift=None):
+    def __init__(self):
         from neural_nlp import get_activations
         self._target_assemblies = {story: get_activations(
             model_identifier='transformer-wordmean', layers=[f'encoder.transformer.0.feed_forward.dropout_2'],
@@ -261,6 +261,8 @@ class StoriesfROIBenchmark:
 
     def average_subregions(self, assembly):
         del assembly['threshold']
+        # TODO: average within-subject first, then across
+        # TODO: use all the data
         assembly = assembly.multi_dim_apply(['stimulus_id', 'fROI_area'], lambda group, **_: group.mean())
         _, index = np.unique(assembly['fROI_area'], return_index=True)
         assembly = assembly.isel(neuroid=index)
@@ -346,7 +348,7 @@ def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=Tr
 
 
 class PereiraEncoding(_PereiraBenchmark):
-    def __init__(self, bold_shift=None):
+    def __init__(self):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
@@ -355,7 +357,7 @@ class PereiraEncoding(_PereiraBenchmark):
 
 
 class PereiraEncodingMin(_PereiraBenchmark):
-    def __init__(self, bold_shift=None):
+    def __init__(self):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
@@ -366,17 +368,8 @@ class PereiraEncodingMin(_PereiraBenchmark):
         self._target_assembly = NeuroidAssembly(self._target_assembly)  # re-index with subject
 
 
-class PereiraEncodingCG(_PereiraBenchmark):
-    def __init__(self, bold_shift=None):
-        metric = CrossRegressedCorrelation(
-            regression=cg_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
-            correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
-        super(PereiraEncodingCG, self).__init__(metric=metric)
-
-
 class PereiraDecoding(_PereiraBenchmark):
-    def __init__(self, bold_shift=None):
+    def __init__(self):
         metric = CrossRegressedCorrelation(
             regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
@@ -386,15 +379,15 @@ class PereiraDecoding(_PereiraBenchmark):
 
 
 class PereiraRDM(_PereiraBenchmark):
-    def __init__(self, bold_shift=None):
+    def __init__(self):
         metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
         super(PereiraRDM, self).__init__(metric=metric)
 
 
-class Fedorenko2016Encoding:
-    def __init__(self, bold_shift=None):
+class _Fedorenko2016:
+    def __init__(self, metric):
         assembly = load_Fedorenko2016()
         self._target_assembly = assembly
         self._metric = metric

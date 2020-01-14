@@ -12,7 +12,7 @@ _logger = logging.getLogger(__name__)
 
 
 @store(identifier_ignore=['layers', 'prerun', 'model_impl'])
-def score(benchmark, model, layers=None, model_impl=None, subsample=None, bold_shift=4):
+def score(benchmark, model, layers=None, model_impl=None, subsample=None):
     model_impl = model_impl or model_pool[model]
     if subsample:
         SubsamplingHook.hook(model, subsample)
