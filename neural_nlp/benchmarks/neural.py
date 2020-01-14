@@ -352,7 +352,8 @@ class PereiraEncoding(_PereiraBenchmark):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
+            crossvalidation_kwargs=dict(splits=3, train_size=.8,
+                                        split_coord='stimulus_id', stratification_coord=None))
         super(PereiraEncoding, self).__init__(metric=metric)
 
 
