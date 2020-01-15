@@ -1,7 +1,8 @@
 import pytest
 from pytest import approx
 
-from neural_nlp.benchmarks.neural import PereiraEncoding, PereiraRDM, Fedorenko2016Encoding, StoriesVoxelEncoding
+from neural_nlp.benchmarks.neural import PereiraEncoding, PereiraRDM, Fedorenko2016Encoding, \
+    StoriesVoxelEncoding, StoriesfROIEncoding
 
 
 @pytest.mark.parametrize('benchmark_ctr, expected', [
@@ -9,6 +10,7 @@ from neural_nlp.benchmarks.neural import PereiraEncoding, PereiraRDM, Fedorenko2
     (PereiraRDM, 0.048785),
     (Fedorenko2016Encoding, .125773),
     (StoriesVoxelEncoding, .129175),
+    (StoriesfROIEncoding, .145968),
 ])
 def test_ceiling(benchmark_ctr, expected):
     benchmark = benchmark_ctr()

@@ -3,16 +3,15 @@ import warnings
 import itertools
 import logging
 import numpy as np
-from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly
+from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
 from tqdm import tqdm
-from xarray import DataArray
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import pls_regression, linear_regression, pearsonr_correlation, \
     CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation, subset, standard_error_of_the_mean, \
+from brainscore.metrics.transformations import CartesianProduct, CrossValidation, standard_error_of_the_mean, \
     apply_aggregate
 from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018_Blank
@@ -30,30 +29,6 @@ class Invert:
     def __call__(self, source, target):
         source, target = target, source
         return self._metric(source, target)
-
-
-class StoriesTransformerWordmeanBenchmark:
-    def __init__(self):
-        from neural_nlp import get_activations
-        self._target_assemblies = {story: get_activations(
-            model_identifier='transformer-wordmean', layers=[f'encoder.transformer.0.feed_forward.dropout_2'],
-            stimuli=load_stimuli(f'naturalistic-neural-reduced.{story}'))
-            for story in ['Boar', 'KingOfBirds', 'Elvis', 'HighSchool', 'MatchstickSeller']}
-        self._metric = RDMSimilarityCrossValidated()
-
-    def __call__(self, candidate):
-        scores = []
-        for story, story_assembly in self._target_assemblies.items():
-            stimulus_set = load_stimuli(f'naturalistic-neural-reduced.{story}')
-            source_assembly = candidate(stimuli=stimulus_set)
-            story_assembly_rdm = self._metric._rdm(story_assembly)
-            score = self._metric(source_assembly, story_assembly_rdm)
-            score = score.expand_dims('story')
-            score['story'] = [story]
-            scores.append(score)
-        score = Score.merge(*scores)
-        score = apply_aggregate(lambda score: score.mean('story'), score)
-        return score
 
 
 class _StoriesVoxelBenchmark(Benchmark):
@@ -193,35 +168,57 @@ def align(source, target, on):
     return aligned
 
 
-class StoriesfROIBenchmark:
-    def __init__(self):
-        assembly = load_voxels()
+class StoriesfROIEncoding:
+    def __init__(self, bold_shift=4):
+        assembly = load_voxels(bold_shift_seconds=bold_shift)
         # leave-out Elvis story
         assembly = assembly[{'presentation': [story != 'Elvis' for story in assembly['story'].values]}]
         assembly.attrs['stimulus_set'] = assembly.attrs['stimulus_set'][
             [row.story != 'Elvis' for row in assembly.attrs['stimulus_set'].itertuples()]]
-        assembly = self.average_subregions(assembly)
+        assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
         self._target_assembly = assembly
 
-        self._regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+        self._regression = pls_regression(xarray_kwargs=dict(
+            stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
+        self._correlation = pearsonr_correlation(xarray_kwargs=dict(
+            correlation_coord='stimulus_id', neuroid_coord='fROI_area'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
+            crossvalidation_kwargs=dict(splits=3, train_size=.8,
+                                        split_coord='stimulus_id', stratification_coord='story'))
 
-    def average_subregions(self, assembly):
+    @store(identifier_ignore=['assembly'])
+    def average_subregions(self, bold_shift, assembly):
+        attrs = assembly.attrs
         del assembly['threshold']
-        # TODO: average within-subject first, then across
-        # TODO: use all the data
-        assembly = assembly.multi_dim_apply(['stimulus_id', 'fROI_area'], lambda group, **_: group.mean())
-        _, index = np.unique(assembly['fROI_area'], return_index=True)
-        assembly = assembly.isel(neuroid=index)
-        return assembly
+        # group by stimuli, fROI, subject after one another.
+        # this gets rid of adjacent coords unfortunately, but we accept that for now.
+        averaged_assembly = assembly.groupby('stimulus_id').apply(
+            lambda stimulus_group: stimulus_group.groupby('fROI_area').apply(
+                lambda fROI_group: fROI_group.groupby('subject_UID').mean()
+            ))
+        averaged_assembly = averaged_assembly.stack(presentation=['stimulus_id'], neuroid=['fROI_area', 'subject_UID'])
+        # copy presentation coords back since those are needed for e.g. metric stratification
+        order = [averaged_assembly['stimulus_id'].values.tolist().index(stimulus_id)
+                 for stimulus_id in assembly['stimulus_id'].values]
+        for copy_coord, dims, copy_value in walk_coords(assembly):
+            if not array_is_element(dims, 'presentation') or hasattr(averaged_assembly, copy_coord):
+                continue
+            averaged_assembly[copy_coord] = dims, copy_value[order]
+        averaged_assembly.attrs = attrs
+        return averaged_assembly
+
+    @property
+    @store()
+    def ceiling(self):
+        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
+                                       metric=self._metric)
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
-        model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
-        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
+        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+        assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
+        _logger.info('Scoring model')
         return self._metric(model_activations, self._target_assembly)
 
 
@@ -406,12 +403,11 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
 benchmark_pool = {
     'stories_voxel_bold4s-encoding': StoriesVoxelEncoding,
     'stories_voxel_bold4s-decoding': StoriesVoxelDecoding,
-    'fROI': StoriesfROIBenchmark,
+    'stories_froi_bold4s-encoding': StoriesfROIEncoding,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
     'Pereira2018-encoding-min': PereiraEncodingMin,
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
-    'transformer-wordmean': StoriesTransformerWordmeanBenchmark,
     'Fedorenko2016-encoding': Fedorenko2016Encoding,
 }
