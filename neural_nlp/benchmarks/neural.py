@@ -73,59 +73,19 @@ class _StoriesVoxelBenchmark(Benchmark):
         self._regression = regression
         self._correlation = correlation
         self._metric = metric
-        self._cross_subject = CartesianProduct(dividers=['subject_UID'])
 
     @property
     @store()
     def ceiling(self):
-        cross_validation = CrossValidation(split_coord='stimulus_id', stratification_coord='story', splits=2)
-
-        def ceiling_apply(train_source, train_target, test_source, test_target):
-            self._regression.fit(train_source, train_target)
-            prediction = self._regression.predict(test_source)
-            score = self._correlation(prediction, test_target)
-            return score
-
-        subjects = list(sorted(set(self._target_assembly['subject_UID'].values)))
-        split_scores = []
-        for heldout_subject in tqdm(subjects, desc='subject holdout'):
-            subject_pool = list(sorted(set(subjects) - {heldout_subject}))
-            indexer_pool = DataArray(np.zeros(len(subject_pool)), coords={'subject_UID': subject_pool},
-                                     dims=['subject_UID']).stack(neuroid=['subject_UID'])
-            heldout_indexer = DataArray(np.zeros(1), coords={'subject_UID': [heldout_subject]},
-                                        dims=['subject_UID']).stack(neuroid=['subject_UID'])
-            subject_pool = subset(self._target_assembly, indexer_pool, dims_must_match=False)
-            heldout = subset(self._target_assembly, heldout_indexer, dims_must_match=False)
-            split_score = cross_validation(subject_pool, heldout, apply=ceiling_apply, aggregate=self._metric.aggregate)
-            split_score = split_score.expand_dims('heldout_subject')
-            split_score['heldout_subject'] = [heldout_subject]
-            split_score.attrs[Score.RAW_VALUES_KEY] = split_score.attrs[Score.RAW_VALUES_KEY]
-            split_scores.append(split_score)
-        consistency = Score.merge(*split_scores)
-        error = standard_error_of_the_mean(consistency.sel(aggregation='center'), 'heldout_subject')
-        consistency = apply_aggregate(lambda scores: scores.mean('heldout_subject'), consistency)
-        consistency.loc[{'aggregation': 'error'}] = error
-        return consistency
+        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
+                                       metric=self._metric)
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
-        model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
-        # since we're presenting all stimuli, including the inter-recording ones, we need to filter
-        model_activations = model_activations[
-            {'presentation': [sentence in self._target_assembly['stimulus_sentence'].values
-                              for sentence in
-                              model_activations['stimulus_sentence'].values]}]
+        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
-
-        _logger.info('Scoring across subjects')
-        subject_scores = self._cross_subject(self._target_assembly, apply=
-        lambda subject_assembly: self._apply_subject(model_activations, subject_assembly))
-        score = apply_aggregate(lambda scores: scores.median('subject_UID'), subject_scores)
-        return score
-
-    def _apply_subject(self, source_assembly, subject_assembly):
-        assert not np.isnan(subject_assembly).any()
-        return self._metric(source_assembly, subject_assembly)
+        _logger.info('Scoring model')
+        return self._metric(model_activations, self._target_assembly)
 
 
 class StoriesVoxelEncoding(_StoriesVoxelBenchmark):
@@ -134,20 +94,10 @@ class StoriesVoxelEncoding(_StoriesVoxelBenchmark):
         correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
         metric = CrossRegressedCorrelation(
             regression=regression, correlation=correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
+            crossvalidation_kwargs=dict(splits=3, train_size=.8,
+                                        split_coord='stimulus_id', stratification_coord='story'))
         super(StoriesVoxelEncoding, self).__init__(bold_shift=bold_shift,
                                                    regression=regression, correlation=correlation, metric=metric)
-
-
-class StoriesVoxelEncodingCG(_StoriesVoxelBenchmark):
-    def __init__(self, bold_shift=4):
-        regression = cg_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
-        correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-        metric = CrossRegressedCorrelation(
-            regression=regression, correlation=correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
-        super(StoriesVoxelEncodingCG, self).__init__(bold_shift=bold_shift,
-                                                     regression=regression, correlation=correlation, metric=metric)
 
 
 class StoriesVoxelDecoding(_StoriesVoxelBenchmark):
@@ -273,14 +223,6 @@ class StoriesfROIBenchmark:
         model_activations = candidate(stimuli=self._target_assembly.attrs['stimulus_set'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
-
-
-class VoxelPCABenchmark:
-    def __init__(self):
-        pass
-
-    def __call__(self, candidate):
-        pass
 
 
 class _PereiraBenchmark(Benchmark):
@@ -462,9 +404,8 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
 
 
 benchmark_pool = {
-    'voxel-encoding': StoriesVoxelEncoding,
-    'stories-voxel-encoding-cg': StoriesVoxelEncodingCG,
-    'voxel-decoding': StoriesVoxelDecoding,
+    'stories_voxel_bold4s-encoding': StoriesVoxelEncoding,
+    'stories_voxel_bold4s-decoding': StoriesVoxelDecoding,
     'fROI': StoriesfROIBenchmark,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
