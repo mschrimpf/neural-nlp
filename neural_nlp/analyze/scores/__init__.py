@@ -17,6 +17,7 @@ from tqdm import tqdm
 from neural_nlp import score, model_layers
 from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
     _score_model as score_architecture_model
+from neural_nlp.benchmarks.neural import ceiling_normalize, aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from result_caching import NotCachedError
 
@@ -87,13 +88,16 @@ models = tuple(model_colors.keys())
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 
 
-def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False):
+def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False, normalize=True):
     scores1, scores2, run_models = [], [], []
     os.environ['RESULTCACHING_CACHEDONLY'] = '1'
     for model in models:
         try:
             score1 = score(benchmark=benchmark1, model=model)
             score2 = score(benchmark=benchmark2, model=model)
+            if normalize:
+                score1 = ceiling_normalize(score1, benchmark_identifier=benchmark1)
+                score2 = ceiling_normalize(score2, benchmark_identifier=benchmark2)
             scores1.append(score1)
             scores2.append(score2)
             run_models.append(model)
@@ -102,18 +106,15 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     savename = f"{benchmark1}__{benchmark2}"
     fig, ax = _plot_scores1_2(scores1, scores2, score_annotations=run_models,
                               xlabel=benchmark1, ylabel=benchmark2, flip_x=flip_x)
+    if normalize:
+        ax.set_xlim([-.05, 1.05])
+        ax.set_ylim([-.05, 1.05])
     _savefig(fig, savename=savename)
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None, xlabel=None, ylabel=None, flip_x=False, **kwargs):
     def get_center_err(s):
-        if hasattr(s, 'experiment'):
-            s = s.mean('experiment')
-        if hasattr(s, 'atlas'):
-            s = s.mean('atlas')
-        if hasattr(s, 'layer'):
-            max_score = s.sel(aggregation='center').max()
-            s = s[{'layer': (s.sel(aggregation='center') == max_score).values}].squeeze('layer')
+        s = aggregate(s)
         if hasattr(s, 'aggregation'):
             return s.sel(aggregation='center').values.tolist(), s.sel(aggregation='error').values.tolist()
         if hasattr(s, 'measure'):

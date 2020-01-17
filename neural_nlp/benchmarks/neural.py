@@ -13,6 +13,7 @@ from brainscore.metrics.regression import pls_regression, linear_regression, pea
     CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, standard_error_of_the_mean, \
     apply_aggregate
+from brainscore.utils import LazyLoad
 from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018_Blank
 from neural_nlp.stimuli import load_stimuli, StimulusSet
@@ -34,6 +35,14 @@ class Invert:
 class _StoriesVoxelBenchmark(Benchmark):
     def __init__(self, regression, correlation, metric, bold_shift=4):
         _logger.info('Loading neural data')
+        assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
+        self._target_assembly = assembly
+
+        self._regression = regression
+        self._correlation = correlation
+        self._metric = metric
+
+    def _load_assembly(self, bold_shift):
         assembly = load_voxels(bold_shift_seconds=bold_shift)
         # leave-out Elvis story
         assembly = assembly[{'presentation': [story != 'Elvis' for story in assembly['story'].values]}]
@@ -43,11 +52,7 @@ class _StoriesVoxelBenchmark(Benchmark):
         # there could still be NaN neural data at this point, e.g. from non-collected MD
         assembly = assembly.sel(region='language')  # for now
         assert not np.isnan(assembly).any()
-        self._target_assembly = assembly
-
-        self._regression = regression
-        self._correlation = correlation
-        self._metric = metric
+        return assembly
 
     @property
     @store()
@@ -170,12 +175,7 @@ def align(source, target, on):
 
 class StoriesfROIEncoding:
     def __init__(self, bold_shift=4):
-        assembly = load_voxels(bold_shift_seconds=bold_shift)
-        # leave-out Elvis story
-        assembly = assembly[{'presentation': [story != 'Elvis' for story in assembly['story'].values]}]
-        assembly.attrs['stimulus_set'] = assembly.attrs['stimulus_set'][
-            [row.story != 'Elvis' for row in assembly.attrs['stimulus_set'].itertuples()]]
-        assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
+        assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
         self._target_assembly = assembly
 
         self._regression = pls_regression(xarray_kwargs=dict(
@@ -186,6 +186,15 @@ class StoriesfROIEncoding:
             regression=self._regression, correlation=self._correlation,
             crossvalidation_kwargs=dict(splits=3, train_size=.8,
                                         split_coord='stimulus_id', stratification_coord='story'))
+
+    def _load_assembly(self, bold_shift):
+        assembly = load_voxels(bold_shift_seconds=bold_shift)
+        # leave-out Elvis story
+        assembly = assembly[{'presentation': [story != 'Elvis' for story in assembly['story'].values]}]
+        assembly.attrs['stimulus_set'] = assembly.attrs['stimulus_set'][
+            [row.story != 'Elvis' for row in assembly.attrs['stimulus_set'].itertuples()]]
+        assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
+        return assembly
 
     @store(identifier_ignore=['assembly'])
     def average_subregions(self, bold_shift, assembly):
@@ -224,10 +233,14 @@ class StoriesfROIEncoding:
 
 class _PereiraBenchmark(Benchmark):
     def __init__(self, metric):
-        self._target_assembly = load_Pereira2018_Blank()
-        self._target_assembly = self._target_assembly.sel(atlas_selection_lower=90)
+        self._target_assembly = LazyLoad(self._load_assembly)
         self._metric = metric
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
+
+    def _load_assembly(self):
+        assembly = load_Pereira2018_Blank()
+        assembly = assembly.sel(atlas_selection_lower=90)
+        return assembly
 
     def __call__(self, candidate):
         stimulus_set = self._target_assembly.attrs['stimulus_set']
@@ -398,6 +411,31 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
     scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
     scores.loc[{'aggregation': 'error'}] = error
     return scores
+
+
+def ceiling_normalize(score, benchmark_identifier):
+    score = aggregate(score)
+    benchmark = benchmark_pool[benchmark_identifier]()
+    ceiling = benchmark.ceiling
+    normalized_score = score.copy()
+    normalized_center = score.sel(aggregation='center').values / ceiling.sel(aggregation='center').values
+    normalized_error = score.sel(aggregation='error').values / ceiling.sel(aggregation='center').values
+    normalized_score.loc[{'aggregation': 'center'}] = normalized_center
+    normalized_score.loc[{'aggregation': 'error'}] = normalized_error
+    return normalized_score
+
+
+def aggregate(score):
+    if hasattr(score, 'experiment'):
+        score = score.mean('experiment')
+    if hasattr(score, 'atlas'):
+        score = score.mean('atlas')
+    if hasattr(score, 'layer'):
+        max_score = score.sel(aggregation='center').max()
+        max_score = score[{'layer': (score.sel(aggregation='center') == max_score).values}].squeeze('layer', drop=True)
+        max_score.attrs['raw'] = score.copy()
+        score = max_score
+    return score
 
 
 benchmark_pool = {
