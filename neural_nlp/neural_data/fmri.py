@@ -1,10 +1,10 @@
-import logging
 import operator
 import os
 import warnings
 from collections import namedtuple, defaultdict
 
 import fire
+import logging
 import numpy as np
 import pandas as pd
 import re
@@ -17,12 +17,82 @@ from pathlib import Path
 from tqdm import tqdm
 from xarray import DataArray
 
+from brainscore.metrics import Score
+from brainscore.metrics.regression import CrossRegressedCorrelation
+from brainscore.metrics.xarray_utils import XarrayRegression
 from neural_nlp.stimuli import NaturalisticStories, StimulusSet
 from neural_nlp.utils import ordered_set, is_sorted
 from result_caching import cache, store, store_netcdf
 
 neural_data_dir = (Path(os.path.dirname(__file__)) / '..' / '..' / 'ressources' / 'neural_data' / 'fmri').resolve()
 _logger = logging.getLogger(__name__)
+
+
+@store()
+def load_Pereira2018_Blank_languageresiduals():
+    # hijack the corresponding encoding benchmark to regress, but then store residuals instead of correlate
+    from neural_nlp.benchmarks.neural import PereiraEncoding
+    benchmark = PereiraEncoding()
+    assembly, cross = benchmark._target_assembly, benchmark._cross
+    residuals = []
+
+    def store_residuals(nonlanguage_prediction, language_target):
+        residual = language_target - nonlanguage_prediction
+        residuals.append(residual)
+        return Score([0], coords={'neuroid_id': ('neuroid', [0])}, dims=['neuroid'])  # dummy score
+
+    # we build the metric ourselves since we want to use all cross-validation splits
+    class DummyRegression:
+        def fit(self, X, Y):
+            self.W = np.ones((len(X['neuroid']), len(Y['neuroid'])))
+            np.testing.assert_array_equal(np.dot(X.values, self.W).shape, Y.shape)
+
+        def predict(self, X):
+            return np.dot(X, self.W)
+
+    pseudo_metric = CrossRegressedCorrelation(
+        # regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
+        regression=XarrayRegression(DummyRegression(), stimulus_coord='stimulus_id'),
+        correlation=store_residuals,
+        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord=None))
+
+    # separate language from non-language networks
+    language_assembly = assembly[{'neuroid': [atlas in ['DMN', 'MD', 'language']
+                                              for atlas in assembly['atlas'].values]}]
+    nonlanguage_assembly = assembly[{'neuroid': [atlas in ['visual', 'auditory']
+                                                 for atlas in assembly['atlas'].values]}]
+
+    # run
+    def apply_cross(source_assembly, target_assembly):
+        # filter experiment
+        source_assembly = source_assembly[{'presentation': [stimulus_id in target_assembly['stimulus_id'].values
+                                                            for stimulus_id in source_assembly['stimulus_id'].values]}]
+        assert all(source_assembly['stimulus_id'].values == target_assembly['stimulus_id'].values)
+        # filter subjects that have not done this experiment
+        source_assembly = source_assembly.dropna('neuroid')
+        # for the target assembly, it's going to become awkward if we just drop those neuroids.
+        # instead, we set them to zero which makes for simple zero regression weights.
+        target_assembly = target_assembly.fillna(0)
+        # this will regress from joint visual+auditory neural space to one of the language networks
+        return pseudo_metric(source_assembly, target_assembly)
+
+    cross(language_assembly, apply=lambda cross_assembly: apply_cross(nonlanguage_assembly, cross_assembly))
+
+    # combine residuals
+    assert len(residuals) == 5 * 2 * 3  # 5-fold CV, 2 experiments, 3 language brain networks
+    # ensure uniqueness
+    neuroid_ids, stimulus_ids = [], []
+    for residual in residuals:
+        neuroid_ids += residual['neuroid_id'].values.tolist()
+        stimulus_ids += residual['stimulus_id'].values.tolist()
+    assert len(neuroid_ids) == len(language_assembly['neuroid']) * 5 * 2
+    assert len(set(neuroid_ids)) == len(set(language_assembly['neuroid_id'].values))
+    assert len(stimulus_ids) == len(language_assembly['presentation']) * 3
+    assert len(set(stimulus_ids)) == len(set(language_assembly['stimulus_id'].values))
+    residuals = merge_data_arrays(residuals)
+    residuals = type(language_assembly)(residuals)
+    residuals.attrs['stimulus_set'] = assembly.stimulus_set
+    return residuals
 
 
 @store()

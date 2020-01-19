@@ -2,7 +2,17 @@ import numpy as np
 from pytest import approx
 
 from neural_nlp import neural_data
-from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank
+from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank, \
+    load_Pereira2018_Blank_languageresiduals
+
+
+class TestPereiraLanguageResiduals:
+    def test(self):
+        assembly = load_Pereira2018_Blank_languageresiduals()
+        assert set(assembly['atlas'].values) == {'DMN', 'MD', 'language'}
+        assert set(assembly['experiment'].values) == {'384sentences', '243sentences'}
+        assert len(assembly['presentation']) == 627
+        assert len(set(assembly['subject'].values)) == 10
 
 
 class TestLoadRdmSentences(object):
