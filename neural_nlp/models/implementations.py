@@ -10,6 +10,7 @@ import itertools
 import logging
 import numpy as np
 import pandas as pd
+from numpy.random.mtrand import RandomState
 from pathlib import Path
 from tqdm import tqdm
 
@@ -44,9 +45,11 @@ class SentenceLength(BrainModel):
     available_layers = ['sentence-length']
     default_layers = available_layers
 
+    identifier = 'sentence-length'
+
     def __init__(self):
         super(SentenceLength, self).__init__()
-        self._extractor = ActivationsExtractorHelper(identifier='sentence-length',
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier,
                                                      get_activations=self._get_activations, reset=lambda: None)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
@@ -111,14 +114,16 @@ class SkipThoughts:
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
 
+    identifier = 'skip-thoughts'
+
     def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
         super().__init__()
         import skipthoughts
         weights = weights + '/'
         model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
         self._encoder = LazyLoad(lambda: skipthoughts.Encoder(model))
-        self._extractor = ActivationsExtractorHelper(identifier='skip-thoughts', get_activations=self._get_activations,
-                                                     reset=lambda: None)  # TODO: no idea how to reset state in theano.
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
+                                                     reset=lambda: None)  # not sure if this resets states on its own
         self._extractor.insert_attrs(self)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
@@ -147,13 +152,15 @@ class LM1B:
     https://arxiv.org/pdf/1602.02410.pdf
     """
 
+    identifier = 'lm_1b'
+
     def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b')):
         super().__init__()
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
                                 ckpt=os.path.join(weights, 'ckpt-*'))
-        self._extractor = ActivationsExtractorHelper(identifier='lm_1b', get_activations=self._get_activations,
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
         self._logger = logging.getLogger(self.__class__.__name__)
@@ -433,15 +440,19 @@ class KeyedVectorModel:
     To retrieve the sentence activation, we take the mean of the word embeddings.
     """
 
-    def __init__(self, identifier, weights_file, binary=False):
+    def __init__(self, identifier, weights_file, random_embeddings=False, random_std=1, binary=False):
         super().__init__()
+        self._logger = logging.getLogger(self.__class__.__name__)
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
         self._index2word_set = set(self._model.index2word)
+        if random_embeddings:
+            self._logger.debug(f"Replacing embeddings with random N(0, {random_std})")
+            random_embedding = RandomState(0).randn(len(self._index2word_set), len(self._model['the'])) * random_std
+            self._model = {word: random_embedding[i] for i, word in enumerate(sorted(self._index2word_set))}
         self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
-        self._logger = logging.getLogger(self.__class__.__name__)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
         return _call_conditional_average(*args, extractor=self._extractor,
@@ -474,9 +485,15 @@ class Word2Vec(KeyedVectorModel):
     https://arxiv.org/pdf/1310.4546.pdf
     """
 
-    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin'):
+    identifier = 'word2vec'
+
+    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin', **kwargs):
         weights_file = os.path.join(_ressources_dir, 'word2vec', weights_file)
-        super(Word2Vec, self).__init__(identifier='word2vec', weights_file=weights_file, binary=True)
+        super(Word2Vec, self).__init__(
+            identifier=self.identifier, weights_file=weights_file, binary=True,
+            # standard embedding std
+            # https://github.com/pytorch/pytorch/blob/ecbf6f99e6a4e373105133b31534c9fb50f2acca/torch/nn/modules/sparse.py#L106
+            random_std=1, **kwargs)
 
 
 class Glove(KeyedVectorModel):
@@ -484,13 +501,18 @@ class Glove(KeyedVectorModel):
     http://www.aclweb.org/anthology/D14-1162
     """
 
-    def __init__(self, weights='glove.840B.300d.txt'):
+    identifier = 'glove'
+
+    def __init__(self, weights='glove.840B.300d.txt', **kwargs):
         from gensim.scripts.glove2word2vec import glove2word2vec
         weights_file = os.path.join(_ressources_dir, 'glove', weights)
         word2vec_weightsfile = weights_file + '.word2vec'
         if not os.path.isfile(word2vec_weightsfile):
             glove2word2vec(weights_file, word2vec_weightsfile)
-        super(Glove, self).__init__(identifier='glove', weights_file=word2vec_weightsfile)
+        super(Glove, self).__init__(
+            identifier=self.identifier, weights_file=word2vec_weightsfile,
+            # std from https://gist.github.com/MatthieuBizien/de26a7a2663f00ca16d8d2558815e9a6#file-fast_glove-py-L16
+            random_std=.01, **kwargs)
 
 
 class RecursiveNeuralTensorNetwork(BrainModel):
@@ -528,23 +550,27 @@ def load_model(model_name):
 
 
 model_pool = {
-    'sentence-length': LazyLoad(SentenceLength),
-    'skip-thoughts': LazyLoad(SkipThoughts),
-    'lm_1b': LazyLoad(LM1B),
-    'word2vec': LazyLoad(Word2Vec),
-    'glove': LazyLoad(Glove),
+    SentenceLength.identifier: LazyLoad(SentenceLength),
+    SkipThoughts.identifier: LazyLoad(SkipThoughts),
+    LM1B.identifier: LazyLoad(LM1B),
+    Word2Vec.identifier: LazyLoad(Word2Vec),
+    Word2Vec.identifier + '-untrained': LazyLoad(lambda: Word2Vec(random_embeddings=True)),
+    Glove.identifier: LazyLoad(Glove),
+    Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     'transformer': LazyLoad(Transformer),
     'topicETM': LazyLoad(TopicETM),
 }
 model_layers = {
-    'sentence-length': SentenceLength.default_layers,
-    'skip-thoughts': SkipThoughts.default_layers,
-    'lm_1b': LM1B.default_layers,
-    'word2vec': Word2Vec.default_layers,
-    'glove': Glove.default_layers,
+    SentenceLength.identifier: SentenceLength.default_layers,
+    SkipThoughts.identifier: SkipThoughts.default_layers,
+    LM1B.identifier: LM1B.default_layers,
+    Word2Vec.identifier: Word2Vec.default_layers,
+    Glove.identifier: Glove.default_layers,
     'transformer': Transformer.default_layers,
     'topicETM': TopicETM.default_layers,
 }
+# untrained layers are the same as trained ones
+model_layers = {**model_layers, **{f"{identifier}-untrained": layers for identifier, layers in model_layers.items()}}
 
 SPIECE_UNDERLINE = u'▁'  # define directly to avoid having to import (from pytorch_transformers.tokenization_xlnet)
 transformer_configurations = []
