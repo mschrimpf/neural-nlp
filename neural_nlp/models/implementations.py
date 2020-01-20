@@ -574,7 +574,7 @@ for identifier, num_layers in [
     ))
 # openaigpt
 transformer_configurations.append(dict(
-    prefix='OpenAIGPT', weight_identifier='openaigpt', tokenizer_special_tokens=('</w>',),
+    prefix='OpenAIGPT', identifier='openaigpt', weight_identifier='openai-gpt', tokenizer_special_tokens=('</w>',),
     # https://github.com/huggingface/pytorch-transformers/blob/c589862b783b94a8408b40c6dc9bf4a14b2ee391/pytorch_transformers/modeling_openai.py#L517
     layers=('drop',) + tuple(f'encoder.h.{i}.ln_2' for i in range(12))
 ))
