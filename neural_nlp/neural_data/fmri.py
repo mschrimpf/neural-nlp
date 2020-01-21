@@ -135,10 +135,15 @@ def load_Pereira2018_Blank():
                     rois.append(neuroid_meta['rois'][0, 0][atlas_iter, 0][multimask, 0][0])
                     voxel_nums.append(voxel_num)
                     expanded_assembly.append(assembly[:, voxel_num])
+            # ensure all are mapped
+            assert set(voxel_nums) == set(range(assembly.shape[1])), "not all voxels mapped"
+            # add indices
             assembly = np.stack(expanded_assembly).T
             assert assembly.shape[1] == len(atlases) == len(atlas_selections) == len(rois)
             indices_in_3d = neuroid_meta['indicesIn3D'][0, 0][:, 0]
             indices_in_3d = [indices_in_3d[voxel_num] for voxel_num in voxel_nums]
+            # add coords
+            col_to_coords = np.array([neuroid_meta['colToCoord'][0, 0][voxel_num] for voxel_num in voxel_nums])
 
             # put it all together
             assembly = NeuroidAssembly(assembly, coords={
@@ -153,6 +158,9 @@ def load_Pereira2018_Blank():
                    'atlas_selection_lower': ('neuroid', atlas_filter_lower),
                    'roi': ('neuroid', rois),
                    'indices_in_3d': ('neuroid', indices_in_3d),
+                   'col_to_coord_1': ('neuroid', col_to_coords[:, 0]),
+                   'col_to_coord_2': ('neuroid', col_to_coords[:, 1]),
+                   'col_to_coord_3': ('neuroid', col_to_coords[:, 2]),
                    }}, dims=['presentation', 'neuroid'])
             assembly['neuroid_id'] = 'neuroid', _build_id(assembly, ['subject', 'voxel_num'])
             subject_assemblies.append(assembly)
