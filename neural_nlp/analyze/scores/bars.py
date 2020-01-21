@@ -68,13 +68,20 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
     pyplot.savefig(Path(__file__).parent / f'bars-network-{benchmark}.png', dpi=600)
 
 
+def stories_best(models=all_models, benchmark='stories_froi_bold4s-encoding'):
+    whole_best(models=models, benchmark=benchmark, title='stories fROI', ylim=.15)
+
+
 def ecog_best(models=all_models, benchmark='Fedorenko2016-encoding'):
+    whole_best(models=models, benchmark=benchmark, title='ECoG', ylim=.30)
+
+
+def whole_best(models, benchmark, title, ylim=1.):
     # plot
     data = collect_best_scores(benchmark, models=models)
     models = [model for model in models if model in data['model'].values]
-    ylim = 0.30
     fig, ax = pyplot.subplots(figsize=(5, 4))
-    ax.set_title('ECoG')
+    ax.set_title(title)
 
     def get_model_score(model):
         model_score = data[data['model'] == model]
@@ -109,7 +116,7 @@ def _plot_bars(ax, models, get_model_score, ylim, width=0.5, text_kwargs=None):
             ax.text(x=xpos + .8 * width / 2, y=.01, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
     ax.set_ylabel("Predictivity (Pearson r)", fontdict=dict(fontsize=10))
-    ax.set_ylim([0, ylim])
+    ax.set_ylim([-.05, ylim])
     ax.set_yticks(np.arange(0, ylim, .1))
     ax.set_yticklabels(["0" if label == 0 else f"{label:.1f}"[1:] if label % 0.2 == 0 else ""
                         for label in ax.get_yticks()], fontdict=dict(fontsize=14))
