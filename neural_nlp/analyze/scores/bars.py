@@ -1,37 +1,31 @@
 import fire
 import logging
 import numpy as np
+import pandas as pd
 import seaborn
 import sys
+from functools import reduce
 from matplotlib import pyplot
 from pathlib import Path
 
+from brainscore.utils import LazyLoad
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, collect_scores, model_colors
 
 
-def fmri_best(models=all_models, benchmark='Pereira2018-encoding'):
-    data = collect_best_scores(benchmark, models)
-    ylim = 0.40
-    models = [model for model in models if model in data['model'].values]
-    assert set(data['atlas'].values) == set(fmri_atlases)
-    experiments = ('384sentences', '243sentences')
-    assert set(data['experiment'].values) == set(experiments)
-    # plot
-    fig, ax = pyplot.subplots(figsize=(6, 4))
+class DefaultScores(dict):
+    def __missing__(self, benchmark):
+        return LazyLoad(lambda: collect_best_scores(benchmark, all_models))
 
-    def get_model_score(model):
-        model_scores = data[data['model'] == model]
-        assert set(model_scores['atlas']) == set(fmri_atlases)
-        model_scores = model_scores.mean()  # mean across experiments & atlases
-        y, yerr = model_scores['score'], model_scores['error']
-        return [y], [yerr]
 
-    _plot_bars(ax, models=models, get_model_score=get_model_score, ylim=ylim)
-    ax.tick_params(axis='x', which='both', length=0)  # hide ticks
-    ax.set_xticklabels([])
+scores = DefaultScores()
+scores['Pereira2018-encoding'] = LazyLoad(lambda: average_experiments_atlases(
+    collect_best_scores('Pereira2018-encoding', all_models)))
 
-    fig.subplots_adjust(wspace=0, hspace=.2)
-    pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
+
+def average_experiments_atlases(data):
+    assert set(data['atlas']) == set(fmri_atlases)
+    data = data.groupby(['benchmark', 'model', 'layer']).mean()  # mean across experiments & atlases
+    return data.reset_index()
 
 
 def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
@@ -68,32 +62,36 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
     pyplot.savefig(Path(__file__).parent / f'bars-network-{benchmark}.png', dpi=600)
 
 
-def stories_best(models=all_models, benchmark='stories_froi_bold4s-encoding'):
-    whole_best(models=models, benchmark=benchmark, title='stories fROI', ylim=.15)
+def fmri_best(benchmark='Pereira2018-encoding'):
+    whole_best(benchmark=benchmark, title=benchmark, ylim=.40)
 
 
-def ecog_best(models=all_models, benchmark='Fedorenko2016-encoding'):
-    whole_best(models=models, benchmark=benchmark, title='ECoG', ylim=.30)
+def stories_best(benchmark='stories_froi_bold4s-encoding'):
+    whole_best(benchmark=benchmark, title='stories fROI', ylim=.15)
 
 
-def whole_best(models, benchmark, title, ylim=1.):
-    # plot
-    data = collect_best_scores(benchmark, models=models)
-    models = [model for model in models if model in data['model'].values]
+def ecog_best(benchmark='Fedorenko2016-encoding'):
+    whole_best(benchmark=benchmark, title='ECoG', ylim=.30)
+
+
+def whole_best(title, benchmark=None, data=None, ylim=1.):
+    data = data if data is not None else scores[benchmark]
+    models = [model for model in all_models if model in data['model'].values]
     fig, ax = pyplot.subplots(figsize=(5, 4))
     ax.set_title(title)
-
-    def get_model_score(model):
-        model_score = data[data['model'] == model]
-        y, yerr = model_score['score'], model_score['error']
-        return y, yerr
-
-    _plot_bars(ax, models=models, get_model_score=get_model_score, ylim=ylim,
-               text_kwargs=dict(fontdict=dict(fontsize=9)))
+    _plot_bars(ax, models=models, data=data, ylim=ylim, text_kwargs=dict(fontdict=dict(fontsize=9)))
     ax.set_xticks([])
     ax.set_xticklabels([])
     fig.tight_layout()
     pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
+
+
+def overall(benchmarks=('Pereira2018-encoding', 'stories_froi_bold4s-encoding', 'Fedorenko2016-encoding')):
+    data = [scores[benchmark] for benchmark in benchmarks]  # right now this is done without ceiling
+    data = reduce(lambda left, right: pd.concat([left, right]), data)
+    # note that this discards layer info and allows for different layers for different benchmarks
+    data = data.groupby(['model']).mean().reset_index()
+    whole_best('average', data=data, benchmark='average', ylim=.4)
 
 
 def model_ordering(models, benchmark):
@@ -103,12 +101,13 @@ def model_ordering(models, benchmark):
     return models
 
 
-def _plot_bars(ax, models, get_model_score, ylim, width=0.5, text_kwargs=None):
+def _plot_bars(ax, models, data, ylim, width=0.5, text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
     offset = len(models) / 2
     for model_iter, model in enumerate(models):
-        y, yerr = get_model_score(model)
+        model_score = data[data['model'] == model]
+        y, yerr = model_score['score'], model_score['error']
         x = np.arange(start=0, stop=len(y) * step, step=step)
         model_x = x - offset * width + model_iter * width
         ax.bar(model_x, height=y, yerr=yerr, width=width, edgecolor='none', color=model_colors[model])
