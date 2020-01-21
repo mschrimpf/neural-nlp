@@ -418,11 +418,16 @@ def ceiling_normalize(score, benchmark_identifier):
     benchmark = benchmark_pool[benchmark_identifier]()
     ceiling = benchmark.ceiling
     normalized_score = score.copy()
-    normalized_center = score.sel(aggregation='center').values / ceiling.sel(aggregation='center').values
-    normalized_error = score.sel(aggregation='error').values / ceiling.sel(aggregation='center').values
+    normalized_center, normalized_error = ceiling_normalize_score_error(
+        score.sel(aggregation='center').values, score.sel(aggregation='error').values,
+        ceiling.sel(aggregation='center').values)
     normalized_score.loc[{'aggregation': 'center'}] = normalized_center
     normalized_score.loc[{'aggregation': 'error'}] = normalized_error
     return normalized_score
+
+
+def ceiling_normalize_score_error(score, error, ceiling):
+    return score / ceiling, error / ceiling
 
 
 def aggregate(score):

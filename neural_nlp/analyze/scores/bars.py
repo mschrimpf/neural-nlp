@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import fire
 import logging
 import numpy as np
@@ -8,18 +10,28 @@ from functools import reduce
 from matplotlib import pyplot
 from pathlib import Path
 
-from brainscore.utils import LazyLoad
+from neural_nlp import benchmark_pool
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, collect_scores, model_colors
+from neural_nlp.benchmarks.neural import ceiling_normalize_score_error
 
 
-class DefaultScores(dict):
-    def __missing__(self, benchmark):
-        return LazyLoad(lambda: collect_best_scores(benchmark, all_models))
+def retrieve_scores(benchmark, normalize=False):
+    if benchmark == 'Pereira2018-encoding':
+        scores = collect_best_scores('Pereira2018-encoding', all_models)
+        scores = average_experiments_atlases(scores)
+    else:
+        scores = collect_best_scores(benchmark, all_models)
 
+    if normalize:
+        benchmark = benchmark_pool[benchmark]()
+        ceiling = benchmark.ceiling.sel(aggregation='center').values
 
-scores = DefaultScores()
-scores['Pereira2018-encoding'] = LazyLoad(lambda: average_experiments_atlases(
-    collect_best_scores('Pereira2018-encoding', all_models)))
+        def apply(row):
+            row['score'], row['error'] = ceiling_normalize_score_error(row['score'], row['error'], ceiling=ceiling)
+            return row
+
+        scores = scores.apply(apply, axis=1)
+    return scores
 
 
 def average_experiments_atlases(data):
@@ -43,13 +55,7 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
         ax.set_xlabel(experiment, fontdict=dict(fontsize=20))  # "title" at the bottom
         experiment_scores = data[data['experiment'] == experiment]
 
-        def get_model_score(model):
-            model_scores = experiment_scores[experiment_scores['model'] == model]
-            np.testing.assert_array_equal(model_scores['atlas'], fmri_atlases)
-            y, yerr = model_scores['score'], model_scores['error']
-            return y, yerr
-
-        _plot_bars(ax, models=models, get_model_score=get_model_score, ylim=ylim)
+        _plot_bars(ax, models=models, data=experiment_scores, ylim=ylim)
         ax.xaxis.tick_top()
         ax.tick_params(axis='x', which='both', length=0)  # hide ticks
         ax.tick_params(axis='x', pad=3)  # shift labels
@@ -74,24 +80,26 @@ def ecog_best(benchmark='Fedorenko2016-encoding'):
     whole_best(benchmark=benchmark, title='ECoG', ylim=.30)
 
 
-def whole_best(title, benchmark=None, data=None, ylim=1.):
-    data = data if data is not None else scores[benchmark]
+def overall(benchmarks=('Pereira2018-encoding', 'stories_froi_bold4s-encoding')):
+    data = [retrieve_scores(benchmark, normalize=True) for benchmark in benchmarks]
+    data = reduce(lambda left, right: pd.concat([left, right]), data)
+    # note that this discards layer info and allows for different layers for different benchmarks which is not ideal.
+    # A better way would be to at least select the layer based on its max average predictivity.
+    data = data.groupby(['model']).mean().reset_index()
+    whole_best(title=f"mean({', '.join(benchmarks)})", data=data, ylim=1., benchmark='average',
+               ylabel='Normalized Predictivity (r/c)', title_kwargs=dict(fontdict=dict(fontsize=10)))
+
+
+def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
+    data = data if data is not None else retrieve_scores(benchmark)
     models = [model for model in all_models if model in data['model'].values]
     fig, ax = pyplot.subplots(figsize=(5, 4))
-    ax.set_title(title)
-    _plot_bars(ax, models=models, data=data, ylim=ylim, text_kwargs=dict(fontdict=dict(fontsize=9)))
+    ax.set_title(title, **(title_kwargs or {}))
+    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=9)), **kwargs)
     ax.set_xticks([])
     ax.set_xticklabels([])
     fig.tight_layout()
     pyplot.savefig(Path(__file__).parent / f'bars-{benchmark}.png', dpi=600)
-
-
-def overall(benchmarks=('Pereira2018-encoding', 'stories_froi_bold4s-encoding', 'Fedorenko2016-encoding')):
-    data = [scores[benchmark] for benchmark in benchmarks]  # right now this is done without ceiling
-    data = reduce(lambda left, right: pd.concat([left, right]), data)
-    # note that this discards layer info and allows for different layers for different benchmarks
-    data = data.groupby(['model']).mean().reset_index()
-    whole_best('average', data=data, benchmark='average', ylim=.4)
 
 
 def model_ordering(models, benchmark):
@@ -101,7 +109,7 @@ def model_ordering(models, benchmark):
     return models
 
 
-def _plot_bars(ax, models, data, ylim, width=0.5, text_kwargs=None):
+def _plot_bars(ax, models, data, ylim, width=0.5, ylabel="Predictivity (Pearson r)", text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
     offset = len(models) / 2
@@ -114,11 +122,13 @@ def _plot_bars(ax, models, data, ylim, width=0.5, text_kwargs=None):
         for xpos in model_x:
             ax.text(x=xpos + .8 * width / 2, y=.01, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
-    ax.set_ylabel("Predictivity (Pearson r)", fontdict=dict(fontsize=10))
+    ax.set_ylabel(ylabel, fontdict=dict(fontsize=10))
     ax.set_ylim([-.05, ylim])
     ax.set_yticks(np.arange(0, ylim, .1))
-    ax.set_yticklabels(["0" if label == 0 else f"{label:.1f}"[1:] if label % 0.2 == 0 else ""
-                        for label in ax.get_yticks()], fontdict=dict(fontsize=14))
+    ax.set_yticklabels([
+        "0" if Decimal(f"{label:.2f}") == Decimal('0') else "1" if Decimal(f"{label:.2f}") == Decimal('1') else
+        f"{label:.1f}"[1:] if Decimal(f"{label:.2f}") % Decimal(".2") == 0 else ""
+        for label in ax.get_yticks()], fontdict=dict(fontsize=14))
     ax.set_xticks(x)
     ax.tick_params(axis="x", pad=-5)
     return ax
