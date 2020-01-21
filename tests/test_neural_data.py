@@ -80,6 +80,7 @@ def test_PereiraBlank():
     assert len(set(assembly['subject'].values)) == 10
     assert len(set(assembly['neuroid_id'].values)) == 310125
     assert set(assembly['atlas'].values) == {'language', 'MD', 'DMN', 'auditory', 'visual'}
+    assert set(assembly['filter_strategy'].values) == {np.nan, 'NminusS', 'HminusE', 'FIXminusN', 'FIXminusH'}
     subject_assembly = assembly.sel(subject='018', atlas='auditory', atlas_selection_lower=90)
     assert not np.isnan(subject_assembly).any()  # note though that other atlases have nan values from the data itself
     assert np.nansum(assembly.values) == approx(-38516843.18636856)

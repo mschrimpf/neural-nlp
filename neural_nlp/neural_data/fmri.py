@@ -117,17 +117,19 @@ def load_Pereira2018_Blank():
             neuroid_meta = data['meta']
 
             expanded_assembly = []
-            voxel_nums, atlases, atlas_selections, atlas_filter_lower, rois = [], [], [], [], []
+            voxel_nums, atlases, filter_strategies, atlas_selections, atlas_filter_lower, rois = [], [], [], [], [], []
             for voxel_num in range(assembly.shape[1]):
                 for atlas_iter, atlas_selection in enumerate(neuroid_meta['atlases'][0, 0][:, 0]):
                     multimask = neuroid_meta['roiMultimask'][0, 0][atlas_iter, 0][voxel_num, 0]
                     if np.isnan(multimask):
                         continue
                     atlas_selection = atlas_selection[0].split('_')
+                    filter_strategy = None if len(atlas_selection) != 3 else atlas_selection[1]
                     filter_lower = re.match(r'from([0-9]{2})to100prcnt', atlas_selection[-1])
                     atlas_filter_lower.append(int(filter_lower.group(1)))
-                    atlas, selection = atlas_selection[0], '_'.join(atlas_selection[1:])
+                    atlas, selection = atlas_selection[0], atlas_selection[-1]
                     atlases.append(atlas)
+                    filter_strategies.append(filter_strategy)
                     atlas_selections.append(selection)
                     multimask = int(multimask) - 1  # Matlab 1-based to Python 0-based indexing
                     rois.append(neuroid_meta['rois'][0, 0][atlas_iter, 0][multimask, 0][0])
@@ -146,6 +148,7 @@ def load_Pereira2018_Blank():
                    'subject': ('neuroid', [subject] * assembly.shape[1]),
                    'voxel_num': ('neuroid', voxel_nums),
                    'atlas': ('neuroid', atlases),
+                   'filter_strategy': ('neuroid', filter_strategies),
                    'atlas_selection': ('neuroid', atlas_selections),
                    'atlas_selection_lower': ('neuroid', atlas_filter_lower),
                    'roi': ('neuroid', rois),
