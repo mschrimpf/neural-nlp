@@ -191,6 +191,8 @@ class _PereiraBenchmark(Benchmark):
     def _load_assembly(self):
         assembly = load_Pereira2018_Blank()
         assembly = assembly.sel(atlas_selection_lower=90)
+        assembly = assembly[{'neuroid': [filter_strategy in [np.nan, 'HminusE', 'FIXminusH']
+                                         for filter_strategy in assembly['filter_strategy'].values]}]
         return assembly
 
     def __call__(self, candidate):
@@ -255,8 +257,7 @@ class PereiraEncoding(_PereiraBenchmark):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
-            crossvalidation_kwargs=dict(splits=3, train_size=.8,
-                                        split_coord='stimulus_id', stratification_coord=None))
+            crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord=None))
         super(PereiraEncoding, self).__init__(metric=metric)
 
 
@@ -286,7 +287,7 @@ class PereiraRDM(_PereiraBenchmark):
     def __init__(self):
         metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=3))
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5, kfold=True))
         super(PereiraRDM, self).__init__(metric=metric)
 
 
@@ -336,9 +337,8 @@ def Fedorenko2016Encoding(**kwargs):
     regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
-                                       crossvalidation_kwargs=dict(
-                                           splits=3, train_size=.8,
-                                           split_coord='stimulus_id', stratification_coord='sentence_id'))
+                                       crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
+                                                                   stratification_coord='sentence_id'))
     return _Fedorenko2016(metric=metric, **kwargs)
 
 
