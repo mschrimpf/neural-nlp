@@ -80,6 +80,10 @@ def ecog_best(benchmark='Fedorenko2016-encoding'):
     whole_best(benchmark=benchmark, title='ECoG', ylim=.30)
 
 
+def wikitext_best(benchmark='wikitext-2'):
+    whole_best(benchmark=benchmark, title='wikitext-2', ylabel='NLL / Perplexity', ylim=50)
+
+
 def overall(benchmarks=('Pereira2018-encoding', 'stories_froi_bold4s-encoding')):
     data = [retrieve_scores(benchmark, normalize=True) for benchmark in benchmarks]
     data = reduce(lambda left, right: pd.concat([left, right]), data)
@@ -124,11 +128,12 @@ def _plot_bars(ax, models, data, ylim, width=0.5, ylabel="Predictivity (Pearson 
                     rotation=90, rotation_mode='anchor', **text_kwargs)
     ax.set_ylabel(ylabel, fontdict=dict(fontsize=10))
     ax.set_ylim([-.05, ylim])
-    ax.set_yticks(np.arange(0, ylim, .1))
-    ax.set_yticklabels([
-        "0" if Decimal(f"{label:.2f}") == Decimal('0') else "1" if Decimal(f"{label:.2f}") == Decimal('1') else
-        f"{label:.1f}"[1:] if Decimal(f"{label:.2f}") % Decimal(".2") == 0 else ""
-        for label in ax.get_yticks()], fontdict=dict(fontsize=14))
+    if ylim <= 1:
+        ax.set_yticks(np.arange(0, ylim, .1))
+        ax.set_yticklabels([
+            "0" if Decimal(f"{label:.2f}") == Decimal('0') else "1" if Decimal(f"{label:.2f}") == Decimal('1') else
+            f"{label:.1f}"[1:] if Decimal(f"{label:.2f}") % Decimal(".2") == 0 else ""
+            for label in ax.get_yticks()], fontdict=dict(fontsize=14))
     ax.set_xticks(x)
     ax.tick_params(axis="x", pad=-5)
     return ax
