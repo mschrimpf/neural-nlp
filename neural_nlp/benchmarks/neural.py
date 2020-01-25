@@ -32,66 +32,6 @@ class Invert:
         return self._metric(source, target)
 
 
-class _StoriesVoxelBenchmark(Benchmark):
-    def __init__(self, regression, correlation, metric, bold_shift=4):
-        _logger.info('Loading neural data')
-        assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
-        self._target_assembly = assembly
-
-        self._regression = regression
-        self._correlation = correlation
-        self._metric = metric
-
-    def _load_assembly(self, bold_shift):
-        assembly = load_voxels(bold_shift_seconds=bold_shift)
-        # leave-out Elvis story
-        assembly = assembly[{'presentation': [story != 'Elvis' for story in assembly['story'].values]}]
-        assembly.attrs['stimulus_set'] = assembly.attrs['stimulus_set'][
-            [row.story != 'Elvis' for row in assembly.attrs['stimulus_set'].itertuples()]]
-        # note that even though all subjects in this dataset now have seen all stories,
-        # there could still be NaN neural data at this point, e.g. from non-collected MD
-        assembly = assembly.sel(region='language')  # for now
-        assert not np.isnan(assembly).any()
-        return assembly
-
-    @property
-    @store()
-    def ceiling(self):
-        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
-                                       metric=self._metric)
-
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
-        assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
-        _logger.info('Scoring model')
-        return self._metric(model_activations, self._target_assembly)
-
-
-class StoriesVoxelEncoding(_StoriesVoxelBenchmark):
-    def __init__(self, bold_shift=4):
-        regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
-        correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-        metric = CrossRegressedCorrelation(
-            regression=regression, correlation=correlation,
-            crossvalidation_kwargs=dict(splits=3, train_size=.8,
-                                        split_coord='stimulus_id', stratification_coord='story'))
-        super(StoriesVoxelEncoding, self).__init__(bold_shift=bold_shift,
-                                                   regression=regression, correlation=correlation, metric=metric)
-
-
-class StoriesVoxelDecoding(_StoriesVoxelBenchmark):
-    def __init__(self, bold_shift=4):
-        regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))
-        correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-        metric = CrossRegressedCorrelation(
-            regression=regression, correlation=correlation,
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='story'))
-        metric = Invert(metric)
-        super(StoriesVoxelDecoding, self).__init__(bold_shift=bold_shift,
-                                                   regression=regression, correlation=correlation, metric=metric)
-
-
 class StoriesRDMBenchmark:
     def __init__(self, bold_shift=4):
         assemblies = self._load_rdms(bold_shift_seconds=bold_shift)
@@ -173,10 +113,39 @@ def align(source, target, on):
     return aligned
 
 
-class StoriesfROIEncoding:
+class StoriesVoxelEncoding:
     def __init__(self, bold_shift=4):
         assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
         self._target_assembly = assembly
+        self._regression = pls_regression(xarray_kwargs=dict(
+            stimulus_coord='stimulus_id', neuroid_coord='neuroid_id'))
+        self._correlation = pearsonr_correlation(xarray_kwargs=dict(
+            correlation_coord='stimulus_id', neuroid_coord='neuroid_id'))
+        self._metric = CrossRegressedCorrelation(
+            regression=self._regression, correlation=self._correlation,
+            crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
+
+    def _load_assembly(self, bold_shift):
+        assembly = load_voxels(bold_shift_seconds=bold_shift)
+        return assembly
+
+    @property
+    @store()
+    def ceiling(self):
+        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
+                                       metric=self._metric)
+
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+        assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
+        _logger.info('Scoring model')
+        return self._metric(model_activations, self._target_assembly)
+
+
+class StoriesfROIEncoding(StoriesVoxelEncoding):
+    def __init__(self, *args, **kwargs):
+        super(StoriesfROIEncoding, self).__init__(*args, **kwargs)
 
         self._regression = pls_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
@@ -184,15 +153,10 @@ class StoriesfROIEncoding:
             correlation_coord='stimulus_id', neuroid_coord='fROI_area'))
         self._metric = CrossRegressedCorrelation(
             regression=self._regression, correlation=self._correlation,
-            crossvalidation_kwargs=dict(splits=3, train_size=.8,
-                                        split_coord='stimulus_id', stratification_coord='story'))
+            crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
 
     def _load_assembly(self, bold_shift):
-        assembly = load_voxels(bold_shift_seconds=bold_shift)
-        # leave-out Elvis story
-        assembly = assembly[{'presentation': [story != 'Elvis' for story in assembly['story'].values]}]
-        assembly.attrs['stimulus_set'] = assembly.attrs['stimulus_set'][
-            [row.story != 'Elvis' for row in assembly.attrs['stimulus_set'].itertuples()]]
+        assembly = super(StoriesfROIEncoding, self)._load_assembly(bold_shift)
         assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
         return assembly
 
@@ -216,19 +180,6 @@ class StoriesfROIEncoding:
             averaged_assembly[copy_coord] = dims, copy_value[order]
         averaged_assembly.attrs = attrs
         return averaged_assembly
-
-    @property
-    @store()
-    def ceiling(self):
-        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
-                                       metric=self._metric)
-
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
-        assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
-        _logger.info('Scoring model')
-        return self._metric(model_activations, self._target_assembly)
 
 
 class _PereiraBenchmark(Benchmark):
@@ -445,7 +396,6 @@ def aggregate(score):
 
 benchmark_pool = {
     'stories_voxel_bold4s-encoding': StoriesVoxelEncoding,
-    'stories_voxel_bold4s-decoding': StoriesVoxelDecoding,
     'stories_froi_bold4s-encoding': StoriesfROIEncoding,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
