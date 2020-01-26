@@ -18,8 +18,7 @@ from tqdm import tqdm
 from xarray import DataArray
 
 from brainscore.metrics import Score
-from brainscore.metrics.regression import CrossRegressedCorrelation
-from brainscore.metrics.xarray_utils import XarrayRegression
+from brainscore.metrics.regression import CrossRegressedCorrelation, linear_regression
 from neural_nlp.stimuli import NaturalisticStories, StimulusSet
 from neural_nlp.utils import ordered_set, is_sorted
 from result_caching import cache, store, store_netcdf
@@ -41,18 +40,8 @@ def load_Pereira2018_Blank_languageresiduals():
         residuals.append(residual)
         return Score([0], coords={'neuroid_id': ('neuroid', [0])}, dims=['neuroid'])  # dummy score
 
-    # we build the metric ourselves since we want to use all cross-validation splits
-    class DummyRegression:
-        def fit(self, X, Y):
-            self.W = np.ones((len(X['neuroid']), len(Y['neuroid'])))
-            np.testing.assert_array_equal(np.dot(X.values, self.W).shape, Y.shape)
-
-        def predict(self, X):
-            return np.dot(X, self.W)
-
     pseudo_metric = CrossRegressedCorrelation(
-        # regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
-        regression=XarrayRegression(DummyRegression(), stimulus_coord='stimulus_id'),
+        regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
         correlation=store_residuals,
         crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord=None))
 
