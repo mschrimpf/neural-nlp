@@ -135,6 +135,7 @@ def train(model, train_dataset, val_dataset, device='cuda',
     previous_val_ppl = np.inf
     for epoch, _ in enumerate(train_iterator):
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
+        epoch_loss = 0
         for step, batch in enumerate(epoch_iterator):
             inputs, labels = (batch, batch)
             inputs = inputs.to(device)
@@ -145,6 +146,7 @@ def train(model, train_dataset, val_dataset, device='cuda',
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
             if gradient_accumulation_steps > 1:
                 loss = loss / gradient_accumulation_steps
+            epoch_loss += loss.mean().item()
             loss.backward()
 
             tr_loss += loss.item()
@@ -160,6 +162,8 @@ def train(model, train_dataset, val_dataset, device='cuda',
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss) / logging_steps, global_step)
                     logging_loss = tr_loss
 
+        epoch_loss = epoch_loss / step
+        logger.debug(f"Training epoch {epoch}: loss = {epoch_loss}, perplexity = {np.exp(epoch_loss)}")
         val_ppl = evaluate(model=model, eval_dataset=val_dataset)['perplexity']
         if val_ppl < previous_val_ppl - ppl_diff_threshold:  # all good, continue
             previous_val_ppl = val_ppl
