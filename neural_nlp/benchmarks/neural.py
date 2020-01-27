@@ -9,8 +9,7 @@ from tqdm import tqdm
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
-from brainscore.metrics.regression import pls_regression, linear_regression, pearsonr_correlation, \
-    CrossRegressedCorrelation
+from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, standard_error_of_the_mean, \
     apply_aggregate
 from brainscore.utils import LazyLoad
@@ -117,7 +116,7 @@ class StoriesVoxelEncoding:
     def __init__(self, bold_shift=4):
         assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
         self._target_assembly = assembly
-        self._regression = pls_regression(xarray_kwargs=dict(
+        self._regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='neuroid_id'))
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(
             correlation_coord='stimulus_id', neuroid_coord='neuroid_id'))
@@ -147,7 +146,7 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
     def __init__(self, *args, **kwargs):
         super(StoriesfROIEncoding, self).__init__(*args, **kwargs)
 
-        self._regression = pls_regression(xarray_kwargs=dict(
+        self._regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(
             correlation_coord='stimulus_id', neuroid_coord='fROI_area'))
@@ -276,7 +275,7 @@ class PereiraEncodingMin(_PereiraBenchmark):
 class PereiraDecoding(_PereiraBenchmark):
     def __init__(self):
         metric = CrossRegressedCorrelation(
-            regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
+            regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None))
         metric = Invert(metric)
@@ -333,13 +332,13 @@ class _Fedorenko2016:
         return model_activations
 
 
-def Fedorenko2016Encoding(**kwargs):
-    regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
+def Fedorenko2016Encoding():
+    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
                                        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
                                                                    stratification_coord='sentence_id'))
-    return _Fedorenko2016(metric=metric, **kwargs)
+    return _Fedorenko2016(metric=metric)
 
 
 def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
