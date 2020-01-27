@@ -14,7 +14,8 @@ from brainscore.metrics.transformations import CartesianProduct, CrossValidation
     apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
-from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018_Blank
+from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
+    load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
 from neural_nlp.stimuli import load_stimuli, StimulusSet
 from neural_nlp.utils import ordered_set
 from result_caching import store
@@ -260,6 +261,12 @@ class PereiraEncoding(_PereiraBenchmark):
         super(PereiraEncoding, self).__init__(metric=metric)
 
 
+class PereiraLanguageResidualsEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraLanguageResidualsEncoding, self).__init__()
+        self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
+
+
 class PereiraEncodingMin(_PereiraBenchmark):
     def __init__(self):
         metric = CrossRegressedCorrelation(
@@ -398,6 +405,7 @@ benchmark_pool = {
     'stories_froi_bold4s-encoding': StoriesfROIEncoding,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
+    'Pereira2018_languageresiduals-encoding': PereiraLanguageResidualsEncoding,
     'Pereira2018-encoding-min': PereiraEncodingMin,
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
