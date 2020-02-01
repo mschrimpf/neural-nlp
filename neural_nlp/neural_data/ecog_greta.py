@@ -11,41 +11,58 @@ from neural_nlp.stimuli import StimulusSet
 
 _logger = logging.getLogger(__name__)
 
-
 # @store() Disable the storing, since it is a very small file
-def load_Fedorenko2016():
+def load_Fedorenko2016(electrodes):
     # MANUAL DIR: To give access to other people running it from different directories
     ressources_dir = Path(__file__).parent.parent.parent / 'ressources'
     neural_data_dir = ressources_dir / 'neural_data' / 'ecog-Fedorenko2016/'
     stim_data_dir = ressources_dir / 'stimuli' / 'sentences_8'
     _logger.info(f'Neural data directory: {neural_data_dir}')
-
-    # Argument:
-    filepaths_neural = glob(os.path.join(neural_data_dir, '*.mat'))
-    _logger.debug(f'Filepaths neural: {filepaths_neural}')
     filepaths_stim = glob(os.path.join(stim_data_dir, '*.txt'))
 
+    # ECoG
     data = None
 
-    # ECoG
-    for filepath in filepaths_neural:
-        # For each file (currently one)
-        _logger.debug(f"{filepath}...")
+    # For language responsive electrodes:
+    if electrodes == 'language':
+        filepath_neural = glob(os.path.join(neural_data_dir, '*ecog.mat'))
 
-        ecog_mat = sio.loadmat(filepath)
-        ecog_mtrix = ecog_mat['ecog']
+        # Create a subject ID list corresponding to language electrodes
+        subject1 = np.repeat(1, 47)
+        subject2 = np.repeat(2, 9)
+        subject3 = np.repeat(3, 9)
+        subject4 = np.repeat(4, 15)
+        subject5 = np.repeat(5, 18)
 
-        ecog_mtrix_T = np.transpose(ecog_mtrix)
+        print('Running Fedorenko2016 benchmark with language responsive electrodes')
 
-        num_words = list(range(np.shape(ecog_mtrix_T)[0]))
-        new_sent_idx = num_words[::8]
+    # For non-noisy electrodes
+    if electrodes == 'all':
+        filepath_neural = glob(os.path.join(neural_data_dir, '*all.mat'))
 
-        # Average across word representations
-        sent_avg_ecog = []
-        for i in new_sent_idx:
-            eight_words = ecog_mtrix_T[i:i + 8, :]
-            sent_avg = np.mean(eight_words, 0)
-            sent_avg_ecog.append(sent_avg)
+        # Create a subject ID list corresponding to non-noisy electrodes
+        subject1 = np.repeat(1, 70)
+        subject2 = np.repeat(2, 35)
+        subject3 = np.repeat(3, 20)
+        subject4 = np.repeat(4, 29)
+        subject5 = np.repeat(5, 26)
+
+        print('Running Fedorenko2016 benchmark with non-noisy electrodes')
+
+    ecog_mat = sio.loadmat(filepath_neural[0])
+    ecog_mtrix = ecog_mat['ecog']
+
+    ecog_mtrix_T = np.transpose(ecog_mtrix)
+
+    num_words = list(range(np.shape(ecog_mtrix_T)[0]))
+    new_sent_idx = num_words[::8]
+
+    # Average across word representations
+    sent_avg_ecog = []
+    for i in new_sent_idx:
+        eight_words = ecog_mtrix_T[i:i + 8, :]
+        sent_avg = np.mean(eight_words, 0)
+        sent_avg_ecog.append(sent_avg)
 
     # Stimuli
     for filepath in filepaths_stim:
@@ -72,13 +89,6 @@ def load_Fedorenko2016():
     sentence_lst = list(range(0, 52))
     sentenceID = np.repeat(sentence_lst, 8)
 
-    # Create a subject ID list corresponding to electrodes
-    subject1 = np.repeat(1, 47)  # Subject 1 has these language responsive electrodes
-    subject2 = np.repeat(2, 9)
-    subject3 = np.repeat(3, 9)
-    subject4 = np.repeat(4, 15)
-    subject5 = np.repeat(5, 18)
-
     subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5], axis=0)
 
     # Create a list for each word number
@@ -91,7 +101,7 @@ def load_Fedorenko2016():
 
     # xarray
     electrode_numbers = list(range(np.shape(ecog_mtrix_T)[1]))
-    assembly = xr.DataArray(ecog_mtrix_T,  # Do we want the avg word response too?
+    assembly = xr.DataArray(ecog_mtrix_T,
                             dims=('presentation', 'neuroid'),
                             coords={'stimulus_id': ('presentation', word_number),
                                     'word': ('presentation', sentence_words),
@@ -107,4 +117,4 @@ def load_Fedorenko2016():
 
 
 if __name__ == '__main__':
-    data = load_Fedorenko2016()
+    data = load_Fedorenko2016(electrodes='all')

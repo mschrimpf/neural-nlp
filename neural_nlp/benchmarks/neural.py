@@ -9,13 +9,13 @@ from tqdm import tqdm
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
-from brainscore.metrics.regression import pls_regression, linear_regression, pearsonr_correlation, \
-    CrossRegressedCorrelation
+from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, standard_error_of_the_mean, \
     apply_aggregate
 from brainscore.utils import LazyLoad
-from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
-from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, load_Pereira2018_Blank
+from neural_nlp.neural_data.ecog_greta_v2 import load_Fedorenko2016
+from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
+    load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
 from neural_nlp.stimuli import load_stimuli, StimulusSet
 from neural_nlp.utils import ordered_set
 from result_caching import store
@@ -117,7 +117,7 @@ class StoriesVoxelEncoding:
     def __init__(self, bold_shift=4):
         assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
         self._target_assembly = assembly
-        self._regression = pls_regression(xarray_kwargs=dict(
+        self._regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='neuroid_id'))
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(
             correlation_coord='stimulus_id', neuroid_coord='neuroid_id'))
@@ -147,7 +147,7 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
     def __init__(self, *args, **kwargs):
         super(StoriesfROIEncoding, self).__init__(*args, **kwargs)
 
-        self._regression = pls_regression(xarray_kwargs=dict(
+        self._regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
         self._correlation = pearsonr_correlation(xarray_kwargs=dict(
             correlation_coord='stimulus_id', neuroid_coord='fROI_area'))
@@ -261,6 +261,12 @@ class PereiraEncoding(_PereiraBenchmark):
         super(PereiraEncoding, self).__init__(metric=metric)
 
 
+class PereiraLanguageResidualsEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraLanguageResidualsEncoding, self).__init__()
+        self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
+
+
 class PereiraEncodingMin(_PereiraBenchmark):
     def __init__(self):
         metric = CrossRegressedCorrelation(
@@ -276,7 +282,7 @@ class PereiraEncodingMin(_PereiraBenchmark):
 class PereiraDecoding(_PereiraBenchmark):
     def __init__(self):
         metric = CrossRegressedCorrelation(
-            regression=pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
+            regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None))
         metric = Invert(metric)
@@ -291,9 +297,9 @@ class PereiraRDM(_PereiraBenchmark):
         super(PereiraRDM, self).__init__(metric=metric)
 
 
-class _Fedorenko2016:
+class _Fedorenko2016: # For language responsive electrodes
     def __init__(self, metric):
-        assembly = load_Fedorenko2016()
+        assembly = load_Fedorenko2016(electrodes='language')
         self._target_assembly = assembly
         self._metric = metric
 
@@ -332,14 +338,62 @@ class _Fedorenko2016:
 
         return model_activations
 
+class _Fedorenko2016All: # For language responsive electrodes
+    def __init__(self, metric):
+        assembly = load_Fedorenko2016(electrodes='all')
+        self._target_assembly = assembly
+        self._metric = metric
 
-def Fedorenko2016Encoding(**kwargs):
-    regression = pls_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
+    @property
+    @store()
+    def ceiling(self):
+        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
+                                       metric=self._metric)
+
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        stimulus_set = self._target_assembly.attrs['stimulus_set']
+        model_activations = self._read_words(candidate, stimulus_set)
+        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
+        return self._metric(model_activations, self._target_assembly)
+
+    @classmethod
+    def _read_words(cls, candidate, stimulus_set):
+        activations = []
+        for i, sentence_id in enumerate(ordered_set(stimulus_set['sentence_id'].values)):
+            sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence_id]
+            sentence_stimuli = StimulusSet({'sentence': ' '.join(sentence_stimuli['word']),
+                                            'sentence_id': list(set(sentence_stimuli['sentence_id']))})
+            sentence_stimuli.name = f"{stimulus_set.name}-{sentence_id}"
+            sentence_activations = candidate(stimuli=sentence_stimuli, average_sentence=False)
+            sentence_activations['stimulus_id'] = ('presentation', 8 * i + np.arange(0, 8))
+            sentence_activations['sentence_id'] = ('presentation', [sentence_id] * 8)
+            activations.append(sentence_activations)
+        model_activations = merge_data_arrays(activations)
+        # merging does not maintain stimulus order. the following orders again
+        idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
+               itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
+        assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
+        model_activations = model_activations[{'presentation': idx}]
+
+        return model_activations
+
+
+def Fedorenko2016Encoding():
+    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
+    correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+    metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
+                                       crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', 
+                                                                   stratification_coord='sentence_id'))
+    return _Fedorenko2016(metric=metric)
+
+def Fedorenko2016EncodingAll():
+    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
                                        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
                                                                    stratification_coord='sentence_id'))
-    return _Fedorenko2016(metric=metric, **kwargs)
+    return _Fedorenko2016All(metric=metric)
 
 
 def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
@@ -399,8 +453,10 @@ benchmark_pool = {
     'stories_froi_bold4s-encoding': StoriesfROIEncoding,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
+    'Pereira2018_languageresiduals-encoding': PereiraLanguageResidualsEncoding,
     'Pereira2018-encoding-min': PereiraEncodingMin,
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
     'Fedorenko2016-encoding': Fedorenko2016Encoding,
+    'Fedorenko2016-encoding-all': Fedorenko2016EncodingAll,
 }
