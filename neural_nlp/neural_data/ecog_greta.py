@@ -1,7 +1,7 @@
 import os
 from glob import glob
 from pathlib import Path
-
+from scipy import stats
 import logging
 import numpy as np
 import scipy.io as sio
@@ -51,8 +51,9 @@ def load_Fedorenko2016(electrodes):
 
     ecog_mat = sio.loadmat(filepath_neural[0])
     ecog_mtrix = ecog_mat['ecog']
-
-    ecog_mtrix_T = np.transpose(ecog_mtrix)
+    ecog_z = stats.zscore(ecog_mtrix, 1) 
+    
+    ecog_mtrix_T = np.transpose(ecog_z)
 
     num_words = list(range(np.shape(ecog_mtrix_T)[0]))
     new_sent_idx = num_words[::8]
