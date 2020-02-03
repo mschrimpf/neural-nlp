@@ -1,9 +1,9 @@
 # coding=utf-8
-import logging
 import os
 import pickle
 import random
 
+import logging
 import numpy as np
 import torch
 from pathlib import Path
@@ -13,21 +13,24 @@ from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampl
 from tqdm import tqdm, trange
 
 from brainscore.metrics import Score
-from neural_nlp.models.implementations import _PytorchTransformerWrapper, BrainModel
+from neural_nlp.models.implementations import BrainModel
 
 logger = logging.getLogger(__name__)
 
 
 class LMHeadModel(torch.nn.Module):
-    def __init__(self, features_model, features_size, vocab_size):
+    def __init__(self, features_size, vocab_size, embedding_weights=None):
+        """
+        :param embedding_weights: set to tie head weights to embedding
+        """
         super(LMHeadModel, self).__init__()
-        self.features = features_model
-        self.lm_head = nn.Linear(features_size, vocab_size)
+        self.linear = nn.Linear(features_size, vocab_size)
+        if embedding_weights is not None:
+            np.testing.assert_array_equal(self.linear.weight.shape, embedding_weights.shape)
+            self.linear.weight = embedding_weights
 
-    def forward(self, input_ids, labels=None):
-        with torch.no_grad():
-            features = self.features(input_ids)
-        lm_logits = self.lm_head(features)
+    def forward(self, features, labels=None):
+        lm_logits = self.linear(features)
 
         outputs = (lm_logits,) + (features,)
         if labels is not None:
@@ -44,42 +47,53 @@ class LMHeadModel(torch.nn.Module):
 
 
 class TextDataset(Dataset):
-    def __init__(self, model_identifier, tokenizer, file_path='train', block_size=512):
+    def __init__(self, model_identifier, model, file_path, vocab_size=None, block_size=512):
         assert os.path.isfile(file_path), f"{file_path} is not a file"
-        directory, filename = os.path.split(file_path)
-        cached_features_file = os.path.join(directory,
-                                            f'cached_lm_{model_identifier}_{block_size}_{filename}')
+        with open(file_path, encoding="utf-8") as f:
+            text = f.read()
 
-        if os.path.exists(cached_features_file):
-            logger.info("Loading features from cached file %s", cached_features_file)
-            with open(cached_features_file, 'rb') as handle:
+        # Tokens
+        directory, filename = os.path.split(file_path)
+        cached_tokens_file = os.path.join(directory, f'cached_lm_{model_identifier}_{block_size}_{filename}')
+        if os.path.exists(cached_tokens_file):
+            logger.info("Loading tokens from cached file %s", cached_tokens_file)
+            with open(cached_tokens_file, 'rb') as handle:
                 self.examples = pickle.load(handle)
         else:
-            logger.info("Creating features from dataset file %s", file_path)
-
+            logger.info("Creating tokens from dataset file %s", file_path)
             self.examples = []
-            with open(file_path, encoding="utf-8") as f:
-                text = f.read()
-
-            tokenized_text = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(text))
-            tokenized_text = np.array(tokenized_text)  # ~10 sec with numpy, ~40 hours without
-
+            tokenized_text = model.tokenize(text, vocab_size=vocab_size)
             # Truncate in block of block_size
             for i in tqdm(range(0, len(tokenized_text) - block_size + 1, block_size), desc='truncate text into blocks'):
-                self.examples.append(tokenizer.build_inputs_with_special_tokens(tokenized_text[i: i + block_size]))
+                self.examples.append(model.tokens_to_inputs(tokenized_text[i: i + block_size]))
             # Note that we are loosing the last truncated example here for the sake of simplicity (no padding)
             # If your dataset is small, first you should loook for a bigger one :-) and second you
             # can change this behavior by adding (model specific) padding.
+            logger.info("Saving tokens into cached file %s", cached_tokens_file)
+            with open(cached_tokens_file, 'wb') as handle:
+                pickle.dump(self.examples, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+        # Features
+        cached_features_file = os.path.join(directory, f'cached_lm_features_{model_identifier}_{block_size}_{filename}')
+        if os.path.exists(cached_features_file):
+            logger.info("Loading features from cached file %s", cached_features_file)
+            with open(cached_features_file, 'rb') as handle:
+                self.features = pickle.load(handle)
+        else:
+            self.features = []
+            for block in tqdm(self.examples, desc="token blocks to features"):  # pass tokens to model
+                block_features = model(block)
+                self.features.append(block_features)
             logger.info("Saving features into cached file %s", cached_features_file)
             with open(cached_features_file, 'wb') as handle:
-                pickle.dump(self.examples, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(self.features, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        assert len(self.examples) == len(self.features)
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, item):
-        return torch.tensor(self.examples[item])
+        return torch.tensor(self.features[item]), torch.tensor(self.examples[item])
 
 
 def set_seed(seed):
@@ -106,14 +120,10 @@ def train(model, train_dataset, val_dataset, device='cuda',
     t_total = len(train_dataloader) // gradient_accumulation_steps * num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
-    # grab only head params
-    lm_head_prefix = 'lm_head.'
-    optim_params = [n for n, p in model.named_parameters() if n.startswith(lm_head_prefix)]
-    assert optim_params, f"lm_head parameters not found in {[n for n, p in model.named_parameters()]}"
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if n in optim_params],
-         'weight_decay': weight_decay},
-    ]
+        {'params': list(model.parameters()),
+         'weight_decay': weight_decay}]
+    assert len(optimizer_grouped_parameters[0]['params']) == 2, "expected only 2 paramaters for decoder (weight+bias)"
     # features model's parameters are already disabled in LMHead.forward
     optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=t_total)
@@ -135,16 +145,17 @@ def train(model, train_dataset, val_dataset, device='cuda',
     previous_val_ppl = np.inf
     for epoch, _ in enumerate(train_iterator):
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
-        for step, batch in enumerate(epoch_iterator):
-            inputs, labels = (batch, batch)
-            inputs = inputs.to(device)
-            labels = labels.to(device)
+        epoch_loss = 0
+        for step, (batch_features, batch_tokens) in enumerate(epoch_iterator):
+            batch_features = batch_features.to(device)
+            batch_tokens = batch_tokens.to(device)
             model.train()
-            outputs = model(inputs, labels=labels)
+            outputs = model(batch_features, labels=batch_tokens)
             loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
             if gradient_accumulation_steps > 1:
                 loss = loss / gradient_accumulation_steps
+            epoch_loss += loss.mean().item()
             loss.backward()
 
             tr_loss += loss.item()
@@ -160,6 +171,8 @@ def train(model, train_dataset, val_dataset, device='cuda',
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss) / logging_steps, global_step)
                     logging_loss = tr_loss
 
+        epoch_loss = epoch_loss / step
+        logger.debug(f"Training epoch {epoch}: loss = {epoch_loss}, perplexity = {np.exp(epoch_loss)}")
         val_ppl = evaluate(model=model, eval_dataset=val_dataset)['perplexity']
         if val_ppl < previous_val_ppl - ppl_diff_threshold:  # all good, continue
             previous_val_ppl = val_ppl
@@ -183,11 +196,12 @@ def evaluate(model, eval_dataset, eval_batch_size=4, device='cuda', prefix=""):
     nb_eval_steps = 0
     model.eval()
 
-    for batch in tqdm(eval_dataloader, desc="Evaluating"):
-        batch = batch.to(device)
+    for batch_features, batch_tokens in tqdm(eval_dataloader, desc="Evaluating"):
+        batch_features = batch_features.to(device)
+        batch_tokens = batch_tokens.to(device)
 
         with torch.no_grad():
-            outputs = model(batch, labels=batch)
+            outputs = model(batch_features, labels=batch_tokens)
             lm_loss = outputs[0]
             eval_loss += lm_loss.mean().item()
         nb_eval_steps += 1
@@ -206,44 +220,40 @@ def evaluate(model, eval_dataset, eval_batch_size=4, device='cuda', prefix=""):
 
 
 class _PerformanceBenchmark:
-    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file):
+    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=32):
         self.identifier = identifier
         self.train_data_file = train_data_file
         self.val_data_file = val_data_file
         self.eval_data_file = eval_data_file
+        self.tied = tied
+        self.block_size = block_size
 
-    def __call__(self, model: _PytorchTransformerWrapper):
-        model.mode = BrainModel.Modes.general_features
+    def __call__(self, model: BrainModel):
+        model.mode = BrainModel.Modes.tokens_to_features
         set_seed(42)
-        lm_head = LMHeadModel(model, features_size=model.features_size, vocab_size=model.vocab_size)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logger.debug(f"Using block size {self.block_size} for {model.identifier}")
+
+        # Decoder
+        vocab_size = min(model.vocab_size, 250000)
+        logger.info(f"Vocab size: {vocab_size}")
+        lm_head = LMHeadModel(features_size=model.features_size, vocab_size=vocab_size,
+                              embedding_weights=model.get_embedding_weights() if self.tied else None)
         lm_head = lm_head.to(device)
-        model._model.to(device)
-        tokenizer = model.tokenizer
-        block_size = tokenizer.max_len_single_sentence if hasattr(tokenizer, 'max_len_single_sentence') \
-            else tokenizer.max_len
-        if model.identifier.startswith('roberta') or model.identifier.startswith('xlm'):
-            block_size -= 2
-        # reduce block sizes for some models to make them fit on gpu
-        if model.identifier.startswith('transfo'):
-            block_size = 256
-        if any(model.identifier.startswith(prefix) for prefix in ['gpt2-xl', 'xlm-roberta', 't5']):
-            block_size = 128
-        if model.identifier.startswith('t5-3b'):
-            block_size = 32
-        block_size = min(block_size, 1024)
-        logger.debug(f"Using block size {block_size} for {model.identifier}")
-        # train
-        train_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
-                                    file_path=self.train_data_file, block_size=block_size)
-        val_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
-                                  file_path=self.val_data_file, block_size=block_size)
-        train(model=lm_head, train_dataset=train_dataset, val_dataset=val_dataset, device=device)
+
+        # Data
+        train_tokens = TextDataset(model_identifier=model.identifier, model=model, block_size=self.block_size,
+                                   vocab_size=vocab_size, file_path=self.train_data_file)
+        val_tokens = TextDataset(model_identifier=model.identifier, model=model, block_size=self.block_size,
+                                 vocab_size=vocab_size, file_path=self.val_data_file)
+        test_tokens = TextDataset(model_identifier=model.identifier, model=model, block_size=self.block_size,
+                                  vocab_size=vocab_size, file_path=self.eval_data_file)
+
+        # Train
+        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device)
 
         # Evaluation
-        test_dataset = TextDataset(model_identifier=model.identifier, tokenizer=tokenizer,
-                                   file_path=self.eval_data_file, block_size=block_size)
-        test_result = evaluate(model=lm_head, eval_dataset=test_dataset, device=device)
+        test_result = evaluate(model=lm_head, eval_dataset=test_tokens, device=device)
         score = Score([test_result[key] for key in ['perplexity', 'loss']],
                       coords={'measure': ['test_perplexity', 'test_loss']}, dims=['measure'])
         score.attrs['datasets'] = {'train': self.train_data_file,
@@ -257,12 +267,12 @@ class _PerformanceBenchmark:
 _ml_ressources_path = Path(__file__).parent.parent.parent / 'ressources' / 'ml'
 
 
-def Wikitext2Benchmark():
+def Wikitext2Benchmark(identifier='wikitext-2', **kwargs):
     data_path = _ml_ressources_path / 'wikitext-2'
-    return _PerformanceBenchmark(identifier='wikitext-2',
+    return _PerformanceBenchmark(identifier=identifier,
                                  train_data_file=data_path / 'train.txt',
                                  val_data_file=data_path / 'val.txt',
-                                 eval_data_file=data_path / 'test.txt')
+                                 eval_data_file=data_path / 'test.txt', **kwargs)
 
 
 benchmark_pool = {

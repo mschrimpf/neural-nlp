@@ -20,9 +20,11 @@ from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 
 _ressources_dir = (Path(__file__).parent / '..' / '..' / 'ressources' / 'models').resolve()
 
+_logger = logging.getLogger(__name__)
+
 
 class BrainModel:
-    Modes = Enum('Mode', 'recording general_features')
+    Modes = Enum('Mode', 'recording tokens_to_features')
 
     def __init__(self):
         super(BrainModel, self).__init__()
@@ -38,6 +40,20 @@ class BrainModel:
         self._mode = value
 
     def __call__(self, sentences):
+        raise NotImplementedError()
+
+    def tokenize(self, text):
+        raise NotImplementedError()
+
+    def tokens_to_inputs(self, tokens):
+        return tokens
+
+    @property
+    def features_size(self):
+        raise NotImplementedError()
+
+    @property
+    def vocab_size(self):
         raise NotImplementedError()
 
 
@@ -311,6 +327,7 @@ class _PytorchTransformerWrapper(BrainModel):
     def __init__(self, identifier, tokenizer, model, layers, sentence_average, tokenizer_special_tokens=()):
         super(_PytorchTransformerWrapper, self).__init__()
         self.default_layers = self.available_layers = layers
+        self._tokenizer = tokenizer
         self._model = model
         self._model_container = self.ModelContainer(tokenizer, model, layers, tokenizer_special_tokens)
         self._sentence_average = sentence_average
@@ -323,21 +340,36 @@ class _PytorchTransformerWrapper(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor, average_sentence=average_sentence,
                                              sentence_averaging=self._sentence_average, **kwargs)
-        elif self.mode == BrainModel.Modes.general_features:
-            # (input_ids, position_ids=position_ids, token_type_ids=token_type_ids, head_mask=head_mask)
-            transformer_outputs = self._model(*args, **kwargs)
-            hidden_states = transformer_outputs[0]
-            return hidden_states
+        elif self.mode == BrainModel.Modes.tokens_to_features:
+            return self._tokens_to_features(*args, **kwargs)
         else:
             raise ValueError(f"Unknown mode {self.mode}")
+
+    def _tokens_to_features(self, token_ids):
+        import torch
+        max_num_words = 512 - 2  # -2 for [cls], [sep]
+        features = []
+        for token_index in range(len(token_ids)):
+            context_start = max(0, token_index - max_num_words + 1)
+            context_ids = token_ids[context_start:token_index + 1]
+            tokens_tensor = torch.tensor([context_ids])
+            tokens_tensor = tokens_tensor.to('cuda' if torch.cuda.is_available() else 'cpu')
+            context_features = self._model(tokens_tensor)[0]
+            features.append(PytorchWrapper._tensor_to_numpy(context_features[:, -1, :]))
+        return np.concatenate(features)
 
     @property
     def identifier(self):
         return self._extractor.identifier
 
-    @property
-    def tokenizer(self):
-        return self._model_container.tokenizer
+    def tokenize(self, text, vocab_size=None):
+        assert not (bool(vocab_size)) or vocab_size == self.vocab_size
+        tokenized_text = self._tokenizer.convert_tokens_to_ids(self._tokenizer.tokenize(text))
+        tokenized_text = np.array(tokenized_text)  # ~10 sec with numpy, ~40 hours without
+        return tokenized_text
+
+    def tokens_to_inputs(self, tokens):
+        return self._tokenizer.build_inputs_with_special_tokens(tokens)
 
     @property
     def features_size(self):
@@ -349,8 +381,9 @@ class _PytorchTransformerWrapper(BrainModel):
 
     class ModelContainer:
         def __init__(self, tokenizer, model, layer_names, tokenizer_special_tokens=()):
+            import torch
             self.tokenizer = tokenizer
-            self.model = model
+            self.model = model.to('cuda' if torch.cuda.is_available() else 'cpu')
             self.layer_names = layer_names
             self.tokenizer_special_tokens = tokenizer_special_tokens
 
@@ -377,40 +410,15 @@ class _PytorchTransformerWrapper(BrainModel):
             # mapping from original text to later undo chain
             sentence_indices = [0] + [sum(num_words[:i]) for i in range(1, len(num_words), 1)]
 
-            # sliding window approach (see https://github.com/google-research/bert/issues/66)
-            # however, since this is a brain model candidate, we don't let it see future words (just like the brain
-            # doesn't receive future word input). Instead, we maximize the past context of each word
-            sentence_index = 0
-            sentences_chain = ' '.join(sentences).split()
-            previous_indices = []
-
-            encoded_layers = [[]] * len(self.layer_names)
             max_num_words = 512 if not use_special_tokens else 511
-            for token_index in tqdm(range(len(tokenized_sentences)), desc='token features'):
-                if tokenized_sentences[token_index] in additional_tokens:
-                    continue  # ignore altogether
-                # combine e.g. "'hunts', '##man'" or "'jennie', '##s'"
-                tokens = [word.lstrip('##').lstrip('▁')  # tokens are sometimes padded by prefixes, clear those again
-                          for word in tokenized_sentences[previous_indices + [token_index]]]
-                token_word = ''.join(tokens).lower()
-                for special_token in self.tokenizer_special_tokens:
-                    token_word = token_word.replace(special_token, '')
-                if sentences_chain[sentence_index].lower() != token_word:
-                    previous_indices.append(token_index)
-                    continue
-                previous_indices = []
-                sentence_index += 1
-
-                context_start = max(0, token_index - max_num_words + 1)
-                context = tokenized_sentences[context_start:token_index + 1]
-                if use_special_tokens and context_start > 0:  # `cls_token` has been discarded
-                    # insert `cls_token` again following
-                    # https://huggingface.co/pytorch-transformers/model_doc/roberta.html#pytorch_transformers.RobertaModel
-                    context = np.insert(context, 0, tokenized_sentences[0])
-                context_ids = self.tokenizer.convert_tokens_to_ids(context)
-
+            aligned_tokens = self.align_tokens(
+                tokenized_sentences=tokenized_sentences, sentences=sentences,
+                max_num_words=max_num_words, additional_tokens=additional_tokens, use_special_tokens=use_special_tokens)
+            encoded_layers = [[]] * len(self.layer_names)
+            for context_ids in aligned_tokens:
                 # Convert inputs to PyTorch tensors
                 tokens_tensor = torch.tensor([context_ids])
+                tokens_tensor = tokens_tensor.to('cuda' if torch.cuda.is_available() else 'cpu')
 
                 # Predict hidden states features for each layer
                 with torch.no_grad():
@@ -433,12 +441,47 @@ class _PytorchTransformerWrapper(BrainModel):
                                               if layer in layers])
             return sentence_encodings
 
+        def align_tokens(self, tokenized_sentences, sentences, max_num_words, additional_tokens, use_special_tokens):
+            # sliding window approach (see https://github.com/google-research/bert/issues/66)
+            # however, since this is a brain model candidate, we don't let it see future words (just like the brain
+            # doesn't receive future word input). Instead, we maximize the past context of each word
+            sentence_index = 0
+            sentences_chain = ' '.join(sentences).split()
+            previous_indices = []
 
-class KeyedVectorModel:
+            for token_index in tqdm(range(len(tokenized_sentences)), desc='token features'):
+                if tokenized_sentences[token_index] in additional_tokens:
+                    continue  # ignore altogether
+                # combine e.g. "'hunts', '##man'" or "'jennie', '##s'"
+                tokens = [word.lstrip('##').lstrip('▁')  # tokens are sometimes padded by prefixes, clear those again
+                          for word in tokenized_sentences[previous_indices + [token_index]]]
+                token_word = ''.join(tokens).lower()
+                for special_token in self.tokenizer_special_tokens:
+                    token_word = token_word.replace(special_token, '')
+                if sentences_chain[sentence_index].lower() != token_word:
+                    previous_indices.append(token_index)
+                    continue
+                previous_indices = []
+                sentence_index += 1
+
+                context_start = max(0, token_index - max_num_words + 1)
+                context = tokenized_sentences[context_start:token_index + 1]
+                if use_special_tokens and context_start > 0:  # `cls_token` has been discarded
+                    # insert `cls_token` again following
+                    # https://huggingface.co/pytorch-transformers/model_doc/roberta.html#pytorch_transformers.RobertaModel
+                    context = np.insert(context, 0, tokenized_sentences[0])
+                context_ids = self.tokenizer.convert_tokens_to_ids(context)
+                yield context_ids
+
+
+class KeyedVectorModel(BrainModel):
     """
     Lookup-table-like models where each word has an embedding.
     To retrieve the sentence activation, we take the mean of the word embeddings.
     """
+
+    available_layers = ['projection']
+    default_layers = available_layers
 
     def __init__(self, identifier, weights_file, random_embeddings=False, random_std=1, binary=False):
         super().__init__()
@@ -454,9 +497,13 @@ class KeyedVectorModel:
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
 
-    def __call__(self, *args, average_sentence=True, **kwargs):
-        return _call_conditional_average(*args, extractor=self._extractor,
-                                         average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
+    def __call__(self, sentences, *args, average_sentence=True, **kwargs):
+        if self.mode == BrainModel.Modes.recording:
+            return _call_conditional_average(sentences, *args, extractor=self._extractor,
+                                             average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
+        elif self.mode == BrainModel.Modes.tokens_to_features:
+            sentences = " ".join(self._model.index2word[index] for index in sentences)
+            return self._encode_sentence(sentences, *args, **kwargs)
 
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['projection'])
@@ -476,8 +523,19 @@ class KeyedVectorModel:
                 feature_vectors.append(np.zeros((300,)))
         return feature_vectors
 
-    available_layers = ['projection']
-    default_layers = available_layers
+    def tokenize(self, text, vocab_size=None):
+        vocab_size = vocab_size or self.vocab_size
+        tokens = [self._model.vocab[word].index for word in text.split() if word in self._model.vocab
+                  and self._model.vocab[word].index < vocab_size]  # only top-k vocab words
+        return np.array(tokens)
+
+    @property
+    def vocab_size(self):
+        return len(self._model.vocab)
+
+    @property
+    def features_size(self):
+        return 300
 
 
 class Word2Vec(KeyedVectorModel):
@@ -746,7 +804,7 @@ for untrained in False, True:
         configuration['tokenizer_ctr'] = configuration.get('tokenizer_ctr', configuration['prefix'] + 'Tokenizer')
 
 
-        def ModelInstantiation(identifier=identifier, configuration=frozenset(configuration.items())):
+        def model_instantiation(identifier=identifier, configuration=frozenset(configuration.items())):
             configuration = dict(configuration)  # restore from frozen
             module = import_module('transformers')
             config_ctr = getattr(module, configuration['config_ctr'])
@@ -772,5 +830,5 @@ for untrained in False, True:
             return transformer
 
 
-        model_pool[identifier] = LazyLoad(ModelInstantiation)
+        model_pool[identifier] = LazyLoad(model_instantiation)
         model_layers[identifier] = list(configuration['layers'])

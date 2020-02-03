@@ -13,7 +13,7 @@ from brainscore.metrics.regression import linear_regression, pearsonr_correlatio
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, standard_error_of_the_mean, \
     apply_aggregate
 from brainscore.utils import LazyLoad
-from neural_nlp.neural_data.ecog_greta_v2 import load_Fedorenko2016
+from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
     load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
 from neural_nlp.stimuli import load_stimuli, StimulusSet
@@ -387,12 +387,14 @@ def Fedorenko2016Encoding():
                                                                    stratification_coord='sentence_id'))
     return _Fedorenko2016(metric=metric)
 
+  
 def Fedorenko2016EncodingAll():
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
                                        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
                                                                    stratification_coord='sentence_id'))
+
     return _Fedorenko2016All(metric=metric)
 
 
