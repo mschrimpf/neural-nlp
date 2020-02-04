@@ -21,6 +21,7 @@ from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_mod
     _score_model as score_architecture_model
 from neural_nlp.benchmarks.neural import ceiling_normalize, aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
+from neural_nlp.utils import ordered_set
 from result_caching import NotCachedError
 
 logger = logging.getLogger(__name__)
@@ -284,7 +285,8 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
     scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
     # align
-    scores_untrained['model_identifier'] = [model.rstrip('-untrained') for model in scores_untrained['model'].values]
+    scores_untrained['model_identifier'] = [model.replace('-untrained', '')
+                                            for model in scores_untrained['model'].values]
     if layer_mode == 'best':  # layer is already argmax'ed over, might not be same across untrained/trained
         identifiers_trained = scores_trained['model'].values
         identifiers_untrained = scores_untrained['model_identifier'].values
@@ -320,26 +322,39 @@ def choose_best_scores(scores):
     return scores
 
 
-def num_features_vs_score(benchmark='Pereira2018-encoding', models=models, per_layer=False):
-    num_features, scores, colors = [], [], None
-    for model in models:
-        model_score = score(benchmark=benchmark, model=model)
+def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, include_untrained=True):
+    if include_untrained:
+        all_models = [(model, f"{model}-untrained") for model in models]
+        all_models = [model for model_tuple in all_models for model in model_tuple]
+    else:
+        all_models = models
+    scores = collect_scores(benchmark=benchmark, models=all_models)
+    scores = average_adjacent(scores)
+    scores = scores.dropna()
+    if not per_layer:
+        scores = choose_best_scores(scores)
+    # count number of features
+    num_features = []
+    for model in tqdm(ordered_set(scores['model'].values), desc='models'):
         # mock-run stimuli that are already stored
         mock_extractor = ActivationsExtractorHelper(get_activations=None, reset=None)
         features = mock_extractor._from_sentences_stored(
-            layers=model_layers[model], sentences=None,
-            identifier=model, stimuli_identifier='Pereira2018-243sentences.astronaut')
+            layers=model_layers[model.replace('-untrained', '')], sentences=None,
+            identifier=model.replace('-untrained', ''), stimuli_identifier='Pereira2018-243sentences.astronaut')
         if per_layer:
-            colors = []
-            for layer in model_layers[model]:
-                num_features.append(len(features.sel(layer=layer)['neuroid']))
-                scores.append(model_score.sel(layer=layer, drop=True))
-                colors.append(model_colors[model])
+            for layer in scores['layer'].values[scores['model'] == model]:
+                num_features.append({'model': model, 'layer': layer,
+                                     'score': len(features.sel(layer=layer)['neuroid'])})
         else:
-            num_features.append(len(features['neuroid']))
-            scores.append(model_score)
+            num_features.append({'model': model, 'score': len(features['neuroid'])})
+    num_features = pd.DataFrame(num_features)
+    num_features['error'] = np.nan
+    if per_layer:
+        assert (scores['layer'].values == num_features['layer'].values).all()
+    # plot
+    colors = [model_colors[model.replace('-untrained', '')] for model in scores['model'].values]
     fig, ax = _plot_scores1_2(num_features, scores, color=colors, xlabel="number of features", ylabel=benchmark)
-    _savefig(fig, savename=f"num_features-{benchmark}")
+    _savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
 def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer')):
