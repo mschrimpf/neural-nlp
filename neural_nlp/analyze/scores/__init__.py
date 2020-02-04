@@ -4,6 +4,7 @@ from decimal import Decimal
 import fire
 import itertools
 import logging
+import matplotlib
 import numpy as np
 import pandas as pd
 import seaborn
@@ -115,15 +116,16 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None,
-                    xlabel=None, ylabel=None, flip_x=False, **kwargs):
+                    xlabel=None, ylabel=None, flip_x=False, color=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
     fig, ax = pyplot.subplots()
-    ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='.', **kwargs)
-    if score_annotations:
+    ax.scatter(x=x, y=y, c=color, s=2)
+    ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
+    if score_annotations is not None:
         for annotation, _x, _y in zip(score_annotations, x, y):
-            ax.text(_x, _y, annotation, fontdict=dict(fontsize=10))
+            ax.text(_x, _y, annotation, fontdict=dict(fontsize=10), zorder=100)
 
     if flip_x:
         ax.set_xlim(list(reversed(ax.get_xlim())))
@@ -262,20 +264,28 @@ def align_both(data1, data2, on):
     return data1, data2
 
 
-def untrained_vs_trained(benchmark='Pereira2018-encoding', best_layers=True):
+def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
+    """
+    :param layer_mode: 'best' to select the best layer per model,
+      'group' to keep all layers and color them based on their model,
+      'pos' to keep all layers and color them based on their relative position.
+    """
     all_models = [[model, f"{model}-untrained"] for model in models]
     all_models = [model for model_tuple in all_models for model in model_tuple]
     scores = collect_scores(benchmark=benchmark, models=all_models)
     scores = average_adjacent(scores)  # average experiments & atlases
     scores = scores.dropna()  # embedding layers in xlnets and t5s have nan scores
-    if best_layers:
+    if layer_mode == 'best':
         scores = choose_best_scores(scores)
+    elif layer_mode == 'pos':
+        scores['layer_position'] = [model_layers[model].index(layer) / len(model_layers[model])
+                                    for model, layer in zip(scores['model'].values, scores['layer'].values)]
     # separate into trained / untrained
     untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
     scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
     # align
     scores_untrained['model_identifier'] = [model.rstrip('-untrained') for model in scores_untrained['model'].values]
-    if best_layers:  # layer is already argmax'ed over, might not be same across untrained/trained
+    if layer_mode == 'best':  # layer is already argmax'ed over, might not be same across untrained/trained
         identifiers_trained = scores_trained['model'].values
         identifiers_untrained = scores_untrained['model_identifier'].values
     else:
@@ -286,13 +296,17 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', best_layers=True):
     scores_untrained = scores_untrained[[identifier in overlap for identifier in identifiers_untrained]]
     scores_trained = scores_trained.sort_values(['model', 'layer'])
     scores_untrained = scores_untrained.sort_values(['model_identifier', 'layer'])
-    if not best_layers:
+    if layer_mode != 'best':
         assert (scores_trained['layer'].values == scores_untrained['layer'].values).all()
     # plot
-    colors = [model_colors[model] for model in scores_trained['model']]
-    colors = [to_rgba(named_color) for named_color in colors]
-    fig, ax = _plot_scores1_2(scores_untrained, scores_trained, alpha=0.4 if best_layers else None, ecolor=colors,
-                              xlabel="untrained", ylabel="trained")
+    if layer_mode in ('best', 'group'):
+        colors = [model_colors[model] for model in scores_trained['model']]
+        colors = [to_rgba(named_color) for named_color in colors]
+    else:
+        cmap = matplotlib.cm.get_cmap('binary')
+        colors = cmap(scores_trained['layer_position'].values)
+    fig, ax = _plot_scores1_2(scores_untrained, scores_trained, alpha=None if layer_mode == 'best' else 0.4,
+                              color=colors, xlabel="untrained", ylabel="trained")
     lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1])]
     ax.set_xlim(lims)
     ax.set_ylim(lims)
