@@ -9,6 +9,7 @@ import pandas as pd
 import seaborn
 import sys
 from matplotlib import pyplot
+from matplotlib.colors import to_rgba
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
 from scipy.stats import pearsonr
@@ -81,7 +82,8 @@ model_colors = {
     't5-3b': 'darkviolet',
     't5-11b': 'rebeccapurple',
     # XLM-RoBERTa
-    'xlm-roberta-base': 'magenta', 'xlm-roberta-large': 'm',
+    'xlm-roberta-base': 'magenta',
+    'xlm-roberta-large': 'm',
 }
 models = tuple(model_colors.keys())
 
@@ -112,20 +114,11 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     _savefig(fig, savename=savename)
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None, xlabel=None, ylabel=None, flip_x=False, **kwargs):
-    def get_center_err(s):
-        s = aggregate(s)
-        if hasattr(s, 'aggregation'):
-            return s.sel(aggregation='center').values.tolist(), s.sel(aggregation='error').values.tolist()
-        if hasattr(s, 'measure'):
-            ppl = s.sel(measure='test_perplexity').values.tolist()
-            return np.log(ppl), 0
-        if isinstance(s, (int, float)):
-            return s, 0
-        raise ValueError(f"Unknown score structure: {s}")
-
-    x, xerr = [get_center_err(s)[0] for s in scores1], [get_center_err(s)[1] for s in scores1]
-    y, yerr = [get_center_err(s)[0] for s in scores2], [get_center_err(s)[1] for s in scores2]
+def _plot_scores1_2(scores1, scores2, score_annotations=None,
+                    xlabel=None, ylabel=None, flip_x=False, **kwargs):
+    assert len(scores1) == len(scores2)
+    x, xerr = scores1['score'].values, scores1['error'].values
+    y, yerr = scores2['score'].values, scores2['error'].values
     fig, ax = pyplot.subplots()
     ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='.', **kwargs)
     if score_annotations:
@@ -191,10 +184,8 @@ def collect_scores(benchmark, models):
         for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
             adjunct_values = dict(zip(adjunct_columns, adjunct_values))
             current_score = model_scores.sel(**adjunct_values)
-            data.append({**adjunct_values, **{
-                'benchmark': benchmark, 'model': model,
-                'score': current_score.sel(aggregation='center').values.tolist(),
-                'error': current_score.sel(aggregation='error').values.tolist()}})
+            center, error = get_score_center_err(current_score)
+            data.append({**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
     data = pd.DataFrame(data)
     data.to_csv(store_file, index=False)
     return data
@@ -271,25 +262,48 @@ def align_both(data1, data2, on):
     return data1, data2
 
 
-def untrained_vs_trained(benchmark='Pereira2018-encoding'):
-    os.environ['RESULTCACHING_CACHEDONLY'] = '1'
-    trained_scores, untrained_scores, run_models = [], [], []
-    for model in models:
-        try:
-            trained_score = score(benchmark=benchmark, model=model)
-            untrained_score = score(benchmark=benchmark, model=f"{model}-untrained")
-            trained_scores.append(trained_score)
-            untrained_scores.append(untrained_score)
-            run_models.append(model)
-        except NotCachedError:
-            continue
-    fig, ax = _plot_scores1_2(untrained_scores, trained_scores, score_annotations=run_models,
+def untrained_vs_trained(benchmark='Pereira2018-encoding', best_layers=True):
+    all_models = [[model, f"{model}-untrained"] for model in models]
+    all_models = [model for model_tuple in all_models for model in model_tuple]
+    scores = collect_scores(benchmark=benchmark, models=all_models)
+    scores = average_adjacent(scores)  # average experiments & atlases
+    scores = scores.dropna()  # embedding layers in xlnets and t5s have nan scores
+    if best_layers:
+        scores = choose_best_scores(scores)
+    # separate into trained / untrained
+    untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
+    scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
+    # align
+    scores_untrained['model_identifier'] = [model.rstrip('-untrained') for model in scores_untrained['model'].values]
+    if best_layers:  # layer is already argmax'ed over, might not be same across untrained/trained
+        identifiers_trained = scores_trained['model'].values
+        identifiers_untrained = scores_untrained['model_identifier'].values
+    else:
+        identifiers_trained = list(zip(scores_trained['model'].values, scores_trained['layer'].values))
+        identifiers_untrained = list(zip(scores_untrained['model_identifier'].values, scores_untrained['layer'].values))
+    overlap = set(identifiers_trained).intersection(set(identifiers_untrained))
+    scores_trained = scores_trained[[identifier in overlap for identifier in identifiers_trained]]
+    scores_untrained = scores_untrained[[identifier in overlap for identifier in identifiers_untrained]]
+    scores_trained = scores_trained.sort_values(['model', 'layer'])
+    scores_untrained = scores_untrained.sort_values(['model_identifier', 'layer'])
+    if not best_layers:
+        assert (scores_trained['layer'].values == scores_untrained['layer'].values).all()
+    # plot
+    colors = [model_colors[model] for model in scores_trained['model']]
+    colors = [to_rgba(named_color) for named_color in colors]
+    fig, ax = _plot_scores1_2(scores_untrained, scores_trained, alpha=0.4 if best_layers else None, ecolor=colors,
                               xlabel="untrained", ylabel="trained")
     lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1])]
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
     _savefig(fig, savename=f"untrained_trained-{benchmark}")
+
+
+def choose_best_scores(scores):
+    adjunct_columns = list(set(scores.columns) - {'score', 'error', 'layer'})
+    scores = scores.loc[scores.groupby(adjunct_columns)['score'].idxmax()]  # max layer
+    return scores
 
 
 def num_features_vs_score(benchmark='Pereira2018-encoding', models=models, per_layer=False):
@@ -312,6 +326,25 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', models=models, per_l
             scores.append(model_score)
     fig, ax = _plot_scores1_2(num_features, scores, color=colors, xlabel="number of features", ylabel=benchmark)
     _savefig(fig, savename=f"num_features-{benchmark}")
+
+
+def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer')):
+    data = data.groupby(keep_columns).mean()  # mean across non-keep columns
+    return data.reset_index()
+
+
+def get_score_center_err(s, combine_layers=True):
+    s = aggregate(s, combine_layers=combine_layers)
+    if hasattr(s, 'aggregation'):
+        return s.sel(aggregation='center').values.tolist(), s.sel(aggregation='error').values.tolist()
+    if hasattr(s, 'measure'):
+        # s = s.sel(measure='test_perplexity') if len(s['measure'].values.shape) > 0 else s
+        s = s.sel(measure='test_loss') if len(s['measure'].values.shape) > 0 else s
+        s = s.values.tolist()
+        return s, np.nan
+    if isinstance(s, (int, float)):
+        return s, np.nan
+    raise ValueError(f"Unknown score structure: {s}")
 
 
 def _savefig(fig, savename):
