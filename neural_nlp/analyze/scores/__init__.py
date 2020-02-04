@@ -1,5 +1,5 @@
 import os
-from decimal import Decimal
+from functools import reduce
 
 import fire
 import itertools
@@ -176,20 +176,29 @@ def collect_scores(benchmark, models):
         data = pd.read_csv(store_file)
         data = data[data['model'].isin(models)]
         return data
-    data = []
-    for model in tqdm(models, desc='model scores'):
-        os.environ['RESULTCACHING_CACHEDONLY'] = '1'
-        try:
-            model_scores = score(benchmark=benchmark, model=model)
-        except NotCachedError:
-            continue
-        adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
-        for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
-            adjunct_values = dict(zip(adjunct_columns, adjunct_values))
-            current_score = model_scores.sel(**adjunct_values)
-            center, error = get_score_center_err(current_score)
-            data.append({**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
-    data = pd.DataFrame(data)
+    if benchmark == 'overall':
+        data = [collect_scores(benchmark=b, models=models) for b in
+                ['Pereira2018-encoding', 'Fedorenko2016-encoding', 'stories_froi_bold4s-encoding']]
+        data = reduce(lambda left, right: pd.concat([left, right]), data)
+        data = average_adjacent(data)
+        data = data.groupby(['model', 'layer']).mean().reset_index()  # mean across benchmarks per model-layer
+        data['benchmark'] = 'overall'
+    else:
+        data = []
+        for model in tqdm(models, desc='model scores'):
+            os.environ['RESULTCACHING_CACHEDONLY'] = '1'
+            try:
+                model_scores = score(benchmark=benchmark, model=model)
+            except NotCachedError:
+                continue
+            adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
+            for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
+                adjunct_values = dict(zip(adjunct_columns, adjunct_values))
+                current_score = model_scores.sel(**adjunct_values)
+                center, error = get_score_center_err(current_score)
+                data.append(
+                    {**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
+        data = pd.DataFrame(data)
     data.to_csv(store_file, index=False)
     return data
 
