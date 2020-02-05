@@ -297,15 +297,19 @@ class PereiraRDM(_PereiraBenchmark):
         super(PereiraRDM, self).__init__(metric=metric)
 
 
-class _Fedorenko2016: # For language responsive electrodes
-    def __init__(self, metric):
+class _Fedorenko2016:
+    def __init__(self, identifier, metric):
+        self.identifier = identifier
         assembly = load_Fedorenko2016(electrodes='language')
         self._target_assembly = assembly
         self._metric = metric
 
     @property
-    @store()
     def ceiling(self):
+        return self._ceiling(identifier=self.identifier)
+
+    @store()
+    def _ceiling(self, identifier):
         return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
                                        metric=self._metric)
 
@@ -385,7 +389,14 @@ def Fedorenko2016Encoding():
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
                                        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', 
                                                                    stratification_coord='sentence_id'))
-    return _Fedorenko2016(metric=metric)
+    return _Fedorenko2016(identifier='Fedorenko2016-encoding', metric=metric)
+
+
+def Fedorenko2016AllEncoding():
+    benchmark = Fedorenko2016Encoding()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='all')
+    benchmark.identifier = 'Fedorenko2016all-encoding'
+    return benchmark
 
   
 def Fedorenko2016EncodingAll():
@@ -461,4 +472,5 @@ benchmark_pool = {
     'Pereira2018-rdm': PereiraRDM,
     'Fedorenko2016-encoding': Fedorenko2016Encoding,
     'Fedorenko2016-encoding-all': Fedorenko2016EncodingAll,
+    'Fedorenko2016all-encoding': Fedorenko2016AllEncoding,
 }
