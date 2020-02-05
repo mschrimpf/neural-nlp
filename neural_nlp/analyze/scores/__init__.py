@@ -16,10 +16,10 @@ from pathlib import Path
 from scipy.stats import pearsonr
 from tqdm import tqdm
 
-from neural_nlp import score, model_layers
+from neural_nlp import score, model_layers, benchmark_pool
 from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
     _score_model as score_architecture_model
-from neural_nlp.benchmarks.neural import ceiling_normalize, aggregate
+from neural_nlp.benchmarks.neural import aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
 from result_caching import NotCachedError
@@ -113,7 +113,7 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', fli
     if normalize:
         ax.set_xlim([-.05, 1.05])
         ax.set_ylim([-.05, 1.05])
-    _savefig(fig, savename=savename)
+    savefig(fig, savename=savename)
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None,
@@ -144,8 +144,8 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
     return fig, ax
 
 
-def significance_stars(p):
-    return '*' * max([i for i in range(5) if p <= 0.5 / (10 ** i)])
+def significance_stars(p, max_stars=5):
+    return '*' * max([i for i in range(max_stars + 1) if p <= 0.5 / (10 ** i)])
 
 
 def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-lm',
@@ -156,7 +156,7 @@ def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-
     zoo_name = Path(zoo_dir).name
     fig, ax = _bars(architectures, scores, ylabel=f"MT model scores on {benchmark}")
     ax.set_ylim([ax.get_ylim()[0], 0.3])
-    _savefig(fig, savename=f"{zoo_name}-{benchmark}")
+    savefig(fig, savename=f"{zoo_name}-{benchmark}")
 
 
 def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
@@ -167,7 +167,7 @@ def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
     fig, ax = _bars(['MT: WMT\'17', 'LM: 1B'], [mt_score, lm_score], fig_kwargs=dict(figsize=(5, 5)))
     ax.set_ylim([ax.get_ylim()[0], 0.3])
     ax.set_title('LSTM trained on Machine Translation/Language Modeling')
-    _savefig(fig, 'lstm_mt_lm')
+    savefig(fig, 'lstm_mt_lm')
 
 
 def collect_scores(benchmark, models):
@@ -264,7 +264,7 @@ def fmri_brain_network_correlations():
                    length=0)  # hide tick marks, but not text https://stackoverflow.com/a/29988431/2225200
     # save
     fig.tight_layout()
-    _savefig(fig, 'brain_network_correlations')
+    savefig(fig, 'brain_network_correlations')
 
 
 def align_both(data1, data2, on):
@@ -322,7 +322,7 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
-    _savefig(fig, savename=f"untrained_trained-{benchmark}")
+    savefig(fig, savename=f"untrained_trained-{benchmark}")
 
 
 def choose_best_scores(scores):
@@ -363,7 +363,7 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in scores['model'].values]
     fig, ax = _plot_scores1_2(num_features, scores, color=colors, xlabel="number of features", ylabel=benchmark)
-    _savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
+    savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
 def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer')):
@@ -385,7 +385,16 @@ def get_score_center_err(s, combine_layers=True):
     raise ValueError(f"Unknown score structure: {s}")
 
 
-def _savefig(fig, savename):
+def ceiling_normalize(scores):
+    scores['score_unceiled'] = scores['score']
+    benchmark_ceilings = {benchmark: benchmark_pool[benchmark]().ceiling.sel(aggregation='center')
+                          for benchmark in set(scores['benchmark'].values)}
+    scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
+    scores['score'] = scores['score'] / scores['ceiling']
+    return scores
+
+
+def savefig(fig, savename):
     fig.tight_layout()
     savepath = Path(__file__).parent / f"{savename}.png"
     logger.info(f"Saving to {savepath}")
