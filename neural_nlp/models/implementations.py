@@ -490,6 +490,7 @@ class KeyedVectorModel(BrainModel):
         self._logger = logging.getLogger(self.__class__.__name__)
         from gensim.models.keyedvectors import KeyedVectors
         self._model = KeyedVectors.load_word2vec_format(weights_file, binary=binary)
+        self._vocab = self._model.vocab
         self._index2word_set = set(self._model.index2word)
         if random_embeddings:
             self._logger.debug(f"Replacing embeddings with random N(0, {random_std})")
@@ -527,13 +528,13 @@ class KeyedVectorModel(BrainModel):
 
     def tokenize(self, text, vocab_size=None):
         vocab_size = vocab_size or self.vocab_size
-        tokens = [self._model.vocab[word].index for word in text.split() if word in self._model.vocab
-                  and self._model.vocab[word].index < vocab_size]  # only top-k vocab words
+        tokens = [self._vocab[word].index for word in text.split() if word in self._vocab
+                  and self._vocab[word].index < vocab_size]  # only top-k vocab words
         return np.array(tokens)
 
     @property
     def vocab_size(self):
-        return len(self._model.vocab)
+        return len(self._vocab)
 
     @property
     def features_size(self):
