@@ -10,6 +10,7 @@ import itertools
 import logging
 import numpy as np
 import pandas as pd
+from brainio_collection.fetch import fullname
 from numpy.random.mtrand import RandomState
 from pathlib import Path
 from tqdm import tqdm
@@ -19,8 +20,6 @@ from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.models.wrapper.pytorch import PytorchWrapper
 
 _ressources_dir = (Path(__file__).parent / '..' / '..' / 'ressources' / 'models').resolve()
-
-_logger = logging.getLogger(__name__)
 
 
 class BrainModel:
@@ -326,6 +325,7 @@ class Transformer(PytorchWrapper):
 class _PytorchTransformerWrapper(BrainModel):
     def __init__(self, identifier, tokenizer, model, layers, sentence_average, tokenizer_special_tokens=()):
         super(_PytorchTransformerWrapper, self).__init__()
+        self._logger = logging.getLogger(fullname(self))
         self.default_layers = self.available_layers = layers
         self._tokenizer = tokenizer
         self._model = model
@@ -363,9 +363,11 @@ class _PytorchTransformerWrapper(BrainModel):
         return self._extractor.identifier
 
     def tokenize(self, text, vocab_size=None):
-        assert not (bool(vocab_size)) or vocab_size == self.vocab_size
         tokenized_text = self._tokenizer.convert_tokens_to_ids(self._tokenizer.tokenize(text))
         tokenized_text = np.array(tokenized_text)  # ~10 sec with numpy, ~40 hours without
+        if (bool(vocab_size)) and vocab_size > self.vocab_size:  # smaller vocab size requested, drop tokens
+            self._logger.debug(f"Shortening {self.vocab_size} to {vocab_size} (max in tokens: {max(tokenized_text)})")
+            tokenized_text = np.array([token for token in tokenized_text if token < vocab_size])
         return tokenized_text
 
     def tokens_to_inputs(self, tokens):
