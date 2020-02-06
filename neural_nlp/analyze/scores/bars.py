@@ -138,11 +138,13 @@ def benchmark_correlations(best_layer=True):
     for benchmark1, benchmark2 in itertools.combinations(benchmarks, 2):
         benchmark1_scores = collect_scores(benchmark=benchmark1, models=all_models)
         benchmark2_scores = collect_scores(benchmark=benchmark2, models=all_models)
-        benchmark1_scores, benchmark2_scores = benchmark1_scores.dropna(), benchmark2_scores.dropna()
+        benchmark1_scores = average_adjacent(benchmark1_scores).dropna()
+        benchmark2_scores = average_adjacent(benchmark2_scores).dropna()
         if best_layer:
             benchmark1_scores = choose_best_scores(benchmark1_scores)
             benchmark2_scores = choose_best_scores(benchmark2_scores)
-        benchmark1_scores, benchmark2_scores = align_scores(benchmark1_scores, benchmark2_scores)
+        benchmark1_scores, benchmark2_scores = align_scores(
+            benchmark1_scores, benchmark2_scores, identifier_set=('model',) if best_layer else ('model', 'layer'))
         benchmark1_scores, benchmark2_scores = benchmark1_scores['score'].values, benchmark2_scores['score'].values
         r, p = pearsonr(benchmark1_scores, benchmark2_scores)
         data.append(dict(benchmark1=benchmark1, benchmark2=benchmark2, r=r, p=p))
