@@ -395,7 +395,7 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
         scores.append(score)
 
     scores = Score.merge(*scores)
-    error = standard_error_of_the_mean(scores.sel(aggregation='center'), subject_column)
+    error = scores.sel(aggregation='center').std(subject_column)
     scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
     scores.loc[{'aggregation': 'error'}] = error
     return scores
