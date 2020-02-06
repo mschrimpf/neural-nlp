@@ -13,25 +13,20 @@ from scipy.stats import pearsonr
 from neural_nlp import benchmark_pool
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, ceiling_normalize, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars
+    align_scores, savefig, significance_stars, overall_benchmarks
 from neural_nlp.analyze.scores.layers import shaded_errorbar
-from neural_nlp.benchmarks.neural import ceiling_normalize_score_error
+
+_logger = logging.getLogger(__name__)
 
 
-def retrieve_scores(benchmark, normalize=False):
+def retrieve_scores(benchmark):
     scores = collect_scores(benchmark, all_models)
     scores = average_adjacent(scores)  # average each model+layer's score per experiment and atlas
     scores = choose_best_scores(scores)
-
-    if normalize:
-        benchmark = benchmark_pool[benchmark]()
-        ceiling = benchmark.ceiling.sel(aggregation='center').values
-
-        def apply(row):
-            row['score'], row['error'] = ceiling_normalize_score_error(row['score'], row['error'], ceiling=ceiling)
-            return row
-
-        scores = scores.apply(apply, axis=1)
+    nan = scores[scores.isna().any(1)]
+    if len(nan) > 0:
+        _logger.warning(f"Dropping nan rows: {nan}")
+        scores = scores.dropna()
     return scores
 
 
@@ -75,12 +70,12 @@ def ecog_best(benchmark='Fedorenko2016-encoding'):
     whole_best(benchmark=benchmark, title='ECoG')
 
 
+def overall():
+    whole_best(benchmark='overall', title='overall')
+
+
 def wikitext_best(benchmark='wikitext-2'):
     whole_best(benchmark=benchmark, title='wikitext-2', ylabel='NLL / Perplexity', ylim=50)
-
-
-def overall():
-    whole_best(benchmark='overall', title='overall', ylim=.175)
 
 
 def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
@@ -90,8 +85,8 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
     fig, ax = pyplot.subplots(figsize=(5, 4))
     ax.set_title(title, **(title_kwargs or {}))
     _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=9)), **kwargs)
-    ceiling = benchmark_pool[benchmark]().ceiling
-    ceiling_y, ceiling_err = 1, ceiling.sel(aggregation='error').values  # we already normalized so ceiling == 1
+    ceiling_err = get_ceiling_error(benchmark)
+    ceiling_y = 1  # we already normalized so ceiling == 1
     xlim = ax.get_xlim()
     shaded_errorbar(x=[-50, +50], y=[ceiling_y, ceiling_y], error=ceiling_err, ax=ax,
                     alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
@@ -99,6 +94,15 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
     ax.set_xticks([])
     ax.set_xticklabels([])
     savefig(fig, f'bars-{benchmark}')
+
+
+def get_ceiling_error(benchmark):
+    if benchmark != 'overall':
+        ceiling = benchmark_pool[benchmark]().ceiling
+        return ceiling.sel(aggregation='error').values
+    else:
+        ceilings = [benchmark_pool[part]().ceiling for part in overall_benchmarks]
+        return np.mean([ceiling.sel(aggregation='error').values for ceiling in ceilings])
 
 
 def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predictivity (r / c)", text_kwargs=None):
@@ -115,7 +119,6 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predic
             ax.text(x=xpos + .8 * width / 2, y=.01, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
     ax.set_ylabel(ylabel, fontdict=dict(fontsize=10))
-    ax.set_ylim([-.05, ylim or ax.get_ylim()[1]])
     if ylim is not None and ylim <= 1:
         ax.set_yticks(np.arange(0, ylim, .1))
         ax.set_yticklabels([

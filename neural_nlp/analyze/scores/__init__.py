@@ -90,6 +90,7 @@ model_colors = {
 models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
+overall_benchmarks = ('Pereira2018-encoding', 'Fedorenko2016-encoding', 'stories_froi_bold4s-encoding')
 
 
 def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False, normalize=True):
@@ -387,8 +388,13 @@ def get_score_center_err(s, combine_layers=True):
 
 def ceiling_normalize(scores):
     scores['score_unceiled'] = scores['score']
-    benchmark_ceilings = {benchmark: benchmark_pool[benchmark]().ceiling.sel(aggregation='center')
-                          for benchmark in set(scores['benchmark'].values)}
+    benchmark_ceilings = {}
+    for benchmark in set(scores['benchmark'].values):
+        if benchmark == 'overall':
+            ceilings = [benchmark_pool[part]().ceiling.sel(aggregation='center') for part in overall_benchmarks]
+            benchmark_ceilings[benchmark] = np.mean(ceilings)
+        else:
+            benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center')
     scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
     scores['score'] = scores['score'] / scores['ceiling']
     return scores
