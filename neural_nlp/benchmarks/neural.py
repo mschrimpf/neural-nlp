@@ -4,7 +4,7 @@ import itertools
 import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
@@ -398,6 +398,23 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
     error = standard_error_of_the_mean(scores.sel(aggregation='center'), subject_column)
     scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
     scores.loc[{'aggregation': 'error'}] = error
+    return scores
+
+
+@store(identifier_ignore=['assembly', 'metric', 'subject_column'])
+def extrapolation_ceiling(identifier, assembly, metric, subject_column='subject'):
+    subjects = set(assembly[subject_column].values)
+    scores = []
+    for num_subjects in trange(2, len(subjects) + 1, desc='num subjects'):
+        for sub_subjects in itertools.combinations(subjects, num_subjects):
+            sub_assembly = assembly[{'neuroid': [subject in sub_subjects for subject in
+                                                 assembly[subject_column].values]}]
+            score = holdout_subject_ceiling(assembly=sub_assembly, metric=metric, subject_column=subject_column)
+            score = score.expand_dims('num_subjects').expand_dims('sub_subjects')
+            score['num_subjects'] = [num_subjects]
+            score['sub_subjects'] = [str(sub_subjects)]
+            scores.append(score)
+    scores = Score.merge(*scores)
     return scores
 
 
