@@ -116,6 +116,7 @@ def layer_training_delta(models=None):
 
 def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, **kwargs):
     shaded_kwargs = shaded_kwargs or {}
+    shaded_kwargs = {**dict(linewidth=0.0), **shaded_kwargs}
     ax = ax or pyplot.gca()
     line = ax.plot(x, y, **kwargs)
     ax.fill_between(x, y - error, y + error, **shaded_kwargs)

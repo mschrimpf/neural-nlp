@@ -92,14 +92,16 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
     _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=9)), **kwargs)
     ceiling = benchmark_pool[benchmark]().ceiling
     ceiling_y, ceiling_err = 1, ceiling.sel(aggregation='error').values  # we already normalized so ceiling == 1
-    shaded_errorbar(x=ax.get_xlim(), y=[ceiling_y, ceiling_y], error=ceiling_err, ax=ax,
+    xlim = ax.get_xlim()
+    shaded_errorbar(x=[-50, +50], y=[ceiling_y, ceiling_y], error=ceiling_err, ax=ax,
                     alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
+    ax.set_xlim(xlim)
     ax.set_xticks([])
     ax.set_xticklabels([])
     savefig(fig, f'bars-{benchmark}')
 
 
-def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Predictivity (Pearson r)", text_kwargs=None):
+def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predictivity (r / c)", text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
     offset = len(models) / 2
