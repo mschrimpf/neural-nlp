@@ -761,9 +761,13 @@ class _T5Wrapper:
         return self._model(encoder_input_ids=tokens_tensor, decoder_input_ids=tokens_tensor)
 
     def __getattr__(self, item):  # forward attribute retrieval
-        if item == '_model':
+        if item in ['_model', 'to']:
             return super(_T5Wrapper, self).__getattr__(item)
         return getattr(self._model, item)
+
+    def to(self, *args, **kwargs):
+        self._model = self._model.to(*args, **kwargs)
+        return self
 
 
 for identifier, num_layers in [
