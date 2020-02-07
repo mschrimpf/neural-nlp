@@ -90,7 +90,7 @@ model_colors = {
 models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
-overall_benchmarks = ('Pereira2018-encoding', 'Fedorenko2016-encoding', 'stories_froi_bold4s-encoding')
+overall_benchmarks = ('Pereira2018', 'Fedorenko2016', 'stories_froi_bold4s')
 
 
 def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', best_layer=True, normalize=True):
@@ -180,13 +180,13 @@ def collect_scores(benchmark, models):
         data = pd.read_csv(store_file)
         data = data[data['model'].isin(models)]
         return data
-    if benchmark == 'overall':
-        data = [collect_scores(benchmark=b, models=models) for b in
-                ['Pereira2018-encoding', 'Fedorenko2016-encoding', 'stories_froi_bold4s-encoding']]
+    if benchmark.startswith('overall'):
+        metric = benchmark[len('overall-'):]
+        data = [collect_scores(benchmark=f"{b}-{metric}", models=models) for b in overall_benchmarks]
         data = reduce(lambda left, right: pd.concat([left, right]), data)
         data = average_adjacent(data)
         data = data.groupby(['model', 'layer']).mean().reset_index()  # mean across benchmarks per model-layer
-        data['benchmark'] = 'overall'
+        data['benchmark'] = benchmark
     else:
         data = []
         for model in tqdm(models, desc='model scores'):
@@ -194,6 +194,7 @@ def collect_scores(benchmark, models):
             try:
                 model_scores = score(benchmark=benchmark, model=model)
             except NotCachedError:
+                logger.warning(f"No score cached for model {model} on benchmark {benchmark}")
                 continue
             adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
             for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
@@ -394,8 +395,10 @@ def ceiling_normalize(scores):
     scores['score_unceiled'] = scores['score']
     benchmark_ceilings = {}
     for benchmark in set(scores['benchmark'].values):
-        if benchmark == 'overall':
-            ceilings = [benchmark_pool[part]().ceiling.sel(aggregation='center') for part in overall_benchmarks]
+        if benchmark.startswith('overall'):
+            metric = benchmark[len('overall-'):]
+            ceilings = [benchmark_pool[f"{part}-{metric}"]().ceiling.sel(aggregation='center')
+                        for part in overall_benchmarks]
             benchmark_ceilings[benchmark] = np.mean(ceilings)
         else:
             benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center') \
