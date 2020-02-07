@@ -63,13 +63,15 @@ def average_subregions(assembly):
     return assembly
 
 
-def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
+def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
     benchmark_impl = benchmark_pool[benchmark]()
     ceilings = extrapolation_ceiling(identifier=benchmark, assembly=benchmark_impl._target_assembly,
                                      subject_column='subject' if benchmark.startswith('Pereira') else 'subject_UID',
                                      metric=benchmark_impl._metric)
     # work from raw values to treat sub_subjects and split all as splits and then median/std on those
     ceilings = ceilings.raw
+    if hasattr(ceilings, 'experiment'):  # Pereira
+        ceilings = ceilings.mean('experiment')  # neuroid(median) will take care of atlas, but not ideal
     if hasattr(ceilings, 'neuroid'):  # not true for RDMs
         ceilings = ceilings.median('neuroid')
     ceilings = ceilings.stack(subsplit=['sub_subjects', 'split'])  # introduces lots of nans due to non-overlap subjects
@@ -102,5 +104,8 @@ def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
 
 
 if __name__ == '__main__':
+    import warnings
+
+    warnings.simplefilter(action='ignore')  # , category=FutureWarning)
     seaborn.set(context='talk')
     fire.Fire()
