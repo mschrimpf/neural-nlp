@@ -204,6 +204,10 @@ def collect_scores(benchmark, models):
                 data.append(
                     {**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
         data = pd.DataFrame(data)
+        if benchmark.startswith('wikitext'):
+            data['layer'] = -1
+            data['error'] = 0  # nans will otherwise be dropped later on
+            data = data[data['measure'] == 'test_loss']
     data.to_csv(store_file, index=False)
     return data
 
@@ -400,11 +404,15 @@ def ceiling_normalize(scores):
             ceilings = [benchmark_pool[f"{part}-{metric}"]().ceiling.sel(aggregation='center')
                         for part in overall_benchmarks]
             benchmark_ceilings[benchmark] = np.mean(ceilings)
+        elif benchmark.startswith('wikitext'):
+            benchmark_ceilings[benchmark] = np.nan
         else:
             benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center') \
                 .values.tolist()
     scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
-    scores['score'] = scores['score'] / scores['ceiling']
+    if not benchmark.startswith('wikitext'):
+        scores['score'] = scores['score'] / scores['ceiling']
+        scores['error'] = scores['error'] / scores['ceiling']
     return scores
 
 
