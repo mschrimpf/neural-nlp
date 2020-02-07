@@ -212,28 +212,43 @@ def collect_scores(benchmark, models):
     return data
 
 
-def fmri_experiment_correlations():
+def fmri_experiment_correlations(choose_best=False):
+    experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(choose_best)
+    # plot
+    colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
+    colors = [to_rgba(named_color) for named_color in colors]
+    fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if choose_best else .2,
+                              score_annotations=experiment2_scores['model'].values if choose_best else None,
+                              xlabel='Exp. 2 (384sentences)', ylabel='Exp. 3 (243sentences)')
+    scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
+    ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='black')
+    savefig(fig, savename='fmri-correlations')
+
+
+def collect_Pereira_experiment_scores(best_layer=False):
+    # TODO: gpt2-xl missing
     scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    scores = scores.dropna()
+    scores = average_adjacent(scores, keep_columns=['benchmark', 'model', 'layer', 'experiment'])
+    if best_layer:
+        scores = choose_best_scores(scores)  # TODO: do we want to choose the same layer for both?
+    # separate into experiments & align
     experiment2_scores = scores[scores['experiment'] == '384sentences']
     experiment3_scores = scores[scores['experiment'] == '243sentences']
-    r, p = pearsonr(experiment2_scores['score'], experiment3_scores['score'])
-    fig, ax = pyplot.subplots(figsize=(6, 6))
-    ax.errorbar(x=experiment2_scores['score'], xerr=experiment2_scores['error'],
-                y=experiment3_scores['score'], yerr=experiment3_scores['error'],
-                fmt=' ', alpha=.5)
-    ax.plot(ax.get_xlim(), ax.get_ylim(), linestyle='dashed', color='black')
-    ax.set_xlabel('scores on 384sentences')
-    ax.set_ylabel('scores on 243sentences')
-    ax.text(0.8, 0.1, "r: " + ((f"{r:.2f}" + significance_stars(p)) if p < .05 else "n.s."),
-            ha='center', va='center', transform=ax.transAxes)
-    ticks = np.arange(0, 0.4, 0.05)
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ticklabels = ["0" if tick == 0 else f"{tick:.1f}"[1:] if Decimal(f"{tick:.2f}") % Decimal(".1") == 0 else ""
-                  for tick in ticks]
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    _savefig(fig, 'fmri-correlations')
+    experiment2_scores, experiment3_scores = align_scores(experiment2_scores, experiment3_scores)
+    return experiment2_scores, experiment3_scores
+
+
+def align_scores(scores1, scores2, identifier_set=('model', 'layer')):
+    identifiers1 = list(zip(*[scores1[identifier_key].values for identifier_key in identifier_set]))
+    identifiers2 = list(zip(*[scores2[identifier_key].values for identifier_key in identifier_set]))
+    overlap = list(set(identifiers1).intersection(set(identifiers2)))
+    non_overlap = list(set(identifiers1).difference(set(identifiers2)))
+    if len(non_overlap) > 0:
+        logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")
+    scores1 = scores1.iloc[[identifiers1.index(identifier) for identifier in overlap]]
+    scores2 = scores2.iloc[[identifiers2.index(identifier) for identifier in overlap]]
+    return scores1, scores2
 
 
 def fmri_brain_network_correlations():
@@ -304,19 +319,9 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
     scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
     # align
-    scores_untrained['model_identifier'] = [model.replace('-untrained', '')
-                                            for model in scores_untrained['model'].values]
-    if layer_mode == 'best':  # layer is already argmax'ed over, might not be same across untrained/trained
-        identifiers_trained = scores_trained['model'].values
-        identifiers_untrained = scores_untrained['model_identifier'].values
-    else:
-        identifiers_trained = list(zip(scores_trained['model'].values, scores_trained['layer'].values))
-        identifiers_untrained = list(zip(scores_untrained['model_identifier'].values, scores_untrained['layer'].values))
-    overlap = set(identifiers_trained).intersection(set(identifiers_untrained))
-    scores_trained = scores_trained[[identifier in overlap for identifier in identifiers_trained]]
-    scores_untrained = scores_untrained[[identifier in overlap for identifier in identifiers_untrained]]
-    scores_trained = scores_trained.sort_values(['model', 'layer'])
-    scores_untrained = scores_untrained.sort_values(['model_identifier', 'layer'])
+    scores_untrained['model'] = [model.replace('-untrained', '') for model in scores_untrained['model'].values]
+    scores_trained, scores_untrained = align_scores(
+        scores_trained, scores_untrained, identifier_set=('model',) if layer_mode == 'best' else ('model', 'layer'))
     if layer_mode != 'best':
         assert (scores_trained['layer'].values == scores_untrained['layer'].values).all()
     # plot
