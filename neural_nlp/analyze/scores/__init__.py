@@ -226,16 +226,16 @@ def fmri_experiment_correlations(choose_best=False):
 
 
 def collect_Pereira_experiment_scores(best_layer=False):
-    # TODO: gpt2-xl missing
     scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
-    scores = scores.dropna()
     scores = average_adjacent(scores, keep_columns=['benchmark', 'model', 'layer', 'experiment'])
+    scores = scores.dropna()
     if best_layer:
         scores = choose_best_scores(scores)  # TODO: do we want to choose the same layer for both?
     # separate into experiments & align
     experiment2_scores = scores[scores['experiment'] == '384sentences']
     experiment3_scores = scores[scores['experiment'] == '243sentences']
-    experiment2_scores, experiment3_scores = align_scores(experiment2_scores, experiment3_scores)
+    experiment2_scores, experiment3_scores = align_scores(
+        experiment2_scores, experiment3_scores, identifier_set=('model',) if best_layer else ('model', 'layer'))
     return experiment2_scores, experiment3_scores
 
 
