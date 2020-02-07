@@ -13,7 +13,7 @@ from matplotlib import pyplot
 from matplotlib.colors import to_rgba
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 from tqdm import tqdm
 
 from neural_nlp import score, model_layers, benchmark_pool
@@ -112,8 +112,8 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', bes
     savefig(fig, savename=savename)
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None,
-                    xlabel=None, ylabel=None, flip_x=False, color=None, **kwargs):
+def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=True,
+                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
@@ -124,16 +124,24 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
         for annotation, _x, _y in zip(score_annotations, x, y):
             ax.text(_x, _y, annotation, fontdict=dict(fontsize=10), zorder=100)
 
-    if flip_x:
-        ax.set_xlim(list(reversed(ax.get_xlim())))
+    if loss_xaxis:
+        ax.set_xlim(list(reversed(ax.get_xlim())))  # flip x
 
-    correlation, p = pearsonr(x, y)
-    b, m = polyfit(x, y, 1)
-    ax.plot(ax.get_xlim(), b + m * np.array(ax.get_xlim()))
-    ax.text(0.9, 0.1, ha='center', va='center', transform=ax.transAxes,
-            s=(f"r={(correlation * (-1 if flip_x else 1)):.2f}" +
-               significance_stars(p))
-            if p < 0.05 else f"n.s., p={p:.2f}")
+        @matplotlib.ticker.FuncFormatter
+        def loss_formatter(loss, pos):
+            return f"{loss}\n{np.exp(loss):.0f}"
+
+        ax.xaxis.set_major_formatter(loss_formatter)
+
+    for i, (name, correlate) in enumerate([('pearson', pearsonr), ('spearman', spearmanr)]):
+        r, p = correlate(x, y)
+        if i == 0 and plot_correlation:
+            b, m = polyfit(x, y, 1)
+            correlation_x = [min(x), max(x)]
+            ax.plot(correlation_x, b + m * np.array(correlation_x))
+        ax.text(0.9, 0.2 - i * 0.1, ha='center', va='center', transform=ax.transAxes,
+                s=f"{name} " + ((f"r={(r * (-1 if loss_xaxis else 1)):.2f}" + significance_stars(p))
+                                if p < 0.05 else f"n.s., p={p:.2f}"))
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
