@@ -1,5 +1,4 @@
 import os
-from functools import reduce
 
 import fire
 import itertools
@@ -9,6 +8,7 @@ import numpy as np
 import pandas as pd
 import seaborn
 import sys
+from functools import reduce
 from matplotlib import pyplot
 from matplotlib.colors import to_rgba
 from numpy.polynomial.polynomial import polyfit
@@ -93,27 +93,22 @@ fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 overall_benchmarks = ('Pereira2018-encoding', 'Fedorenko2016-encoding', 'stories_froi_bold4s-encoding')
 
 
-def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False, normalize=True):
-    scores1, scores2, run_models = [], [], []
-    os.environ['RESULTCACHING_CACHEDONLY'] = '1'
-    for model in models:
-        try:
-            score1 = score(benchmark=benchmark1, model=model)
-            score2 = score(benchmark=benchmark2, model=model)
-            if normalize:
-                score1 = ceiling_normalize(score1, benchmark_identifier=benchmark1)
-                score2 = ceiling_normalize(score2, benchmark_identifier=benchmark2)
-            scores1.append(score1)
-            scores2.append(score2)
-            run_models.append(model)
-        except NotCachedError:
-            continue
-    savename = f"{benchmark1}__{benchmark2}"
-    fig, ax = _plot_scores1_2(scores1, scores2, score_annotations=run_models,
-                              xlabel=benchmark1, ylabel=benchmark2, flip_x=flip_x)
+def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', best_layer=True, normalize=True):
+    all_models = models
+    scores1 = collect_scores(benchmark=benchmark1, models=all_models)
+    scores2 = collect_scores(benchmark=benchmark2, models=all_models)
+    scores1, scores2 = average_adjacent(scores1).dropna(), average_adjacent(scores2).dropna()
+    if best_layer:
+        scores1, scores2 = choose_best_scores(scores1), choose_best_scores(scores2)
     if normalize:
-        ax.set_xlim([-.05, 1.05])
-        ax.set_ylim([-.05, 1.05])
+        scores1, scores2 = ceiling_normalize(scores1), ceiling_normalize(scores2)
+    scores1, scores2 = align_scores(scores1, scores2, identifier_set=['model'] if best_layer else ['model', 'layer'])
+    colors = [model_colors[model.replace('-untrained', '')] for model in scores1['model'].values]
+    colors = [to_rgba(named_color) for named_color in colors]
+    savename = f"{benchmark1}__{benchmark2}"
+    fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
+                              score_annotations=scores1['model'].values if best_layer else None,
+                              xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'))
     savefig(fig, savename=savename)
 
 
@@ -291,6 +286,7 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     elif layer_mode == 'pos':
         scores['layer_position'] = [model_layers[model].index(layer) / len(model_layers[model])
                                     for model, layer in zip(scores['model'].values, scores['layer'].values)]
+    scores = ceiling_normalize(scores)
     # separate into trained / untrained
     untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
     scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
@@ -367,8 +363,8 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
-def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer')):
-    data = data.groupby(keep_columns).mean()  # mean across non-keep columns
+def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=False):
+    data = data.groupby(list(keep_columns)).agg(lambda g: g.mean(skipna=skipna))  # mean across non-keep columns
     return data.reset_index()
 
 
@@ -394,7 +390,8 @@ def ceiling_normalize(scores):
             ceilings = [benchmark_pool[part]().ceiling.sel(aggregation='center') for part in overall_benchmarks]
             benchmark_ceilings[benchmark] = np.mean(ceilings)
         else:
-            benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center')
+            benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center') \
+                .values.tolist()
     scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
     scores['score'] = scores['score'] / scores['ceiling']
     return scores
