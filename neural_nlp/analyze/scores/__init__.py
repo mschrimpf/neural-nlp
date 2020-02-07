@@ -381,6 +381,22 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
+def Pereira_language_vs_other(best_layer=True):
+    scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    scores_lang, scores_other = scores[scores['atlas'] == 'language'], scores[scores['atlas'] == 'auditory']
+    scores_lang, scores_other = average_adjacent(scores_lang), average_adjacent(scores_other)
+    scores_lang, scores_other = scores_lang.dropna(), scores_other.dropna()
+    if best_layer:
+        scores_lang, scores_other = choose_best_scores(scores_lang), choose_best_scores(scores_other)
+    scores_lang, scores_other = align_scores(scores_lang, scores_other)
+    # plot
+    colors = [model_colors[model] for model in scores_lang['model'].values]
+    fig, ax = _plot_scores1_2(scores_lang, scores_other, color=colors,
+                              xlabel='language scores', ylabel='auditory scores')
+    ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
+    savefig(fig, savename=f"Pereira2018-language_other{'' if best_layer else '-layerwise'}")
+
+
 def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=False):
     data = data.groupby(list(keep_columns)).agg(lambda g: g.mean(skipna=skipna))  # mean across non-keep columns
     return data.reset_index()
