@@ -268,10 +268,12 @@ def word_mean(layer_activations):
     return layer_activations
 
 
-class Transformer(PytorchWrapper):
+class Transformer(PytorchWrapper, BrainModel):
     """
     https://arxiv.org/pdf/1706.03762.pdf
     """
+
+    identifier = 'transformer'
 
     def __init__(self):
         weights = os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')
@@ -284,13 +286,16 @@ class Transformer(PytorchWrapper):
         opt = parser.parse_args(['-batch_size', '1'])
         translator = build_translator(opt, report_score=True)
 
-        model_container = self.TransformerContainer(translator, opt)
-        super(Transformer, self).__init__(model=model_container, identifier='transformer',
+        self._model_container = self.TransformerContainer(translator, opt)
+        super(Transformer, self).__init__(model=self._model_container, identifier=self.identifier,
                                           reset=lambda: None)  # transformer is feed-forward
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        return _call_conditional_average(*args, extractor=self._extractor,
-                                         average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
+        if self.mode == BrainModel.Modes.recording:
+            return _call_conditional_average(*args, extractor=self._extractor,
+                                             average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
+        elif self.mode == BrainModel.Modes.tokens_to_features:
+            return self._model_container(*args, **kwargs)
 
     class TransformerContainer:
         def __init__(self, translator, opt):
@@ -343,6 +348,19 @@ class Transformer(PytorchWrapper):
     Note however that the attended input has not yet been added back to the feed forward output with
     `feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
     """
+
+    def tokenize(self, text, vocab_size=None):
+        assert not vocab_size or vocab_size == self.vocab_size
+        tokens = [word for word in text.split() if word in self._model_container.translator.fields["src"].vocab.freqs]
+        return np.array(tokens)
+
+    @property
+    def features_size(self):
+        return 4608
+
+    @property
+    def vocab_size(self):
+        return len(self._model_container.translator.fields["src"].vocab)
 
 
 class _PytorchTransformerWrapper(BrainModel):
@@ -641,7 +659,7 @@ model_pool = {
     Word2Vec.identifier + '-untrained': LazyLoad(lambda: Word2Vec(random_embeddings=True)),
     Glove.identifier: LazyLoad(Glove),
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
-    'transformer': LazyLoad(Transformer),
+    Transformer.identifier: LazyLoad(Transformer),
     TopicETM.identifier: LazyLoad(TopicETM),
 }
 model_layers = {
@@ -650,7 +668,7 @@ model_layers = {
     LM1B.identifier: LM1B.default_layers,
     Word2Vec.identifier: Word2Vec.default_layers,
     Glove.identifier: Glove.default_layers,
-    'transformer': Transformer.default_layers,
+    Transformer.identifier: Transformer.default_layers,
     TopicETM.identifier: TopicETM.default_layers,
 }
 # untrained layers are the same as trained ones
