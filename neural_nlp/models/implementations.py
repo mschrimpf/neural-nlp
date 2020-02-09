@@ -78,8 +78,13 @@ class SentenceLength(BrainModel):
         return {self.available_layers[0]: np.array(sentence_lengths)}
 
 
-class TopicETM:
+class TopicETM(BrainModel):
     """https://arxiv.org/abs/1907.04907"""
+
+    identifier = 'topicETM'
+
+    available_layers = ['projection']
+    default_layers = available_layers
 
     def __init__(self):
         super().__init__()
@@ -94,17 +99,23 @@ class TopicETM:
             i = self.vocab.index(elm)  # get index of word
             wordEmb_TopicSpace[elm] = self.weights[:, i]
         self.wordEmb_TopicSpace = wordEmb_TopicSpace
-        self._extractor = ActivationsExtractorHelper(identifier='topicETM', get_activations=self._get_activations,
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
         self._logger = logging.getLogger(self.__class__.__name__)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        return _call_conditional_average(*args, extractor=self._extractor,
-                                         average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
+        if self.mode == BrainModel.Modes.recording:
+            return _call_conditional_average(*args, extractor=self._extractor,
+                                             average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
+        elif self.mode == BrainModel.Modes.tokens_to_features:
+            return self._encode_sentence(*args, **kwargs)
 
     def _encode_sentence(self, sentence):
-        words = sentence.split()
+        if isinstance(sentence, str):
+            words = sentence.split()
+        else:
+            words = sentence
         feature_vectors = []
         for word in words:
             if word in self.vocab:
@@ -120,8 +131,20 @@ class TopicETM:
         encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
         return {'projection': encoding}
 
-    available_layers = ['projection']
-    default_layers = available_layers
+    def tokenize(self, text, vocab_size=None):
+        vocab_size = vocab_size or self.vocab_size
+        vocab_index = {word: index for index, word in enumerate(self.vocab)}
+        tokens = [word for word in text.split() if word in self.vocab
+                  and vocab_index[word] < vocab_size]  # only top-k vocab words
+        return np.array(tokens)
+
+    @property
+    def features_size(self):
+        return 100
+
+    @property
+    def vocab_size(self):
+        return len(self.vocab)
 
 
 class SkipThoughts:
@@ -619,7 +642,7 @@ model_pool = {
     Glove.identifier: LazyLoad(Glove),
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     'transformer': LazyLoad(Transformer),
-    'topicETM': LazyLoad(TopicETM),
+    TopicETM.identifier: LazyLoad(TopicETM),
 }
 model_layers = {
     SentenceLength.identifier: SentenceLength.default_layers,
@@ -628,7 +651,7 @@ model_layers = {
     Word2Vec.identifier: Word2Vec.default_layers,
     Glove.identifier: Glove.default_layers,
     'transformer': Transformer.default_layers,
-    'topicETM': TopicETM.default_layers,
+    TopicETM.identifier: TopicETM.default_layers,
 }
 # untrained layers are the same as trained ones
 model_layers = {**model_layers, **{f"{identifier}-untrained": layers for identifier, layers in model_layers.items()}}
