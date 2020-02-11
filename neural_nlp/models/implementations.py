@@ -93,6 +93,8 @@ class TopicETM(BrainModel):
         self.weights = np.load(weights_file)
         with open(vocab_file, 'rb') as f:
             self.vocab = pickle.load(f)
+        self.vocab_index = {word: index for index, word in enumerate(self.vocab)}
+        self.index_vocab = {index: word for index, word in enumerate(self.vocab)}
 
         wordEmb_TopicSpace = {}
         for elm in tqdm(self.vocab, desc='vocab'):
@@ -115,7 +117,7 @@ class TopicETM(BrainModel):
         if isinstance(sentence, str):
             words = sentence.split()
         else:
-            words = sentence
+            words = [self.index_vocab[index] for index in sentence]
         feature_vectors = []
         for word in words:
             if word in self.vocab:
@@ -133,9 +135,9 @@ class TopicETM(BrainModel):
 
     def tokenize(self, text, vocab_size=None):
         vocab_size = vocab_size or self.vocab_size
-        vocab_index = {word: index for index, word in enumerate(self.vocab)}
-        tokens = [word for word in text.split() if word in self.vocab
-                  and vocab_index[word] < vocab_size]  # only top-k vocab words
+        words = text.split()
+        tokens = [self.vocab_index[word] for word in tqdm(words, desc='tokenize') if word in self.vocab
+                  and self.vocab_index[word] < vocab_size]  # only top-k vocab words
         return np.array(tokens)
 
     @property
@@ -287,6 +289,9 @@ class Transformer(PytorchWrapper, BrainModel):
         translator = build_translator(opt, report_score=True)
 
         self._model_container = self.TransformerContainer(translator, opt)
+        self.vocab_index = {word: index for index, word in
+                            enumerate(self._model_container.translator.fields["src"].vocab.freqs)}
+        self.index_vocab = {index: word for word, index in self.vocab_index.items()}
         super(Transformer, self).__init__(model=self._model_container, identifier=self.identifier,
                                           reset=lambda: None)  # transformer is feed-forward
 
@@ -351,7 +356,8 @@ class Transformer(PytorchWrapper, BrainModel):
 
     def tokenize(self, text, vocab_size=None):
         assert not vocab_size or vocab_size == self.vocab_size
-        tokens = [word for word in text.split() if word in self._model_container.translator.fields["src"].vocab.freqs]
+        words = text.split()
+        tokens = [self.vocab_index[word] for word in tqdm(words, desc='tokenize') if word in self.vocab_index]
         return np.array(tokens)
 
     @property
