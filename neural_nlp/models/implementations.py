@@ -124,6 +124,62 @@ class TopicETM:
     available_layers = ['projection']
     default_layers = available_layers
 
+class ETM_rho:
+    """https://arxiv.org/abs/1907.04907
+    Implements a jointly learned embedding space for words and topics.
+    """ 
+
+    def __init__(self, weights_file=os.path.join(_ressources_dir, 'topicETM', 'rho-50-wikitext_df1.pt'),
+                 vocab_file=os.path.join(_ressources_dir, 'topicETM', 'vocab_wikitext_df_1.pkl'),
+                 num_topics=300):
+        import torch
+
+        super().__init__()
+
+        self.num_topics = num_topics
+
+        self.weights = torch.load(weights_file, map_location='cpu')
+        self.weights = self.weights.detach().numpy()
+        self.weights = self.weights.transpose()
+
+        with open(vocab_file, 'rb') as f:
+            self.vocab = pickle.load(f)
+
+        wordEmb_TopicSpace = {}
+        for elm in tqdm(self.vocab, desc='vocab'):
+            i = self.vocab.index(elm)  # get index of word
+            wordEmb_TopicSpace[elm] = self.weights[:, i]
+        self.wordEmb_TopicSpace = wordEmb_TopicSpace
+        self._extractor = ActivationsExtractorHelper(identifier='ETM_rho', get_activations=self._get_activations,
+                                                     reset=lambda: None)
+        self._extractor.insert_attrs(self)
+        self._extractor.register_activations_hook(word_mean)
+        self._logger = logging.getLogger(self.__class__.__name__)
+
+    def __call__(self, *args, **kwargs):  
+        return self._extractor(*args, **kwargs)
+
+    def _encode_sentence(self, sentence):
+        vocab_matches = []
+        words = sentence.split()
+        feature_vectors = []
+        for word in words:
+            if word in self.vocab:
+                feature_vectors.append(self.wordEmb_TopicSpace[word])
+            else:
+                self._logger.warning(f"Word {word} not present in model")
+                feature_vectors.append(np.zeros((self.num_topics,)))
+                vocab_matches.append(word)
+        return feature_vectors
+
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, ['projection'])
+        encoding = [np.array(self._encode_sentence(sentence)) for sentence in sentences]
+        encoding = [np.expand_dims(sentence_encodings, 0) for sentence_encodings in encoding]
+        return {'projection': encoding}
+
+    available_layers = ['projection']
+    default_layers = available_layers
 
 class SkipThoughts:
     """
@@ -617,6 +673,7 @@ model_pool = {
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     'transformer': LazyLoad(Transformer),
     'topicETM': LazyLoad(TopicETM),
+    'ETM_rho': LazyLoad(ETM_rho),
 }
 model_layers = {
     SentenceLength.identifier: SentenceLength.default_layers,
@@ -626,6 +683,7 @@ model_layers = {
     Glove.identifier: Glove.default_layers,
     'transformer': Transformer.default_layers,
     'topicETM': TopicETM.default_layers,
+    'ETM_rho': ETM_rho.default_layers,
 }
 # untrained layers are the same as trained ones
 model_layers = {**model_layers, **{f"{identifier}-untrained": layers for identifier, layers in model_layers.items()}}
