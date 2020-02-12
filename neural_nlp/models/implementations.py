@@ -395,6 +395,12 @@ class _PytorchTransformerWrapper(BrainModel):
     def _tokens_to_features(self, token_ids):
         import torch
         max_num_words = 512 - 2  # -2 for [cls], [sep]
+        if os.getenv('ALLATONCE', '0') == '1':
+            token_tensor = torch.tensor([token_ids])
+            token_tensor = token_tensor.to('cuda' if torch.cuda.is_available() else 'cpu')
+            features = self._model(token_tensor)[0][0]
+            features = PytorchWrapper._tensor_to_numpy(features)
+            return features
         features = []
         for token_index in range(len(token_ids)):
             context_start = max(0, token_index - max_num_words + 1)
