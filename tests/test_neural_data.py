@@ -3,6 +3,7 @@ import pytest
 from pytest import approx
 
 from neural_nlp import neural_data
+from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank, \
     load_Pereira2018_Blank_languageresiduals
 
@@ -101,3 +102,17 @@ def _single_element(array):
     unique_values = np.unique(array)
     assert len(unique_values) == 1
     return unique_values[0]
+
+
+def test_Fedorenko2016_language():
+    assembly = load_Fedorenko2016(electrodes='language')
+    assert len(assembly['presentation']) == 416
+    assert len(assembly['neuroid']) == 98
+    assert len(np.unique(assembly['subject_UID'])) == 5
+
+
+def test_Fedorenko2016_all():
+    assembly = load_Fedorenko2016(electrodes='all')
+    assert len(assembly['presentation']) == 416
+    assert len(assembly['neuroid']) == 180
+    assert len(np.unique(assembly['subject_UID'])) == 5
