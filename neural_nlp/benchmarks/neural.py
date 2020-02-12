@@ -192,8 +192,8 @@ class StoriesfROIRDM(StoriesfROIEncoding):
 
 
 class _PereiraBenchmark(Benchmark):
-    def __init__(self, metric):
-        self._target_assembly = LazyLoad(self._load_assembly)
+    def __init__(self, metric, data_version='base'):
+        self._target_assembly = LazyLoad(lambda: self._load_assembly(version=data_version))
         self._single_metric = metric
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
@@ -203,8 +203,8 @@ class _PereiraBenchmark(Benchmark):
         score = cross_scores.mean(['experiment', 'atlas'])
         return score
 
-    def _load_assembly(self):
-        assembly = load_Pereira2018_Blank()
+    def _load_assembly(self, version='base'):
+        assembly = load_Pereira2018_Blank(version=version)
         assembly = assembly.sel(atlas_selection_lower=90)
         assembly = assembly[{'neuroid': [filter_strategy in [np.nan, 'HminusE', 'FIXminusH']
                                          for filter_strategy in assembly['filter_strategy'].values]}]
@@ -268,18 +268,33 @@ def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=Tr
 
 
 class PereiraEncoding(_PereiraBenchmark):
-    def __init__(self):
+    def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord=None))
-        super(PereiraEncoding, self).__init__(metric=metric)
+        super(PereiraEncoding, self).__init__(metric=metric, **kwargs)
 
 
 class PereiraLanguageResidualsEncoding(PereiraEncoding):
     def __init__(self):
         super(PereiraLanguageResidualsEncoding, self).__init__()
         self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
+
+
+class PereiraICAEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraICAEncoding, self).__init__(data_version='ICA')
+
+
+class PereiraDemeanEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraDemeanEncoding, self).__init__(data_version='Demean')
+
+
+class PereiraNovisaudEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraNovisaudEncoding, self).__init__(data_version='NoVisAud')
 
 
 class PereiraEncodingMin(_PereiraBenchmark):
@@ -460,6 +475,9 @@ benchmark_pool = {
     'stories_froi_bold4s-rdm': StoriesfROIRDM,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
+    'Pereira2018ICA-encoding': PereiraICAEncoding,
+    'Pereira2018Demean-encoding': PereiraDemeanEncoding,
+    'Pereira2018Novisaud-encoding': PereiraNovisaudEncoding,
     'Pereira2018_languageresiduals-encoding': PereiraLanguageResidualsEncoding,
     'Pereira2018-encoding-min': PereiraEncodingMin,
     'Pereira2018-decoding': PereiraDecoding,

@@ -2,6 +2,7 @@ import pytest
 from pytest import approx
 
 from neural_nlp.benchmarks.neural import PereiraEncoding, PereiraRDM, \
+    PereiraICAEncoding, PereiraDemeanEncoding, PereiraNovisaudEncoding, \
     Fedorenko2016Encoding, Fedorenko2016AllEncoding, Fedorenko2016RDM, \
     StoriesVoxelEncoding, StoriesfROIEncoding, StoriesfROIRDM
 
@@ -11,6 +12,9 @@ PereiraLanguageResidualsEncoding,
 
 @pytest.mark.parametrize('benchmark_ctr, expected', [
     (PereiraEncoding, 0.292317),
+    (PereiraICAEncoding, 0.29382),
+    (PereiraDemeanEncoding, 0.306911),
+    (PereiraNovisaudEncoding, 0.312894),
     (PereiraRDM, 0.048785),
     (Fedorenko2016Encoding, .098452),
     (Fedorenko2016AllEncoding, .178473),
