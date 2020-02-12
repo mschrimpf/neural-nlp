@@ -194,8 +194,14 @@ class StoriesfROIRDM(StoriesfROIEncoding):
 class _PereiraBenchmark(Benchmark):
     def __init__(self, metric):
         self._target_assembly = LazyLoad(self._load_assembly)
-        self._metric = metric
+        self._single_metric = metric
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
+
+    def _metric(self, source_assembly, target_assembly):
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: self._apply_cross(source_assembly, cross_assembly))
+        score = cross_scores.mean(['experiment', 'atlas'])
+        return score
 
     def _load_assembly(self):
         assembly = load_Pereira2018_Blank()
@@ -220,7 +226,7 @@ class _PereiraBenchmark(Benchmark):
         assert not np.isnan(cross_assembly).any()
         source_assembly = source_assembly[{'presentation': [stimulus_id in cross_assembly['stimulus_id'].values
                                                             for stimulus_id in source_assembly['stimulus_id'].values]}]
-        return self._metric(source_assembly, cross_assembly)
+        return self._single_metric(source_assembly, cross_assembly)
 
     @property
     @store()
