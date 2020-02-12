@@ -225,13 +225,14 @@ def evaluate(model, eval_dataset, eval_batch_size=4, device='cuda', prefix=""):
 
 
 class _PerformanceBenchmark:
-    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=32):
+    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=64, **kwargs):
         self.identifier = identifier
         self.train_data_file = train_data_file
         self.val_data_file = val_data_file
         self.eval_data_file = eval_data_file
         self.tied = tied
         self.block_size = block_size
+        self.kwargs = kwargs
 
     def __call__(self, model: BrainModel):
         model.mode = BrainModel.Modes.tokens_to_features
@@ -255,7 +256,7 @@ class _PerformanceBenchmark:
                                   vocab_size=vocab_size, file_path=self.eval_data_file)
 
         # Train
-        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device)
+        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device, **self.kwargs)
 
         # Evaluation
         test_result = evaluate(model=lm_head, eval_dataset=test_tokens, device=device)
