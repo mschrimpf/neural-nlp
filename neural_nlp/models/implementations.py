@@ -508,8 +508,10 @@ class _PytorchTransformerWrapper(BrainModel):
                 if tokenized_sentences[token_index] in additional_tokens:
                     continue  # ignore altogether
                 # combine e.g. "'hunts', '##man'" or "'jennie', '##s'"
-                tokens = [word.lstrip('##').lstrip('▁')  # tokens are sometimes padded by prefixes, clear those again
-                          for word in tokenized_sentences[previous_indices + [token_index]]]
+                tokens = [
+                    # tokens are sometimes padded by prefixes, clear those here
+                    word.lstrip('##').lstrip('▁').rstrip('@@')
+                    for word in tokenized_sentences[previous_indices + [token_index]]]
                 token_word = ''.join(tokens).lower()
                 for special_token in self.tokenizer_special_tokens:
                     token_word = token_word.replace(special_token, '')
