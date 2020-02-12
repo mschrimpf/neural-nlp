@@ -547,13 +547,13 @@ class KeyedVectorModel(BrainModel):
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
 
-    def __call__(self, sentences, *args, average_sentence=True, **kwargs):
+    def __call__(self, stimuli, *args, average_sentence=True, **kwargs):
         if self.mode == BrainModel.Modes.recording:
-            return _call_conditional_average(sentences, *args, extractor=self._extractor,
+            return _call_conditional_average(stimuli, *args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
         elif self.mode == BrainModel.Modes.tokens_to_features:
-            sentences = " ".join(self._model.index2word[index] for index in sentences)
-            return self._encode_sentence(sentences, *args, **kwargs)
+            stimuli = " ".join(self._model.index2word[index] for index in stimuli)
+            return self._encode_sentence(stimuli, *args, **kwargs)
 
     def _get_activations(self, sentences, layers):
         np.testing.assert_array_equal(layers, ['projection'])
