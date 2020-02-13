@@ -228,7 +228,7 @@ class GLUEBenchmark:
 
     def __call__(self, model: BrainModel):
         model.mode = BrainModel.Modes.sentence_features
-        data_dir = self.task_name.replace('mnli-mm', 'mnli').upper()
+        data_dir = self.task_name.upper().replace('COLA', 'CoLA')
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..',
                                                 'ressources', 'ml', 'glue', data_dir))
         set_seed(42)
@@ -277,4 +277,4 @@ class GLUEBenchmark:
 
 
 benchmark_pool = {f'glue-{task}': lambda _task=task: GLUEBenchmark(_task) for task in
-                  ['cola', 'mnli', 'mnli-mm', 'mrpc', 'sst-2', 'sts-b', 'qqp', 'qnli', 'rte', 'wnli']}
+                  ['cola', 'mnli', 'mrpc', 'sst-2', 'sts-b', 'qqp', 'qnli', 'rte', 'wnli']}
