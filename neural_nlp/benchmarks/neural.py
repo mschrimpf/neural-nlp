@@ -4,7 +4,7 @@ import itertools
 import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
@@ -117,12 +117,12 @@ class StoriesVoxelEncoding:
     def __init__(self, bold_shift=4):
         assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
         self._target_assembly = assembly
-        self._regression = linear_regression(xarray_kwargs=dict(
+        regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='neuroid_id'))
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(
+        correlation = pearsonr_correlation(xarray_kwargs=dict(
             correlation_coord='stimulus_id', neuroid_coord='neuroid_id'))
         self._metric = CrossRegressedCorrelation(
-            regression=self._regression, correlation=self._correlation,
+            regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
 
     def _load_assembly(self, bold_shift):
@@ -147,12 +147,12 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
     def __init__(self, *args, **kwargs):
         super(StoriesfROIEncoding, self).__init__(*args, **kwargs)
 
-        self._regression = linear_regression(xarray_kwargs=dict(
+        regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
-        self._correlation = pearsonr_correlation(xarray_kwargs=dict(
+        correlation = pearsonr_correlation(xarray_kwargs=dict(
             correlation_coord='stimulus_id', neuroid_coord='fROI_area'))
         self._metric = CrossRegressedCorrelation(
-            regression=self._regression, correlation=self._correlation,
+            regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
 
     def _load_assembly(self, bold_shift):
@@ -182,14 +182,29 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
         return averaged_assembly
 
 
+class StoriesfROIRDM(StoriesfROIEncoding):
+    def __init__(self, *args, **kwargs):
+        super(StoriesfROIRDM, self).__init__(*args, **kwargs)
+        self._metric = RDMCrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
+                                        kfold=True, test_size=None))
+
+
 class _PereiraBenchmark(Benchmark):
-    def __init__(self, metric):
-        self._target_assembly = LazyLoad(self._load_assembly)
-        self._metric = metric
+    def __init__(self, metric, data_version='base'):
+        self._target_assembly = LazyLoad(lambda: self._load_assembly(version=data_version))
+        self._single_metric = metric
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
-    def _load_assembly(self):
-        assembly = load_Pereira2018_Blank()
+    def _metric(self, source_assembly, target_assembly):
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: self._apply_cross(source_assembly, cross_assembly))
+        score = cross_scores.mean(['experiment', 'atlas'])
+        return score
+
+    def _load_assembly(self, version='base'):
+        assembly = load_Pereira2018_Blank(version=version)
         assembly = assembly.sel(atlas_selection_lower=90)
         assembly = assembly[{'neuroid': [filter_strategy in [np.nan, 'HminusE', 'FIXminusH']
                                          for filter_strategy in assembly['filter_strategy'].values]}]
@@ -211,7 +226,7 @@ class _PereiraBenchmark(Benchmark):
         assert not np.isnan(cross_assembly).any()
         source_assembly = source_assembly[{'presentation': [stimulus_id in cross_assembly['stimulus_id'].values
                                                             for stimulus_id in source_assembly['stimulus_id'].values]}]
-        return self._metric(source_assembly, cross_assembly)
+        return self._single_metric(source_assembly, cross_assembly)
 
     @property
     @store()
@@ -253,18 +268,33 @@ def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=Tr
 
 
 class PereiraEncoding(_PereiraBenchmark):
-    def __init__(self):
+    def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord=None))
-        super(PereiraEncoding, self).__init__(metric=metric)
+        super(PereiraEncoding, self).__init__(metric=metric, **kwargs)
 
 
 class PereiraLanguageResidualsEncoding(PereiraEncoding):
     def __init__(self):
         super(PereiraLanguageResidualsEncoding, self).__init__()
         self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
+
+
+class PereiraICAEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraICAEncoding, self).__init__(data_version='ICA')
+
+
+class PereiraDemeanEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraDemeanEncoding, self).__init__(data_version='Demean')
+
+
+class PereiraNovisaudEncoding(PereiraEncoding):
+    def __init__(self):
+        super(PereiraNovisaudEncoding, self).__init__(data_version='NoVisAud')
 
 
 class PereiraEncodingMin(_PereiraBenchmark):
@@ -293,14 +323,15 @@ class PereiraRDM(_PereiraBenchmark):
     def __init__(self):
         metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5, kfold=True))
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
+                                        kfold=True, test_size=None))
         super(PereiraRDM, self).__init__(metric=metric)
 
 
 class _Fedorenko2016:
     def __init__(self, identifier, metric):
         self.identifier = identifier
-        assembly = load_Fedorenko2016(electrodes='language')
+        assembly = load_Fedorenko2016(electrodes='language', version=1)
         self._target_assembly = assembly
         self._metric = metric
 
@@ -342,71 +373,49 @@ class _Fedorenko2016:
 
         return model_activations
 
-class _Fedorenko2016All: # For language responsive electrodes
-    def __init__(self, metric):
-        assembly = load_Fedorenko2016(electrodes='all')
-        self._target_assembly = assembly
-        self._metric = metric
-
-    @property
-    @store()
-    def ceiling(self):
-        return holdout_subject_ceiling(assembly=self._target_assembly, subject_column='subject_UID',
-                                       metric=self._metric)
-
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-        stimulus_set = self._target_assembly.attrs['stimulus_set']
-        model_activations = self._read_words(candidate, stimulus_set)
-        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        return self._metric(model_activations, self._target_assembly)
-
-    @classmethod
-    def _read_words(cls, candidate, stimulus_set):
-        activations = []
-        for i, sentence_id in enumerate(ordered_set(stimulus_set['sentence_id'].values)):
-            sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence_id]
-            sentence_stimuli = StimulusSet({'sentence': ' '.join(sentence_stimuli['word']),
-                                            'sentence_id': list(set(sentence_stimuli['sentence_id']))})
-            sentence_stimuli.name = f"{stimulus_set.name}-{sentence_id}"
-            sentence_activations = candidate(stimuli=sentence_stimuli, average_sentence=False)
-            sentence_activations['stimulus_id'] = ('presentation', 8 * i + np.arange(0, 8))
-            sentence_activations['sentence_id'] = ('presentation', [sentence_id] * 8)
-            activations.append(sentence_activations)
-        model_activations = merge_data_arrays(activations)
-        # merging does not maintain stimulus order. the following orders again
-        idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
-               itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
-        assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
-        model_activations = model_activations[{'presentation': idx}]
-
-        return model_activations
-
-
-def Fedorenko2016Encoding():
-    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
-    correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-    metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
-                                       crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', 
-                                                                   stratification_coord='sentence_id'))
-    return _Fedorenko2016(identifier='Fedorenko2016-encoding', metric=metric)
-
-
-def Fedorenko2016AllEncoding():
-    benchmark = Fedorenko2016Encoding()
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='all')
-    benchmark.identifier = 'Fedorenko2016all-encoding'
-    return benchmark
-
-  
-def Fedorenko2016EncodingAll():
+# The original Fedorenko2016 benchmark (version 1) 
+def Fedorenko2016EncodingV1():
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
                                        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
                                                                    stratification_coord='sentence_id'))
+    return _Fedorenko2016(identifier='Fedorenko2016-encoding-v1', metric=metric)
 
-    return _Fedorenko2016All(metric=metric)
+# The new Fedorenko2016 benchmark (version 2)
+def Fedorenko2016EncodingV2():
+    benchmark = Fedorenko2016EncodingV1()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='language', version=2) 
+    benchmark.identifier = 'Fedorenko2016-encoding-v2'
+    return benchmark
+
+def Fedorenko2016AllEncodingV1():
+    benchmark = Fedorenko2016EncodingV1()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=1)
+    benchmark.identifier = 'Fedorenko2016all-encoding-v1'
+    return benchmark
+
+def Fedorenko2016AllEncodingV2():
+    benchmark = Fedorenko2016EncodingV1()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=2)
+    benchmark.identifier = 'Fedorenko2016all-encoding-v2'
+    return benchmark
+
+def Fedorenko2016NonLangEncoding():
+    benchmark = Fedorenko2016EncodingV1()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='non-language', version=2) # Version 2 - do not z-score in ecog_greta.py
+    benchmark.identifier = 'Fedorenko2016nonlang-encoding'
+    return benchmark
+
+
+def Fedorenko2016RDM():
+    metric = RDMCrossValidated(
+        comparison_coord='stimulus_id',
+        crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
+                                    # doesn't work because train_size is deemed too small.
+                                    # even though `train` is not needed, CrossValidation still splits it that way
+                                    splits=5, kfold=True, test_size=None))
+    return _Fedorenko2016(identifier='Fedorenko2016-rdm', metric=metric)
 
 
 def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
@@ -425,9 +434,26 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
         scores.append(score)
 
     scores = Score.merge(*scores)
-    error = standard_error_of_the_mean(scores.sel(aggregation='center'), subject_column)
+    error = scores.sel(aggregation='center').std(subject_column)
     scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
     scores.loc[{'aggregation': 'error'}] = error
+    return scores
+
+
+@store(identifier_ignore=['assembly', 'metric', 'subject_column'])
+def extrapolation_ceiling(identifier, assembly, metric, subject_column='subject'):
+    subjects = set(assembly[subject_column].values)
+    scores = []
+    for num_subjects in trange(2, len(subjects) + 1, desc='num subjects'):
+        for sub_subjects in itertools.combinations(subjects, num_subjects):
+            sub_assembly = assembly[{'neuroid': [subject in sub_subjects for subject in
+                                                 assembly[subject_column].values]}]
+            score = holdout_subject_ceiling(assembly=sub_assembly, metric=metric, subject_column=subject_column)
+            score = score.expand_dims('num_subjects').expand_dims('sub_subjects')
+            score['num_subjects'] = [num_subjects]
+            score['sub_subjects'] = [str(sub_subjects)]
+            scores.append(score)
+    scores = Score.merge(*scores)
     return scores
 
 
@@ -464,13 +490,20 @@ def aggregate(score):
 benchmark_pool = {
     'stories_voxel_bold4s-encoding': StoriesVoxelEncoding,
     'stories_froi_bold4s-encoding': StoriesfROIEncoding,
+    'stories_froi_bold4s-rdm': StoriesfROIRDM,
     'rdm': StoriesRDMBenchmark,
     'Pereira2018-encoding': PereiraEncoding,
+    'Pereira2018ICA-encoding': PereiraICAEncoding,
+    'Pereira2018Demean-encoding': PereiraDemeanEncoding,
+    'Pereira2018Novisaud-encoding': PereiraNovisaudEncoding,
     'Pereira2018_languageresiduals-encoding': PereiraLanguageResidualsEncoding,
     'Pereira2018-encoding-min': PereiraEncodingMin,
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
-    'Fedorenko2016-encoding': Fedorenko2016Encoding,
-    'Fedorenko2016-encoding-all': Fedorenko2016EncodingAll,
-    'Fedorenko2016all-encoding': Fedorenko2016AllEncoding,
+    'Fedorenko2016-rdm': Fedorenko2016RDM,
+    'Fedorenko2016-encoding-v1': Fedorenko2016EncodingV1,
+    'Fedorenko2016-encoding-v2': Fedorenko2016EncodingV2,
+    'Fedorenko2016all-encoding-v1': Fedorenko2016AllEncodingV1,
+    'Fedorenko2016all-encoding-v2': Fedorenko2016AllEncodingV2,
+    'Fedorenko2016nonlang-encoding': Fedorenko2016NonLangEncoding,
 }

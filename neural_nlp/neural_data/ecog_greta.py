@@ -12,7 +12,7 @@ from neural_nlp.stimuli import StimulusSet
 _logger = logging.getLogger(__name__)
 
 # @store() Disable the storing, since it is a very small file
-def load_Fedorenko2016(electrodes):
+def load_Fedorenko2016(electrodes, version):
     # MANUAL DIR: To give access to other people running it from different directories
     ressources_dir = Path(__file__).parent.parent.parent / 'ressources'
     neural_data_dir = ressources_dir / 'neural_data' / 'ecog-Fedorenko2016/'
@@ -25,7 +25,6 @@ def load_Fedorenko2016(electrodes):
 
     # For language responsive electrodes:
     if electrodes == 'language':
-        filepath_neural = glob(os.path.join(neural_data_dir, '*ecog.mat'))
 
         # Create a subject ID list corresponding to language electrodes
         subject1 = np.repeat(1, 47)
@@ -34,11 +33,16 @@ def load_Fedorenko2016(electrodes):
         subject4 = np.repeat(4, 15)
         subject5 = np.repeat(5, 18)
 
-        print('Running Fedorenko2016 benchmark with language responsive electrodes')
+        if version == 1:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*ecog.mat'))
+        
+        if version == 2:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_lang.mat'))
+
+        print('Running Fedorenko2016 benchmark with language responsive electrodes, data version: ', version)
 
     # For non-noisy electrodes
     if electrodes == 'all':
-        filepath_neural = glob(os.path.join(neural_data_dir, '*all.mat'))
 
         # Create a subject ID list corresponding to non-noisy electrodes
         subject1 = np.repeat(1, 70)
@@ -46,12 +50,35 @@ def load_Fedorenko2016(electrodes):
         subject3 = np.repeat(3, 20)
         subject4 = np.repeat(4, 29)
         subject5 = np.repeat(5, 26)
+        
+        if version == 1:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*ecog_all.mat'))
+        
+        if version == 2:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_all.mat'))
 
-        print('Running Fedorenko2016 benchmark with non-noisy electrodes')
+        print('Running Fedorenko2016 benchmark with non-noisy electrodes, data version: ', version)
+        
+        # For non-noisy electrodes
+    if electrodes == 'non-language':
+        filepath_neural = glob(os.path.join(neural_data_dir, '*nonlang.mat'))
+
+        # Create a subject ID list corresponding to non-language electrodes
+        subject1 = np.repeat(1, 28)
+        subject2 = np.repeat(2, 31)
+        subject3 = np.repeat(3, 14)
+        subject4 = np.repeat(4, 19)
+        subject5 = np.repeat(5, 16)
+
+        print('Running Fedorenko2016 benchmark with non-language electrodes')
 
     ecog_mat = sio.loadmat(filepath_neural[0])
     ecog_mtrix = ecog_mat['ecog']
-    ecog_z = stats.zscore(ecog_mtrix, 1) 
+    
+    if version == 1: # Manually z-score the version 1 data
+        ecog_z = stats.zscore(ecog_mtrix, 1) 
+    if version == 2:
+        ecog_z = ecog_mtrix
     
     ecog_mtrix_T = np.transpose(ecog_z)
 
@@ -118,4 +145,4 @@ def load_Fedorenko2016(electrodes):
 
 
 if __name__ == '__main__':
-    data = load_Fedorenko2016(electrodes='all')
+    data = load_Fedorenko2016(electrodes='all', version=2)
