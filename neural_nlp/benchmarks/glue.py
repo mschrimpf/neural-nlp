@@ -76,9 +76,7 @@ def set_seed(seed):
 
 def train(train_dataset, features_model, decoder_head, run_evaluation,
           train_batch_size=8, gradient_accumulation_steps=1, num_train_epochs=3, weight_decay=0,
-          learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0, max_grad_norm=1.0, adjust_inputs=None,
-          device='cuda', logging_steps=500):
-    adjust_inputs = adjust_inputs or (lambda inputs, batch: inputs)
+          learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0, max_grad_norm=1.0, device='cuda', logging_steps=500):
     """ Train the model """
     tb_writer = SummaryWriter()
     train_sampler = RandomSampler(train_dataset)
@@ -125,8 +123,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
             decoder_head.train()
             batch = tuple(t.to(device) for t in batch)
             inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
-            inputs = adjust_inputs(inputs, batch)
-            first_token_tensor = features_model(**inputs)
+            first_token_tensor = features_model(**inputs, batch=batch)
             outputs = decoder_head(first_token_tensor, labels=batch[3])
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -167,9 +164,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
 
 
 def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
-             eval_batch_size=8, adjust_inputs=None,
-             device='cuda'):
-    adjust_inputs = adjust_inputs or (lambda inputs, batch: inputs)
+             eval_batch_size=8, device='cuda'):
     # Note that DistributedSampler samples randomly
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=eval_batch_size)
@@ -188,8 +183,7 @@ def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
 
         with torch.no_grad():
             inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
-            inputs = adjust_inputs(inputs, batch)
-            first_token_tensor = features_model(**inputs)
+            first_token_tensor = features_model(**inputs, batch=batch)
             labels = batch[3]
             outputs = decoder_head(first_token_tensor, labels=labels)
             tmp_eval_loss, logits = outputs[:2]
@@ -241,14 +235,6 @@ class GLUEBenchmark:
         max_seq_length = 128
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        adjust_inputs = None
-        if not model.identifier.startswith('distilbert'):
-            def adjust_inputs(inputs, batch):
-                inputs["token_type_ids"] = (
-                    batch[2] if not any(model.identifier.startswith(prefix) for prefix in ["bert", "xlnet", "albert"])
-                    else None)  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
-                return inputs
-
         # Prepare GLUE task
         if self.task_name not in processors:
             raise ValueError("Task not found: %s" % self.task_name)
@@ -271,7 +257,7 @@ class GLUEBenchmark:
                                                   output_mode=output_mode, max_seq_length=max_seq_length)
                 result = evaluate(features_model=model, decoder_head=decoder_head,
                                   eval_dataset=eval_dataset, task_name=eval_task, output_mode=output_mode,
-                                  adjust_inputs=adjust_inputs, device=device)
+                                  device=device)
                 results.update(result)
             return results
 
@@ -281,7 +267,7 @@ class GLUEBenchmark:
                                            output_mode=output_mode, max_seq_length=max_seq_length)
         global_step, tr_loss = train(features_model=model, decoder_head=decoder_head,
                                      train_dataset=train_dataset, run_evaluation=run_evaluation,
-                                     adjust_inputs=adjust_inputs, device=device)
+                                     device=device)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         # Evaluation
