@@ -23,7 +23,7 @@ _ressources_dir = (Path(__file__).parent / '..' / '..' / 'ressources' / 'models'
 
 
 class BrainModel:
-    Modes = Enum('Mode', 'recording tokens_to_features')
+    Modes = Enum('Mode', 'recording tokens_to_features sentence_features')
 
     def __init__(self):
         super(BrainModel, self).__init__()
@@ -53,6 +53,9 @@ class BrainModel:
 
     @property
     def vocab_size(self):
+        raise NotImplementedError()
+
+    def glue_dataset(self, task, examples, label_list, output_mode, max_seq_length):
         raise NotImplementedError()
 
 
@@ -389,6 +392,8 @@ class _PytorchTransformerWrapper(BrainModel):
                                              sentence_averaging=self._sentence_average, **kwargs)
         elif self.mode == BrainModel.Modes.tokens_to_features:
             return self._tokens_to_features(*args, **kwargs)
+        elif self.mode == BrainModel.Modes.sentence_features:
+            return self._sentence_features(*args, **kwargs)
         else:
             raise ValueError(f"Unknown mode {self.mode}")
 
@@ -411,6 +416,14 @@ class _PytorchTransformerWrapper(BrainModel):
             features.append(PytorchWrapper._tensor_to_numpy(context_features[:, -1, :]))
         return np.concatenate(features)
 
+    def _sentence_features(self, *args, **kwargs):
+        features_outputs = self._model(*args, **kwargs)
+        # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
+        sequence_output = features_outputs[0]
+        # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L454
+        first_token_tensor = sequence_output[:, 0]
+        return first_token_tensor
+
     @property
     def identifier(self):
         return self._extractor.identifier
@@ -425,6 +438,37 @@ class _PytorchTransformerWrapper(BrainModel):
 
     def tokens_to_inputs(self, tokens):
         return self._tokenizer.build_inputs_with_special_tokens(tokens)
+
+    def glue_dataset(self, task, examples, label_list, output_mode, max_seq_length):
+        import torch
+        from torch.utils.data import TensorDataset
+        from transformers import glue_convert_examples_to_features as convert_examples_to_features
+        if task in ["mnli", "mnli-mm"] and \
+                any(self.identifier.startswith(swap_model) for swap_model in ["roberta", "xlm-roberta"]):
+            # HACK(label indices are swapped in RoBERTa pretrained model)
+            label_list[1], label_list[2] = label_list[2], label_list[1]
+        features = convert_examples_to_features(
+            examples,
+            self._tokenizer,
+            label_list=label_list,
+            max_length=max_seq_length,
+            output_mode=output_mode,
+            pad_on_left=bool(self.identifier.startswith("xlnet")),  # pad on the left for xlnet
+            pad_token=self._tokenizer.convert_tokens_to_ids([self._tokenizer.pad_token])[0],
+            pad_token_segment_id=4 if self.identifier.startswith("xlnet") else 0,
+        )
+
+        # Convert to Tensors and build dataset
+        all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
+        all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
+        all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+        if output_mode == "classification":
+            all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+
+        dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+        return dataset
 
     @property
     def features_size(self):

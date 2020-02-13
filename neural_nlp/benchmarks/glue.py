@@ -126,7 +126,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
             batch = tuple(t.to(device) for t in batch)
             inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
             inputs = adjust_inputs(inputs, batch)
-            first_token_tensor = sentence_features_from_model(features_model, inputs)
+            first_token_tensor = features_model(**inputs)
             outputs = decoder_head(first_token_tensor, labels=batch[3])
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
@@ -166,15 +166,6 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
     return global_step, tr_loss / global_step
 
 
-def sentence_features_from_model(features_model, inputs):
-    features_outputs = features_model(**inputs)
-    # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
-    sequence_output = features_outputs[0]
-    # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L454
-    first_token_tensor = sequence_output[:, 0]
-    return first_token_tensor
-
-
 def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
              eval_batch_size=8, adjust_inputs=None,
              device='cuda'):
@@ -198,7 +189,7 @@ def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
         with torch.no_grad():
             inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
             inputs = adjust_inputs(inputs, batch)
-            first_token_tensor = sentence_features_from_model(features_model, inputs)
+            first_token_tensor = features_model(**inputs)
             labels = batch[3]
             outputs = decoder_head(first_token_tensor, labels=labels)
             tmp_eval_loss, logits = outputs[:2]
@@ -227,47 +218,14 @@ def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
     return result
 
 
-def load_and_cache_examples(task, model_identifier, tokenizer, data_dir, max_seq_length, evaluate=False):
+def get_examples(data_dir, task, evaluate=False):
     processor = processors[task]()
     output_mode = output_modes[task]
-    # Load data features from cache or dataset file
-    cached_features_file = os.path.join(
-        data_dir, f"cached_{'dev' if evaluate else 'train'}_{model_identifier}_{max_seq_length}_{task}")
-    if os.path.exists(cached_features_file):
-        logger.info("Loading features from cached file %s", cached_features_file)
-        features = torch.load(cached_features_file)
-    else:
-        logger.info("Creating features from dataset file at %s", data_dir)
-        label_list = processor.get_labels()
-        if task in ["mnli", "mnli-mm"] and \
-                any(model_identifier.startswith(swap_model) for swap_model in ["roberta", "xlm-roberta"]):
-            # HACK(label indices are swapped in RoBERTa pretrained model)
-            label_list[1], label_list[2] = label_list[2], label_list[1]
-        examples = processor.get_dev_examples(data_dir) if evaluate else processor.get_train_examples(data_dir)
-        features = convert_examples_to_features(
-            examples,
-            tokenizer,
-            label_list=label_list,
-            max_length=max_seq_length,
-            output_mode=output_mode,
-            pad_on_left=bool(model_identifier.startswith("xlnet")),  # pad on the left for xlnet
-            pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
-            pad_token_segment_id=4 if model_identifier.startswith("xlnet") else 0,
-        )
-        logger.info("Saving features into cached file %s", cached_features_file)
-        torch.save(features, cached_features_file)
-
-    # Convert to Tensors and build dataset
-    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
-    if output_mode == "classification":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
-    elif output_mode == "regression":
-        all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
-
-    dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
-    return dataset
+    # Load data features from dataset file
+    logger.info("Creating features from dataset file at %s", data_dir)
+    label_list = processor.get_labels()
+    examples = processor.get_dev_examples(data_dir) if evaluate else processor.get_train_examples(data_dir)
+    return examples, label_list, output_mode
 
 
 class GLUEBenchmark:
@@ -275,6 +233,7 @@ class GLUEBenchmark:
         self.task_name = task_name
 
     def __call__(self, model: BrainModel):
+        model.mode = BrainModel.Modes.sentence_features
         data_dir = self.task_name.replace('mnli-mm', 'mnli').upper()
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..',
                                                 'ressources', 'ml', 'glue', data_dir))
@@ -294,7 +253,6 @@ class GLUEBenchmark:
         if self.task_name not in processors:
             raise ValueError("Task not found: %s" % self.task_name)
         processor = processors[self.task_name]()
-        output_mode = output_modes[self.task_name]
         label_list = processor.get_labels()
         num_labels = len(label_list)
 
@@ -308,20 +266,20 @@ class GLUEBenchmark:
             results = {}
             # Loop to handle MNLI double evaluation (matched, mis-matched)
             for eval_task in eval_task_names:
-                eval_dataset = load_and_cache_examples(task=eval_task, data_dir=data_dir,
-                                                       max_seq_length=max_seq_length, evaluate=True,
-                                                       model_identifier=model.identifier, tokenizer=model._tokenizer)
-                result = evaluate(features_model=model._model, decoder_head=decoder_head,
+                examples, label_list, output_mode = get_examples(data_dir=data_dir, task=eval_task, evaluate=True)
+                eval_dataset = model.glue_dataset(task=eval_task, examples=examples, label_list=label_list,
+                                                  output_mode=output_mode, max_seq_length=max_seq_length)
+                result = evaluate(features_model=model, decoder_head=decoder_head,
                                   eval_dataset=eval_dataset, task_name=eval_task, output_mode=output_mode,
                                   adjust_inputs=adjust_inputs, device=device)
                 results.update(result)
             return results
 
         # Training
-        train_dataset = load_and_cache_examples(task=self.task_name, data_dir=data_dir,
-                                                max_seq_length=max_seq_length, evaluate=False,
-                                                model_identifier=model.identifier, tokenizer=model._tokenizer)
-        global_step, tr_loss = train(features_model=model._model, decoder_head=decoder_head,
+        examples, label_list, output_mode = get_examples(data_dir=data_dir, task=self.task_name, evaluate=False)
+        train_dataset = model.glue_dataset(task=self.task_name, examples=examples, label_list=label_list,
+                                           output_mode=output_mode, max_seq_length=max_seq_length)
+        global_step, tr_loss = train(features_model=model, decoder_head=decoder_head,
                                      train_dataset=train_dataset, run_evaluation=run_evaluation,
                                      adjust_inputs=adjust_inputs, device=device)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
