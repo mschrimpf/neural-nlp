@@ -417,11 +417,13 @@ class _PytorchTransformerWrapper(BrainModel):
         return np.concatenate(features)
 
     def _sentence_features(self, *args, batch, **kwargs):
+        import torch
         if not self.identifier.startswith('distilbert'):
             kwargs["token_type_ids"] = (
                 batch[2] if not any(self.identifier.startswith(prefix) for prefix in ["bert", "xlnet", "albert"])
                 else None)  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
-        features_outputs = self._model(*args, **kwargs)
+        with torch.no_grad():
+            features_outputs = self._model(*args, **kwargs)
         # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
         sequence_output = features_outputs[0]
         # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L454
