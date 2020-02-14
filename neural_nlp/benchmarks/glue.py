@@ -122,9 +122,8 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
         for step, batch in enumerate(epoch_iterator):
             decoder_head.train()
             batch = tuple(t.to(device) for t in batch)
-            inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
-            first_token_tensor = features_model(**inputs, batch=batch)
-            outputs = decoder_head(first_token_tensor, labels=batch[3])
+            features = features_model(batch=batch)
+            outputs = decoder_head(features, labels=batch[-1])
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -182,10 +181,9 @@ def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
         batch = tuple(t.to(device) for t in batch)
 
         with torch.no_grad():
-            inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
-            first_token_tensor = features_model(**inputs, batch=batch)
-            labels = batch[3]
-            outputs = decoder_head(first_token_tensor, labels=labels)
+            features = features_model(batch=batch)
+            labels = batch[-1]
+            outputs = decoder_head(features, labels=labels)
             tmp_eval_loss, logits = outputs[:2]
 
             eval_loss += tmp_eval_loss.mean().item()
