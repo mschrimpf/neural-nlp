@@ -76,7 +76,8 @@ def set_seed(seed):
 
 def train(train_dataset, features_model, decoder_head, run_evaluation,
           train_batch_size=8, gradient_accumulation_steps=1, num_train_epochs=3, weight_decay=0,
-          learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0, max_grad_norm=1.0, device='cuda', logging_steps=500):
+          learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0, max_grad_norm=1.0,
+          seed=42, device='cuda', logging_steps=500):
     """ Train the model """
     tb_writer = SummaryWriter()
     train_sampler = RandomSampler(train_dataset)
@@ -116,7 +117,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
     tr_loss, logging_loss = 0.0, 0.0
     decoder_head.zero_grad()
     train_iterator = trange(epochs_trained, int(num_train_epochs), desc="Epoch")
-    set_seed(42)  # Added here for reproductibility
+    set_seed(seed)  # Added here for reproductibility
     for _ in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
         for step, batch in enumerate(epoch_iterator):
@@ -221,15 +222,16 @@ def get_examples(data_dir, task, evaluate=False):
 
 
 class GLUEBenchmark:
-    def __init__(self, task_name):
+    def __init__(self, task_name, seed=42):
         self.task_name = task_name
+        self.seed = seed
 
     def __call__(self, model: BrainModel):
         model.mode = BrainModel.Modes.sentence_features
         data_dir = self.task_name.upper().replace('COLA', 'CoLA')
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..',
                                                 'ressources', 'ml', 'glue', data_dir))
-        set_seed(42)
+        set_seed(self.seed)
         max_seq_length = 128
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -265,7 +267,7 @@ class GLUEBenchmark:
                                            output_mode=output_mode, max_seq_length=max_seq_length)
         global_step, tr_loss = train(features_model=model, decoder_head=decoder_head,
                                      train_dataset=train_dataset, run_evaluation=run_evaluation,
-                                     device=device)
+                                     seed=self.seed, device=device)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
         # Evaluation
