@@ -422,10 +422,14 @@ class _PytorchTransformerWrapper(BrainModel):
     def _sentence_features(self, batch):
         import torch
         inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
-        if not self.identifier.startswith('distilbert'):
+        if not any(self.identifier.startswith(prefix) for prefix in ['distilbert', 't5']):
             inputs["token_type_ids"] = (
                 batch[2] if not any(self.identifier.startswith(prefix) for prefix in ["bert", "xlnet", "albert"])
                 else None)  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
+        if self.identifier.startswith('t5'):
+            # we already have a T5Wrapper in place that will convert input_ids to {encoder,decoder}_input_ids
+            inputs['encoder_attention_mask'] = inputs['attention_mask']
+            del inputs['attention_mask']
         with torch.no_grad():
             features_outputs = self._model(**inputs)
         # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
@@ -865,9 +869,9 @@ class _T5Wrapper:
     def __init__(self, model):
         self._model = model
 
-    def __call__(self, tokens_tensor):
+    def __call__(self, input_ids, **kwargs):
         # the decoder_input_ids are not right, but we only retrieve encoder features anyway
-        return self._model(encoder_input_ids=tokens_tensor, decoder_input_ids=tokens_tensor)
+        return self._model(encoder_input_ids=input_ids, decoder_input_ids=input_ids, **kwargs)
 
     def __getattr__(self, item):  # forward attribute retrieval
         if item in ['_model', 'to']:
