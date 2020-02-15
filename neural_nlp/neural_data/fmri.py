@@ -161,6 +161,7 @@ def load_Pereira2018_Blank(version='base'):
 
     _logger.debug(f"Merging {len(assemblies)} assemblies")
     assembly = merge_data_arrays(assemblies)
+    assembly.attrs['version'] = version
 
     _logger.debug("Creating StimulusSet")
     assembly.attrs['stimulus_set'] = reference_data.stimulus_set
