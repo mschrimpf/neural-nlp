@@ -499,6 +499,13 @@ class _PytorchTransformerWrapper(BrainModel):
     def vocab_size(self):
         return self._model.config.vocab_size
 
+    def get_embedding_weights(self):
+        modules = list(self._model.modules())
+        while len(modules) > 1:  # 0th module is self
+            modules = list(modules[1].modules())
+        embedding_layer = modules[0]
+        return embedding_layer.weight
+
     class ModelContainer:
         def __init__(self, tokenizer, model, layer_names, tokenizer_special_tokens=()):
             import torch
