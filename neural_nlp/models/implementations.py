@@ -340,7 +340,7 @@ class Transformer(PytorchWrapper, BrainModel):
     """
     For each of the 6 encoder blocks, we're using two layers,
     one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
-
+    
     The encoder is implemented as follows:
     ```
     input_norm = self.layer_norm(inputs)

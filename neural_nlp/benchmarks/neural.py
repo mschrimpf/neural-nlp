@@ -10,8 +10,7 @@ from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation, standard_error_of_the_mean, \
-    apply_aggregate
+from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
@@ -331,7 +330,7 @@ class PereiraRDM(_PereiraBenchmark):
 class _Fedorenko2016:
     def __init__(self, identifier, metric):
         self.identifier = identifier
-        assembly = load_Fedorenko2016(electrodes='language')
+        assembly = load_Fedorenko2016(electrodes='language', version=1)
         self._target_assembly = assembly
         self._metric = metric
 
@@ -375,6 +374,7 @@ class _Fedorenko2016:
 
 
 def Fedorenko2016Encoding():
+    """ Fedorenko benchmark with NO z-scored recordings """
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
@@ -383,10 +383,33 @@ def Fedorenko2016Encoding():
     return _Fedorenko2016(identifier='Fedorenko2016-encoding', metric=metric)
 
 
+def Fedorenko2016V2Encoding():
+    """ Fedorenko benchmark WITH z-scored recordings """
+    benchmark = Fedorenko2016Encoding()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='language', version=2)
+    benchmark.identifier = 'Fedorenko2016v2-encoding'
+    return benchmark
+
+
 def Fedorenko2016AllEncoding():
     benchmark = Fedorenko2016Encoding()
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='all')
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=1)
     benchmark.identifier = 'Fedorenko2016all-encoding'
+    return benchmark
+
+
+def Fedorenko2016AllV2Encoding():
+    benchmark = Fedorenko2016Encoding()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=2)
+    benchmark.identifier = 'Fedorenko2016allv2-encoding'
+    return benchmark
+
+
+def Fedorenko2016NonLangEncoding():
+    benchmark = Fedorenko2016Encoding()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='non-language',
+                                                    version=2)  # Version 2 - do not z-score in ecog_greta.py
+    benchmark.identifier = 'Fedorenko2016nonlangv2-encoding'
     return benchmark
 
 
@@ -484,5 +507,8 @@ benchmark_pool = {
     'Pereira2018-rdm': PereiraRDM,
     'Fedorenko2016-rdm': Fedorenko2016RDM,
     'Fedorenko2016-encoding': Fedorenko2016Encoding,
+    'Fedorenko2016v2-encoding': Fedorenko2016V2Encoding,
     'Fedorenko2016all-encoding': Fedorenko2016AllEncoding,
+    'Fedorenko2016allv2-encoding': Fedorenko2016AllV2Encoding,
+    'Fedorenko2016nonlangv2-encoding': Fedorenko2016NonLangEncoding,
 }
