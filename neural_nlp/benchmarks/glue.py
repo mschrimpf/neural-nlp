@@ -32,6 +32,7 @@ from transformers import glue_convert_examples_to_features as convert_examples_t
 from transformers import glue_output_modes as output_modes
 from transformers import glue_processors as processors
 
+from brainscore.metrics import Score
 from neural_nlp.models.implementations import BrainModel
 
 try:
@@ -248,8 +249,8 @@ class GLUEBenchmark:
         # setup Evaluation
         eval_task_names = ("mnli", "mnli-mm") if self.task_name == "mnli" else (self.task_name,)
 
-        def run_evaluation():
-            results = {}
+        def run_evaluation(return_score=False):
+            scores = []
             # Loop to handle MNLI double evaluation (matched, mis-matched)
             for eval_task in eval_task_names:
                 examples, label_list, output_mode = get_examples(data_dir=data_dir, task=eval_task, evaluate=True)
@@ -258,8 +259,18 @@ class GLUEBenchmark:
                 result = evaluate(features_model=model, decoder_head=decoder_head,
                                   eval_dataset=eval_dataset, task_name=eval_task, output_mode=output_mode,
                                   device=device)
-                results.update(result)
-            return results
+                if not return_score:
+                    return result  # we're ignoring mnli-mm here, but this return is just for progress logging anyway
+                score = Score([[value for key, value in result.items()]],
+                              coords={'eval_task': [eval_task], 'measure': list(result.keys())},
+                              dims=['eval_task', 'measure'])
+                score.attrs['data_dir'] = data_dir
+                score.attrs['benchmark_identifier'] = f"glue-{self.task_name}"
+                score.attrs['eval_task'] = eval_task
+                score.attrs['model_identifier'] = model.identifier
+                scores.append(score)
+            scores = Score.merge(*scores)
+            return scores
 
         # Training
         examples, label_list, output_mode = get_examples(data_dir=data_dir, task=self.task_name, evaluate=False)
@@ -272,7 +283,7 @@ class GLUEBenchmark:
 
         # Evaluation
         logger.info("Evaluate")
-        results = run_evaluation()
+        results = run_evaluation(return_score=True)
         return results
 
 
