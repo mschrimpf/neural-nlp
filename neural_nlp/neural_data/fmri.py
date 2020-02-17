@@ -85,24 +85,27 @@ def load_Pereira2018_Blank_languageresiduals():
 
 
 @store()
-def load_Pereira2018_Blank():
+def load_Pereira2018_Blank(version='base'):
     reference_data = load_Pereira2018()
 
-    data_dir = neural_data_dir / "Pereira2018_Blank"
+    data_dir = neural_data_dir / ("Pereira2018_Blank" + ("_langonly" if version != 'base' else ""))
     experiments = {'n72': "243sentences", 'n96': "384sentences"}
     assemblies = []
     subjects = ['018', '199', '215', '288', '289', '296', '343', '366', '407', '426']
     for subject in tqdm(subjects, desc="subjects"):
         subject_assemblies = []
         for experiment_filepart, experiment_name in experiments.items():
-            filepath = data_dir / f"{subject}_complang_passages_{experiment_filepart}_persent.mat"
+            filepath = data_dir / f"{'ICA_' if version != 'base' else ''}" \
+                                  f"{subject}_complang_passages_{experiment_filepart}_persent.mat"
             if not filepath.is_file():
                 _logger.debug(f"Subject {subject} did not run {experiment_name}: {filepath} does not exist")
                 continue
             data = scipy.io.loadmat(str(filepath))
+            if version != 'base':
+                data = data['x'][0, 0]
 
             # construct assembly
-            assembly = data['data']
+            assembly = data['data' if version == 'base' else f'data{version}']
             neuroid_meta = data['meta']
 
             expanded_assembly = []
@@ -158,6 +161,7 @@ def load_Pereira2018_Blank():
 
     _logger.debug(f"Merging {len(assemblies)} assemblies")
     assembly = merge_data_arrays(assemblies)
+    assembly.attrs['version'] = version
 
     _logger.debug("Creating StimulusSet")
     assembly.attrs['stimulus_set'] = reference_data.stimulus_set

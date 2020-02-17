@@ -373,39 +373,49 @@ class _Fedorenko2016:
 
         return model_activations
 
-# The original Fedorenko2016 benchmark (version 1) 
-def Fedorenko2016EncodingV1():
+def Fedorenko2016Encoding():
+    """ Fedorenko benchmark with NO z-scored recordings """
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
                                        crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
                                                                    stratification_coord='sentence_id'))
-    return _Fedorenko2016(identifier='Fedorenko2016-encoding-v1', metric=metric)
+    return _Fedorenko2016(identifier='Fedorenko2016-encoding', metric=metric)
 
-# The new Fedorenko2016 benchmark (version 2)
-def Fedorenko2016EncodingV2():
-    benchmark = Fedorenko2016EncodingV1()
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='language', version=2) 
-    benchmark.identifier = 'Fedorenko2016-encoding-v2'
+def Fedorenko2016ZScoreEncoding():
+    """ Fedorenko benchmark WITH z-scored recordings """
+    benchmark = Fedorenko2016Encoding()
+    benchmark._target_assembly = load_Fedorenko2016(electrodes='language', version=2)
+    benchmark.identifier = 'Fedorenko2016zscore-encoding'
     return benchmark
 
-def Fedorenko2016AllEncodingV1():
-    benchmark = Fedorenko2016EncodingV1()
+def Fedorenko2016AllEncoding():
+    benchmark = Fedorenko2016Encoding()
     benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=1)
-    benchmark.identifier = 'Fedorenko2016all-encoding-v1'
+    benchmark.identifier = 'Fedorenko2016all-encoding'
     return benchmark
 
-def Fedorenko2016AllEncodingV2():
-    benchmark = Fedorenko2016EncodingV1()
+def Fedorenko2016AllZScoreEncoding():
+    benchmark = Fedorenko2016Encoding()
     benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=2)
-    benchmark.identifier = 'Fedorenko2016all-encoding-v2'
+    benchmark.identifier = 'Fedorenko2016allzscore-encoding'
     return benchmark
 
 def Fedorenko2016NonLangEncoding():
-    benchmark = Fedorenko2016EncodingV1()
+    benchmark = Fedorenko2016Encoding()
     benchmark._target_assembly = load_Fedorenko2016(electrodes='non-language', version=2) # Version 2 - do not z-score in ecog_greta.py
-    benchmark.identifier = 'Fedorenko2016nonlang-encoding'
+    benchmark.identifier = 'Fedorenko2016nonlangzscore-encoding'
     return benchmark
+
+
+def Fedorenko2016RDM():
+    metric = RDMCrossValidated(
+        comparison_coord='stimulus_id',
+        crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
+                                    # doesn't work because train_size is deemed too small.
+                                    # even though `train` is not needed, CrossValidation still splits it that way
+                                    splits=5, kfold=True, test_size=None))
+    return _Fedorenko2016(identifier='Fedorenko2016-rdm', metric=metric)
 
 
 def Fedorenko2016RDM():
@@ -501,9 +511,9 @@ benchmark_pool = {
     'Pereira2018-decoding': PereiraDecoding,
     'Pereira2018-rdm': PereiraRDM,
     'Fedorenko2016-rdm': Fedorenko2016RDM,
-    'Fedorenko2016-encoding-v1': Fedorenko2016EncodingV1,
-    'Fedorenko2016-encoding-v2': Fedorenko2016EncodingV2,
-    'Fedorenko2016all-encoding-v1': Fedorenko2016AllEncodingV1,
-    'Fedorenko2016all-encoding-v2': Fedorenko2016AllEncodingV2,
+    'Fedorenko2016-encoding': Fedorenko2016Encoding,
+    'Fedorenko2016zscore-encoding': Fedorenko2016ZScoreEncoding,
+    'Fedorenko2016all-encoding': Fedorenko2016AllEncoding,
+    'Fedorenko2016allzscore-encoding': Fedorenko2016AllZScoreEncoding,
     'Fedorenko2016nonlang-encoding': Fedorenko2016NonLangEncoding,
 }

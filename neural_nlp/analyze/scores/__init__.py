@@ -1,5 +1,4 @@
 import os
-from decimal import Decimal
 
 import fire
 import itertools
@@ -9,17 +8,18 @@ import numpy as np
 import pandas as pd
 import seaborn
 import sys
+from functools import reduce
 from matplotlib import pyplot
 from matplotlib.colors import to_rgba
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 from tqdm import tqdm
 
-from neural_nlp import score, model_layers
+from neural_nlp import score, model_layers, benchmark_pool
 from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
     _score_model as score_architecture_model
-from neural_nlp.benchmarks.neural import ceiling_normalize, aggregate
+from neural_nlp.benchmarks.neural import aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
 from result_caching import NotCachedError
@@ -90,34 +90,30 @@ model_colors = {
 models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
+overall_benchmarks = ('Pereira2018', 'Fedorenko2016', 'stories_froi_bold4s')
 
 
-def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', flip_x=False, normalize=True):
-    scores1, scores2, run_models = [], [], []
-    os.environ['RESULTCACHING_CACHEDONLY'] = '1'
-    for model in models:
-        try:
-            score1 = score(benchmark=benchmark1, model=model)
-            score2 = score(benchmark=benchmark2, model=model)
-            if normalize:
-                score1 = ceiling_normalize(score1, benchmark_identifier=benchmark1)
-                score2 = ceiling_normalize(score2, benchmark_identifier=benchmark2)
-            scores1.append(score1)
-            scores2.append(score2)
-            run_models.append(model)
-        except NotCachedError:
-            continue
-    savename = f"{benchmark1}__{benchmark2}"
-    fig, ax = _plot_scores1_2(scores1, scores2, score_annotations=run_models,
-                              xlabel=benchmark1, ylabel=benchmark2, flip_x=flip_x)
+def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', best_layer=True, normalize=True):
+    all_models = models
+    scores1 = collect_scores(benchmark=benchmark1, models=all_models)
+    scores2 = collect_scores(benchmark=benchmark2, models=all_models)
+    scores1, scores2 = average_adjacent(scores1).dropna(), average_adjacent(scores2).dropna()
+    if best_layer:
+        scores1, scores2 = choose_best_scores(scores1), choose_best_scores(scores2)
     if normalize:
-        ax.set_xlim([-.05, 1.05])
-        ax.set_ylim([-.05, 1.05])
-    _savefig(fig, savename=savename)
+        scores1, scores2 = ceiling_normalize(scores1), ceiling_normalize(scores2)
+    scores1, scores2 = align_scores(scores1, scores2, identifier_set=['model'] if best_layer else ['model', 'layer'])
+    colors = [model_colors[model.replace('-untrained', '')] for model in scores1['model'].values]
+    colors = [to_rgba(named_color) for named_color in colors]
+    savename = f"{benchmark1}__{benchmark2}"
+    fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
+                              score_annotations=scores1['model'].values if best_layer else None,
+                              xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'))
+    savefig(fig, savename=savename)
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None,
-                    xlabel=None, ylabel=None, flip_x=False, color=None, **kwargs):
+def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=True,
+                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
@@ -128,24 +124,32 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
         for annotation, _x, _y in zip(score_annotations, x, y):
             ax.text(_x, _y, annotation, fontdict=dict(fontsize=10), zorder=100)
 
-    if flip_x:
-        ax.set_xlim(list(reversed(ax.get_xlim())))
+    if loss_xaxis:
+        ax.set_xlim(list(reversed(ax.get_xlim())))  # flip x
 
-    correlation, p = pearsonr(x, y)
-    b, m = polyfit(x, y, 1)
-    ax.plot(ax.get_xlim(), b + m * np.array(ax.get_xlim()))
-    ax.text(0.9, 0.1, ha='center', va='center', transform=ax.transAxes,
-            s=(f"r={(correlation * (-1 if flip_x else 1)):.2f}" +
-               significance_stars(p))
-            if p < 0.05 else f"n.s., p={p:.2f}")
+        @matplotlib.ticker.FuncFormatter
+        def loss_formatter(loss, pos):
+            return f"{loss}\n{np.exp(loss):.0f}"
+
+        ax.xaxis.set_major_formatter(loss_formatter)
+
+    for i, (name, correlate) in enumerate([('pearson', pearsonr), ('spearman', spearmanr)]):
+        r, p = correlate(x, y)
+        if i == 0 and plot_correlation:
+            b, m = polyfit(x, y, 1)
+            correlation_x = [min(x), max(x)]
+            ax.plot(correlation_x, b + m * np.array(correlation_x))
+        ax.text(0.9, 0.2 - i * 0.1, ha='center', va='center', transform=ax.transAxes,
+                s=f"{name} " + ((f"r={(r * (-1 if loss_xaxis else 1)):.2f}" + significance_stars(p))
+                                if p < 0.05 else f"n.s., p={p:.2f}"))
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     return fig, ax
 
 
-def significance_stars(p):
-    return '*' * max([i for i in range(5) if p <= 0.5 / (10 ** i)])
+def significance_stars(p, max_stars=5):
+    return '*' * max([i for i in range(max_stars + 1) if p <= 0.5 / (10 ** i)])
 
 
 def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-lm',
@@ -156,7 +160,7 @@ def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-
     zoo_name = Path(zoo_dir).name
     fig, ax = _bars(architectures, scores, ylabel=f"MT model scores on {benchmark}")
     ax.set_ylim([ax.get_ylim()[0], 0.3])
-    _savefig(fig, savename=f"{zoo_name}-{benchmark}")
+    savefig(fig, savename=f"{zoo_name}-{benchmark}")
 
 
 def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
@@ -167,7 +171,7 @@ def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
     fig, ax = _bars(['MT: WMT\'17', 'LM: 1B'], [mt_score, lm_score], fig_kwargs=dict(figsize=(5, 5)))
     ax.set_ylim([ax.get_ylim()[0], 0.3])
     ax.set_title('LSTM trained on Machine Translation/Language Modeling')
-    _savefig(fig, 'lstm_mt_lm')
+    savefig(fig, 'lstm_mt_lm')
 
 
 def collect_scores(benchmark, models):
@@ -176,46 +180,75 @@ def collect_scores(benchmark, models):
         data = pd.read_csv(store_file)
         data = data[data['model'].isin(models)]
         return data
-    data = []
-    for model in tqdm(models, desc='model scores'):
-        os.environ['RESULTCACHING_CACHEDONLY'] = '1'
-        try:
-            model_scores = score(benchmark=benchmark, model=model)
-        except NotCachedError:
-            continue
-        adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
-        for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
-            adjunct_values = dict(zip(adjunct_columns, adjunct_values))
-            current_score = model_scores.sel(**adjunct_values)
-            center, error = get_score_center_err(current_score)
-            data.append({**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
-    data = pd.DataFrame(data)
+    if benchmark.startswith('overall'):
+        metric = benchmark[len('overall-'):]
+        data = [collect_scores(benchmark=f"{b}-{metric}", models=models) for b in overall_benchmarks]
+        data = reduce(lambda left, right: pd.concat([left, right]), data)
+        data = average_adjacent(data)
+        data = data.groupby(['model', 'layer']).mean().reset_index()  # mean across benchmarks per model-layer
+        data['benchmark'] = benchmark
+    else:
+        data = []
+        for model in tqdm(models, desc='model scores'):
+            os.environ['RESULTCACHING_CACHEDONLY'] = '1'
+            try:
+                model_scores = score(benchmark=benchmark, model=model)
+            except NotCachedError:
+                logger.warning(f"No score cached for model {model} on benchmark {benchmark}")
+                continue
+            adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
+            for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
+                adjunct_values = dict(zip(adjunct_columns, adjunct_values))
+                current_score = model_scores.sel(**adjunct_values)
+                center, error = get_score_center_err(current_score)
+                data.append(
+                    {**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
+        data = pd.DataFrame(data)
+        if benchmark.startswith('wikitext'):
+            data['layer'] = -1
+            data['error'] = 0  # nans will otherwise be dropped later on
+            data = data[data['measure'] == 'test_loss']
     data.to_csv(store_file, index=False)
     return data
 
 
-def fmri_experiment_correlations():
+def fmri_experiment_correlations(choose_best=False):
+    experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(choose_best)
+    # plot
+    colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
+    colors = [to_rgba(named_color) for named_color in colors]
+    fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if choose_best else .2,
+                              score_annotations=experiment2_scores['model'].values if choose_best else None,
+                              xlabel='Exp. 2 (384sentences)', ylabel='Exp. 3 (243sentences)')
+    scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
+    ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='black')
+    savefig(fig, savename='fmri-correlations')
+
+
+def collect_Pereira_experiment_scores(best_layer=False):
     scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    scores = average_adjacent(scores, keep_columns=['benchmark', 'model', 'layer', 'experiment'])
+    scores = scores.dropna()
+    if best_layer:
+        scores = choose_best_scores(scores)  # TODO: do we want to choose the same layer for both?
+    # separate into experiments & align
     experiment2_scores = scores[scores['experiment'] == '384sentences']
     experiment3_scores = scores[scores['experiment'] == '243sentences']
-    r, p = pearsonr(experiment2_scores['score'], experiment3_scores['score'])
-    fig, ax = pyplot.subplots(figsize=(6, 6))
-    ax.errorbar(x=experiment2_scores['score'], xerr=experiment2_scores['error'],
-                y=experiment3_scores['score'], yerr=experiment3_scores['error'],
-                fmt=' ', alpha=.5)
-    ax.plot(ax.get_xlim(), ax.get_ylim(), linestyle='dashed', color='black')
-    ax.set_xlabel('scores on 384sentences')
-    ax.set_ylabel('scores on 243sentences')
-    ax.text(0.8, 0.1, "r: " + ((f"{r:.2f}" + significance_stars(p)) if p < .05 else "n.s."),
-            ha='center', va='center', transform=ax.transAxes)
-    ticks = np.arange(0, 0.4, 0.05)
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ticklabels = ["0" if tick == 0 else f"{tick:.1f}"[1:] if Decimal(f"{tick:.2f}") % Decimal(".1") == 0 else ""
-                  for tick in ticks]
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    _savefig(fig, 'fmri-correlations')
+    experiment2_scores, experiment3_scores = align_scores(
+        experiment2_scores, experiment3_scores, identifier_set=('model',) if best_layer else ('model', 'layer'))
+    return experiment2_scores, experiment3_scores
+
+
+def align_scores(scores1, scores2, identifier_set=('model', 'layer')):
+    identifiers1 = list(zip(*[scores1[identifier_key].values for identifier_key in identifier_set]))
+    identifiers2 = list(zip(*[scores2[identifier_key].values for identifier_key in identifier_set]))
+    overlap = list(set(identifiers1).intersection(set(identifiers2)))
+    non_overlap = list(set(identifiers1).difference(set(identifiers2)))
+    if len(non_overlap) > 0:
+        logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")
+    scores1 = scores1.iloc[[identifiers1.index(identifier) for identifier in overlap]]
+    scores2 = scores2.iloc[[identifiers2.index(identifier) for identifier in overlap]]
+    return scores1, scores2
 
 
 def fmri_brain_network_correlations():
@@ -255,7 +288,7 @@ def fmri_brain_network_correlations():
                    length=0)  # hide tick marks, but not text https://stackoverflow.com/a/29988431/2225200
     # save
     fig.tight_layout()
-    _savefig(fig, 'brain_network_correlations')
+    savefig(fig, 'brain_network_correlations')
 
 
 def align_both(data1, data2, on):
@@ -281,23 +314,14 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     elif layer_mode == 'pos':
         scores['layer_position'] = [model_layers[model].index(layer) / len(model_layers[model])
                                     for model, layer in zip(scores['model'].values, scores['layer'].values)]
+    scores = ceiling_normalize(scores)
     # separate into trained / untrained
     untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
     scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
     # align
-    scores_untrained['model_identifier'] = [model.replace('-untrained', '')
-                                            for model in scores_untrained['model'].values]
-    if layer_mode == 'best':  # layer is already argmax'ed over, might not be same across untrained/trained
-        identifiers_trained = scores_trained['model'].values
-        identifiers_untrained = scores_untrained['model_identifier'].values
-    else:
-        identifiers_trained = list(zip(scores_trained['model'].values, scores_trained['layer'].values))
-        identifiers_untrained = list(zip(scores_untrained['model_identifier'].values, scores_untrained['layer'].values))
-    overlap = set(identifiers_trained).intersection(set(identifiers_untrained))
-    scores_trained = scores_trained[[identifier in overlap for identifier in identifiers_trained]]
-    scores_untrained = scores_untrained[[identifier in overlap for identifier in identifiers_untrained]]
-    scores_trained = scores_trained.sort_values(['model', 'layer'])
-    scores_untrained = scores_untrained.sort_values(['model_identifier', 'layer'])
+    scores_untrained['model'] = [model.replace('-untrained', '') for model in scores_untrained['model'].values]
+    scores_trained, scores_untrained = align_scores(
+        scores_trained, scores_untrained, identifier_set=('model',) if layer_mode == 'best' else ('model', 'layer'))
     if layer_mode != 'best':
         assert (scores_trained['layer'].values == scores_untrained['layer'].values).all()
     # plot
@@ -313,7 +337,7 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
-    _savefig(fig, savename=f"untrained_trained-{benchmark}")
+    savefig(fig, savename=f"untrained_trained-{benchmark}")
 
 
 def choose_best_scores(scores):
@@ -354,11 +378,27 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in scores['model'].values]
     fig, ax = _plot_scores1_2(num_features, scores, color=colors, xlabel="number of features", ylabel=benchmark)
-    _savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
+    savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
-def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer')):
-    data = data.groupby(keep_columns).mean()  # mean across non-keep columns
+def Pereira_language_vs_other(best_layer=True):
+    scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    scores_lang, scores_other = scores[scores['atlas'] == 'language'], scores[scores['atlas'] == 'auditory']
+    scores_lang, scores_other = average_adjacent(scores_lang), average_adjacent(scores_other)
+    scores_lang, scores_other = scores_lang.dropna(), scores_other.dropna()
+    if best_layer:
+        scores_lang, scores_other = choose_best_scores(scores_lang), choose_best_scores(scores_other)
+    scores_lang, scores_other = align_scores(scores_lang, scores_other)
+    # plot
+    colors = [model_colors[model] for model in scores_lang['model'].values]
+    fig, ax = _plot_scores1_2(scores_lang, scores_other, color=colors,
+                              xlabel='language scores', ylabel='auditory scores')
+    ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
+    savefig(fig, savename=f"Pereira2018-language_other{'' if best_layer else '-layerwise'}")
+
+
+def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=False):
+    data = data.groupby(list(keep_columns)).agg(lambda g: g.mean(skipna=skipna))  # mean across non-keep columns
     return data.reset_index()
 
 
@@ -376,7 +416,28 @@ def get_score_center_err(s, combine_layers=True):
     raise ValueError(f"Unknown score structure: {s}")
 
 
-def _savefig(fig, savename):
+def ceiling_normalize(scores):
+    scores['score_unceiled'] = scores['score']
+    benchmark_ceilings = {}
+    for benchmark in set(scores['benchmark'].values):
+        if benchmark.startswith('overall'):
+            metric = benchmark[len('overall-'):]
+            ceilings = [benchmark_pool[f"{part}-{metric}"]().ceiling.sel(aggregation='center')
+                        for part in overall_benchmarks]
+            benchmark_ceilings[benchmark] = np.mean(ceilings)
+        elif benchmark.startswith('wikitext'):
+            benchmark_ceilings[benchmark] = np.nan
+        else:
+            benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center') \
+                .values.tolist()
+    scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
+    if not benchmark.startswith('wikitext'):
+        scores['score'] = scores['score'] / scores['ceiling']
+        scores['error'] = scores['error'] / scores['ceiling']
+    return scores
+
+
+def savefig(fig, savename):
     fig.tight_layout()
     savepath = Path(__file__).parent / f"{savename}.png"
     logger.info(f"Saving to {savepath}")

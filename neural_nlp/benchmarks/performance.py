@@ -55,7 +55,7 @@ class TextDataset(Dataset):
         # Tokens
         directory, filename = os.path.split(file_path)
         cached_tokens_file = os.path.join(directory, f'cached_lm_{model_identifier}_{block_size}_{filename}')
-        if os.path.exists(cached_tokens_file):
+        if os.path.exists(cached_tokens_file) and os.getenv('NOSAVE', '0') != '1':
             logger.info("Loading tokens from cached file %s", cached_tokens_file)
             with open(cached_tokens_file, 'rb') as handle:
                 self.examples = pickle.load(handle)
@@ -64,18 +64,22 @@ class TextDataset(Dataset):
             self.examples = []
             tokenized_text = model.tokenize(text, vocab_size=vocab_size)
             # Truncate in block of block_size
+            # Especially with the small block sizes we end up using together with the
+            # "feeding in context one word increments at a time", this is not ideal because the model doesn't see a lot
+            # of context. But it's going to be even more compute if we maximize the context per block.
             for i in tqdm(range(0, len(tokenized_text) - block_size + 1, block_size), desc='truncate text into blocks'):
                 self.examples.append(model.tokens_to_inputs(tokenized_text[i: i + block_size]))
             # Note that we are loosing the last truncated example here for the sake of simplicity (no padding)
             # If your dataset is small, first you should loook for a bigger one :-) and second you
             # can change this behavior by adding (model specific) padding.
-            logger.info("Saving tokens into cached file %s", cached_tokens_file)
-            with open(cached_tokens_file, 'wb') as handle:
-                pickle.dump(self.examples, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            if os.getenv('NOSAVE', '0') != '1':
+                logger.info("Saving tokens into cached file %s", cached_tokens_file)
+                with open(cached_tokens_file, 'wb') as handle:
+                    pickle.dump(self.examples, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # Features
         cached_features_file = os.path.join(directory, f'cached_lm_features_{model_identifier}_{block_size}_{filename}')
-        if os.path.exists(cached_features_file):
+        if os.path.exists(cached_features_file) and os.getenv('NOSAVE', '0') != '1':
             logger.info("Loading features from cached file %s", cached_features_file)
             with open(cached_features_file, 'rb') as handle:
                 self.features = pickle.load(handle)
@@ -84,9 +88,10 @@ class TextDataset(Dataset):
             for block in tqdm(self.examples, desc="token blocks to features"):  # pass tokens to model
                 block_features = model(block)
                 self.features.append(block_features)
-            logger.info("Saving features into cached file %s", cached_features_file)
-            with open(cached_features_file, 'wb') as handle:
-                pickle.dump(self.features, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            if os.getenv('NOSAVE', '0') != '1':
+                logger.info("Saving features into cached file %s", cached_features_file)
+                with open(cached_features_file, 'wb') as handle:
+                    pickle.dump(self.features, handle, protocol=pickle.HIGHEST_PROTOCOL)
         assert len(self.examples) == len(self.features)
 
     def __len__(self):
@@ -220,13 +225,14 @@ def evaluate(model, eval_dataset, eval_batch_size=4, device='cuda', prefix=""):
 
 
 class _PerformanceBenchmark:
-    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=32):
+    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=64, **kwargs):
         self.identifier = identifier
         self.train_data_file = train_data_file
         self.val_data_file = val_data_file
         self.eval_data_file = eval_data_file
         self.tied = tied
         self.block_size = block_size
+        self.kwargs = kwargs
 
     def __call__(self, model: BrainModel):
         model.mode = BrainModel.Modes.tokens_to_features
@@ -250,7 +256,7 @@ class _PerformanceBenchmark:
                                   vocab_size=vocab_size, file_path=self.eval_data_file)
 
         # Train
-        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device)
+        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device, **self.kwargs)
 
         # Evaluation
         test_result = evaluate(model=lm_head, eval_dataset=test_tokens, device=device)

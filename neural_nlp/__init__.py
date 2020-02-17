@@ -55,6 +55,6 @@ class FixedLayer:
         return self._model.__getattr__(item)
 
     def __setattr__(self, item, value):
-        if item in ['_model', '_layer']:
+        if item in ['_model', '_layer', '_prerun']:
             return super(FixedLayer, self).__setattr__(item, value)
         return self._model.__setattr__(item, value)

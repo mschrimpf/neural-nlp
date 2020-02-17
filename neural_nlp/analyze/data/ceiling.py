@@ -1,11 +1,19 @@
+import fire
 import itertools
 import numpy as np
+import seaborn
 from brainio_base.assemblies import walk_coords
+from matplotlib import pyplot
+from matplotlib.ticker import MaxNLocator
+from pathlib import Path
+from scipy.optimize import curve_fit
 from tqdm import tqdm
 
 from brainscore.metrics import Score
 from brainscore.metrics.regression import pearsonr_correlation
 from brainscore.metrics.transformations import apply_aggregate
+from neural_nlp import benchmark_pool
+from neural_nlp.benchmarks.neural import extrapolation_ceiling
 from neural_nlp.neural_data.fmri import load_voxels
 from result_caching import store
 
@@ -55,6 +63,49 @@ def average_subregions(assembly):
     return assembly
 
 
+def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
+    benchmark_impl = benchmark_pool[benchmark]()
+    ceilings = extrapolation_ceiling(identifier=benchmark, assembly=benchmark_impl._target_assembly,
+                                     subject_column='subject' if benchmark.startswith('Pereira') else 'subject_UID',
+                                     metric=benchmark_impl._metric)
+    # work from raw values to treat sub_subjects and split all as splits and then median/std on those
+    ceilings = ceilings.raw
+    if hasattr(ceilings, 'experiment'):  # Pereira
+        ceilings = ceilings.mean('experiment')  # neuroid(median) will take care of atlas, but not ideal
+    if hasattr(ceilings, 'neuroid'):  # not true for RDMs
+        ceilings = ceilings.median('neuroid')
+    ceilings = ceilings.stack(subsplit=['sub_subjects', 'split'])  # introduces lots of nans due to non-overlap subjects
+    y, yerr = ceilings.mean('subsplit'), ceilings.std('subsplit')
+
+    # extrapolation
+    def v(x, v0, tau0):
+        return v0 * (1 - np.exp(-x / tau0))
+
+    params, pcov = curve_fit(v, ceilings['num_subjects'], y)
+    asymptote_threshold = .0005
+    for interpolation_x in range(999):
+        if v(interpolation_x + 1, *params) - v(interpolation_x, *params) < asymptote_threshold:
+            break
+    extrapolation_x = np.arange(interpolation_x + 3)
+    extrapolation_y = v(extrapolation_x, *params)
+    # plot
+    fig, ax = pyplot.subplots()
+    ax.errorbar(ceilings['num_subjects'].values, y.values, yerr=yerr.values)
+    ax.plot(extrapolation_x, extrapolation_y, linestyle='dashed', color='gray')
+    ax.text(.5, .1, s=f"~asymptote {params[0]:.2f} at #={np.ceil(interpolation_x):.0f}",
+            ha='center', va='center', transform=ax.transAxes)
+    # plot meta
+    ax.set_title(benchmark)
+    ax.set_xlabel('# subjects')
+    ax.set_ylabel('ceiling')
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    fig.tight_layout()
+    fig.savefig(Path(__file__).parent / f'extrapolation-{benchmark}.png')
+
+
 if __name__ == '__main__':
-    r = fROI_correlation()
-    print(r)
+    import warnings
+
+    warnings.simplefilter(action='ignore')  # , category=FutureWarning)
+    seaborn.set(context='talk')
+    fire.Fire()

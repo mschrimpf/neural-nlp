@@ -1,7 +1,9 @@
 import numpy as np
+import pytest
 from pytest import approx
 
 from neural_nlp import neural_data
+from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank, \
     load_Pereira2018_Blank_languageresiduals
 
@@ -73,8 +75,14 @@ def test_Pereira():
     assert subject_assembly.values.sum() == approx(101003052.8293553)
 
 
-def test_PereiraBlank():
-    assembly = load_Pereira2018_Blank()
+@pytest.mark.parametrize(('version', 'values_sum'), [
+    ('base', -38516843.18636856),
+    ('ICA', 52337776.49628149),
+    ('Demean', -10854974.038396357),
+    ('NoVisAud', -12719536.616299922),
+])
+def test_PereiraBlank(version, values_sum):
+    assembly = load_Pereira2018_Blank(version=version)
     assert set(assembly['experiment'].values) == {'243sentences', '384sentences'}
     assert len(assembly['presentation']) == 243 + 384
     assert len(set(assembly['subject'].values)) == 10
@@ -83,7 +91,7 @@ def test_PereiraBlank():
     assert set(assembly['filter_strategy'].values) == {np.nan, 'NminusS', 'HminusE', 'FIXminusN', 'FIXminusH'}
     subject_assembly = assembly.sel(subject='018', atlas='auditory', atlas_selection_lower=90)
     assert not np.isnan(subject_assembly).any()  # note though that other atlases have nan values from the data itself
-    assert np.nansum(assembly.values) == approx(-38516843.18636856)
+    assert np.nansum(assembly.values) == approx(values_sum)
     voxel = assembly.sel(subject='018', voxel_num=15 - 1)  # -1 to go from matlab 1-based indexing to python 0-based
     assert _single_element(voxel['indices_in_3d']) == 65158
     cols = [_single_element(voxel[f'col_to_coord_{i + 1}']) for i in range(3)]
@@ -94,3 +102,17 @@ def _single_element(array):
     unique_values = np.unique(array)
     assert len(unique_values) == 1
     return unique_values[0]
+
+
+def test_Fedorenko2016_language():
+    assembly = load_Fedorenko2016(electrodes='language')
+    assert len(assembly['presentation']) == 416
+    assert len(assembly['neuroid']) == 98
+    assert len(np.unique(assembly['subject_UID'])) == 5
+
+
+def test_Fedorenko2016_all():
+    assembly = load_Fedorenko2016(electrodes='all')
+    assert len(assembly['presentation']) == 416
+    assert len(assembly['neuroid']) == 180
+    assert len(np.unique(assembly['subject_UID'])) == 5
