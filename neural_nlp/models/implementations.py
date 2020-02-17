@@ -475,7 +475,8 @@ class _PytorchTransformerWrapper(BrainModel):
             max_length=max_seq_length,
             output_mode=output_mode,
             pad_on_left=bool(self.identifier.startswith("xlnet")),  # pad on the left for xlnet
-            pad_token=self._tokenizer.convert_tokens_to_ids([self._tokenizer.pad_token])[0],
+            pad_token=self._tokenizer.convert_tokens_to_ids([self._tokenizer.pad_token
+                                                             if self._tokenizer.pad_token else ''])[0],
             pad_token_segment_id=4 if self.identifier.startswith("xlnet") else 0,
         )
 
