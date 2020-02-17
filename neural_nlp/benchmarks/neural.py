@@ -463,29 +463,12 @@ def extrapolation_ceiling(identifier, assembly, metric, subject_column='subject'
     return scores
 
 
-def ceiling_normalize(score, benchmark_identifier):
-    score = aggregate(score)
-    benchmark = benchmark_pool[benchmark_identifier]()
-    ceiling = benchmark.ceiling
-    normalized_score = score.copy()
-    normalized_center, normalized_error = ceiling_normalize_score_error(
-        score.sel(aggregation='center').values, score.sel(aggregation='error').values,
-        ceiling.sel(aggregation='center').values)
-    normalized_score.loc[{'aggregation': 'center'}] = normalized_center
-    normalized_score.loc[{'aggregation': 'error'}] = normalized_error
-    return normalized_score
-
-
-def ceiling_normalize_score_error(score, error, ceiling):
-    return score / ceiling, error / ceiling
-
-
-def aggregate(score):
-    if hasattr(score, 'experiment'):
+def aggregate(score, combine_layers=True):
+    if hasattr(score, 'experiment') and score['experiment'].ndim > 0:
         score = score.mean('experiment')
-    if hasattr(score, 'atlas'):
+    if hasattr(score, 'atlas') and score['atlas'].ndim > 0:
         score = score.mean('atlas')
-    if hasattr(score, 'layer'):
+    if hasattr(score, 'layer') and score['layer'].ndim > 0 and combine_layers:
         max_score = score.sel(aggregation='center').max()
         max_score = score[{'layer': (score.sel(aggregation='center') == max_score).values}].squeeze('layer', drop=True)
         max_score.attrs['raw'] = score.copy()
