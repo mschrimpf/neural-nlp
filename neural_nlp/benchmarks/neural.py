@@ -192,7 +192,8 @@ class StoriesfROIRDM(StoriesfROIEncoding):
 
 class _PereiraBenchmark(Benchmark):
     def __init__(self, metric, data_version='base'):
-        self._target_assembly = LazyLoad(lambda: self._load_assembly(version=data_version))
+        self._data_version = data_version
+        self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
