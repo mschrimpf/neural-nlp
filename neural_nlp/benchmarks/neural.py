@@ -383,11 +383,11 @@ def Fedorenko2016Encoding():
     return _Fedorenko2016(identifier='Fedorenko2016-encoding', metric=metric)
 
 
-def Fedorenko2016ZScoreEncoding():
+def Fedorenko2016V2Encoding():
     """ Fedorenko benchmark WITH z-scored recordings """
     benchmark = Fedorenko2016Encoding()
     benchmark._target_assembly = load_Fedorenko2016(electrodes='language', version=2)
-    benchmark.identifier = 'Fedorenko2016zscore-encoding'
+    benchmark.identifier = 'Fedorenko2016v2-encoding'
     return benchmark
 
 
@@ -398,10 +398,10 @@ def Fedorenko2016AllEncoding():
     return benchmark
 
 
-def Fedorenko2016AllZScoreEncoding():
+def Fedorenko2016AllV2Encoding():
     benchmark = Fedorenko2016Encoding()
     benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=2)
-    benchmark.identifier = 'Fedorenko2016allzscore-encoding'
+    benchmark.identifier = 'Fedorenko2016allv2-encoding'
     return benchmark
 
 
@@ -409,7 +409,7 @@ def Fedorenko2016NonLangEncoding():
     benchmark = Fedorenko2016Encoding()
     benchmark._target_assembly = load_Fedorenko2016(electrodes='non-language',
                                                     version=2)  # Version 2 - do not z-score in ecog_greta.py
-    benchmark.identifier = 'Fedorenko2016nonlangzscore-encoding'
+    benchmark.identifier = 'Fedorenko2016nonlangv2-encoding'
     return benchmark
 
 
@@ -507,8 +507,8 @@ benchmark_pool = {
     'Pereira2018-rdm': PereiraRDM,
     'Fedorenko2016-rdm': Fedorenko2016RDM,
     'Fedorenko2016-encoding': Fedorenko2016Encoding,
-    'Fedorenko2016zscore-encoding': Fedorenko2016ZScoreEncoding,
+    'Fedorenko2016v2-encoding': Fedorenko2016V2Encoding,
     'Fedorenko2016all-encoding': Fedorenko2016AllEncoding,
-    'Fedorenko2016allzscore-encoding': Fedorenko2016AllZScoreEncoding,
-    'Fedorenko2016nonlang-encoding': Fedorenko2016NonLangEncoding,
+    'Fedorenko2016allv2-encoding': Fedorenko2016AllV2Encoding,
+    'Fedorenko2016nonlangv2-encoding': Fedorenko2016NonLangEncoding,
 }
