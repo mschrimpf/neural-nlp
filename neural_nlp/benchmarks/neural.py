@@ -446,6 +446,16 @@ def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
     return scores
 
 
+def _check_Pereira_experiment_overlap(assembly):
+    for experiment in set(assembly['experiment'].values):
+        experiment_assembly = assembly[{'presentation': [exp == experiment for exp in assembly['experiment'].values]}]
+        experiment_assembly = experiment_assembly.dropna('neuroid')
+        if len(experiment_assembly['neuroid']) < 1 or \
+                set(experiment_assembly['subject'].values) != set(assembly['subject'].values):
+            return False  # no subject has done this experiment or no subject overlap for experiment
+    return True  # all good
+
+
 @store(identifier_ignore=['assembly', 'metric', 'subject_column'])
 def extrapolation_ceiling(identifier, assembly, metric, subject_column='subject'):
     subjects = set(assembly[subject_column].values)
@@ -454,6 +464,8 @@ def extrapolation_ceiling(identifier, assembly, metric, subject_column='subject'
         for sub_subjects in itertools.combinations(subjects, num_subjects):
             sub_assembly = assembly[{'neuroid': [subject in sub_subjects for subject in
                                                  assembly[subject_column].values]}]
+            if identifier.startswith('Pereira') and not _check_Pereira_experiment_overlap(sub_assembly):
+                continue  # no two subjects have done same experiment
             score = holdout_subject_ceiling(assembly=sub_assembly, metric=metric, subject_column=subject_column)
             score = score.expand_dims('num_subjects').expand_dims('sub_subjects')
             score['num_subjects'] = [num_subjects]
