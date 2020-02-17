@@ -107,10 +107,12 @@ def load_Fedorenko2016(electrodes, version):
             sentences.append(sentence)
 
             for word in sentence:
+                if word == '\n':
+                    continue
+                word = word.rstrip('\n')
                 words.append(word)
 
-        newline = ['\n']
-        sentence_words = [word for word in words if word not in newline]
+        sentence_words = [word for word in words]
         _logger.debug(sentence_words)
 
     # Create sentenceID list
