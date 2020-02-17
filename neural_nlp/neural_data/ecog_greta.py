@@ -1,17 +1,20 @@
 import os
 from glob import glob
-from pathlib import Path
-from scipy import stats
+
 import logging
 import numpy as np
 import scipy.io as sio
 import xarray as xr
+from brainio_base.assemblies import NeuroidAssembly
+from pathlib import Path
+from scipy import stats
 
 from neural_nlp.stimuli import StimulusSet
 
 _logger = logging.getLogger(__name__)
 
-# @store() Disable the storing, since it is a very small file
+
+# no need to @store()  since it is a very small file
 def load_Fedorenko2016(electrodes, version):
     # MANUAL DIR: To give access to other people running it from different directories
     ressources_dir = Path(__file__).parent.parent.parent / 'ressources'
@@ -35,7 +38,7 @@ def load_Fedorenko2016(electrodes, version):
 
         if version == 1:
             filepath_neural = glob(os.path.join(neural_data_dir, '*ecog.mat'))
-        
+
         if version == 2:
             filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_lang.mat'))
 
@@ -50,15 +53,15 @@ def load_Fedorenko2016(electrodes, version):
         subject3 = np.repeat(3, 20)
         subject4 = np.repeat(4, 29)
         subject5 = np.repeat(5, 26)
-        
+
         if version == 1:
             filepath_neural = glob(os.path.join(neural_data_dir, '*ecog_all.mat'))
-        
+
         if version == 2:
             filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_all.mat'))
 
         print('Running Fedorenko2016 benchmark with non-noisy electrodes, data version: ', version)
-        
+
         # For non-noisy electrodes
     if electrodes == 'non-language':
         filepath_neural = glob(os.path.join(neural_data_dir, '*nonlang.mat'))
@@ -74,12 +77,12 @@ def load_Fedorenko2016(electrodes, version):
 
     ecog_mat = sio.loadmat(filepath_neural[0])
     ecog_mtrix = ecog_mat['ecog']
-    
-    if version == 1: # Manually z-score the version 1 data
-        ecog_z = stats.zscore(ecog_mtrix, 1) 
+
+    if version == 1:  # Manually z-score the version 1 data
+        ecog_z = stats.zscore(ecog_mtrix, 1)
     if version == 2:
         ecog_z = ecog_mtrix
-    
+
     ecog_mtrix_T = np.transpose(ecog_z)
 
     num_words = list(range(np.shape(ecog_mtrix_T)[0]))
@@ -94,25 +97,26 @@ def load_Fedorenko2016(electrodes, version):
 
     # Stimuli
     for filepath in filepaths_stim:
-
         with open(filepath, 'r') as file1:
             f1 = file1.readlines()
 
         _logger.debug(f1)
 
         sentences = []
-        words = []
+        sentence_words, word_nums = [], []
         for sentence in f1:
             sentence = sentence.split(' ')
             sentences.append(sentence)
+            word_counter = 0
 
             for word in sentence:
                 if word == '\n':
                     continue
                 word = word.rstrip('\n')
-                words.append(word)
+                sentence_words.append(word)
+                word_nums.append(word_counter)
+                word_counter += 1
 
-        sentence_words = [word for word in words]
         _logger.debug(sentence_words)
 
     # Create sentenceID list
@@ -135,6 +139,7 @@ def load_Fedorenko2016(electrodes, version):
                             dims=('presentation', 'neuroid'),
                             coords={'stimulus_id': ('presentation', word_number),
                                     'word': ('presentation', sentence_words),
+                                    'word_num': ('presentation', word_nums),
                                     'sentence_id': ('presentation', sentenceID),
                                     'electrode': ('neuroid', electrode_numbers),
                                     'neuroid_id': ('neuroid', electrode_numbers),
@@ -143,8 +148,4 @@ def load_Fedorenko2016(electrodes, version):
 
     assembly.attrs['stimulus_set'] = df_stimulus_set  # Add the stimulus_set dataframe
     data = assembly if data is None else xr.concat(data, assembly)
-    return data
-
-
-if __name__ == '__main__':
-    data = load_Fedorenko2016(electrodes='all', version=2)
+    return NeuroidAssembly(data)
