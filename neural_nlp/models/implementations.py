@@ -92,11 +92,18 @@ class TopicETM(BrainModel):
     available_layers = ['projection']
     default_layers = available_layers
 
-    def __init__(self):
+    def __init__(self, identifier,
+                 weights_file,
+                 vocab_file,
+                 emb_size,
+                 binary=False):
+
         super().__init__()
-        weights_file = os.path.join(_ressources_dir, 'topicETM', 'normalized_betas_50K.npy')
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', 'vocab_50K.pkl')
+        self.emb_size = emb_size
+
+        self.weights = weights_file
         self.weights = np.load(weights_file)
+
         with open(vocab_file, 'rb') as f:
             self.vocab = pickle.load(f)
         self.vocab_index = {word: index for index, word in enumerate(self.vocab)}
@@ -130,7 +137,7 @@ class TopicETM(BrainModel):
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
                 self._logger.warning(f"Word {word} not present in model")
-                feature_vectors.append(np.zeros((100,)))
+                feature_vectors.append(np.zeros((self.emb_size,)))
         return feature_vectors
 
     def _get_activations(self, sentences, layers):
@@ -148,11 +155,45 @@ class TopicETM(BrainModel):
 
     @property
     def features_size(self):
-        return 100
+        return self.emb_size
 
     @property
     def vocab_size(self):
         return len(self.vocab)
+
+
+class ETM_topicspace(TopicETM):
+    """Uses the distributed representation of topics from the ETM as embedding features"""
+
+    identifier = TopicETM.identifier
+    print(identifier)
+
+    def __init__(self, weights_file='normalized_betas_50K.npy',
+                 vocab_file='vocab_50K.pkl',
+                 emb_size=100):
+        weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
+        vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
+        emb_size = emb_size
+
+        super(ETM_topicspace, self).__init__(identifier=self.identifier, weights_file=weights_file,
+                                             vocab_file=vocab_file, emb_size=emb_size)
+
+
+class ETM_featurespace(TopicETM):
+    """Uses the jointly learned embedding space for words and topics from the ETM as embedding features"""
+
+    identifier = TopicETM.identifier + '-featurespace'
+    print(identifier)
+
+    def __init__(self, weights_file='rho-50-wikitext_df1.npy',
+                 vocab_file='vocab_wikitext_df_1.pkl',
+                 emb_size=300):
+        weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
+        vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
+        emb_size = emb_size
+
+        super(ETM_featurespace, self).__init__(identifier=self.identifier, weights_file=weights_file,
+                                               vocab_file=vocab_file, emb_size=emb_size)
 
 
 class SkipThoughts:
@@ -340,7 +381,7 @@ class Transformer(PytorchWrapper, BrainModel):
     """
     For each of the 6 encoder blocks, we're using two layers,
     one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
-    
+
     The encoder is implemented as follows:
     ```
     input_norm = self.layer_norm(inputs)
@@ -778,7 +819,8 @@ model_pool = {
     Glove.identifier: LazyLoad(Glove),
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     Transformer.identifier: LazyLoad(Transformer),
-    TopicETM.identifier: LazyLoad(TopicETM),
+    ETM_topicspace.identifier: LazyLoad(ETM_topicspace),
+    ETM_featurespace.identifier: LazyLoad(ETM_featurespace),
     Pereira2018NonLanguage.identifier: LazyLoad(Pereira2018NonLanguage),
 }
 model_layers = {
@@ -788,7 +830,8 @@ model_layers = {
     Word2Vec.identifier: Word2Vec.default_layers,
     Glove.identifier: Glove.default_layers,
     Transformer.identifier: Transformer.default_layers,
-    TopicETM.identifier: TopicETM.default_layers,
+    ETM_topicspace.identifier: ETM_topicspace.default_layers,
+    ETM_featurespace.identifier: ETM_featurespace.default_layers,
     Pereira2018NonLanguage.identifier: Pereira2018NonLanguage.default_layers,
 }
 # untrained layers are the same as trained ones
@@ -800,7 +843,7 @@ transformer_configurations = []
 Each model configuration is a dictionary with the following keys:
 - identifier: if empty, use weight_identifier)
 - weight_identifier: which pretrained weights to use
-- prefix: the model's string prefix from which to build <prefix>Config, <prefix>Model, and <prefix>Tokenizer 
+- prefix: the model's string prefix from which to build <prefix>Config, <prefix>Model, and <prefix>Tokenizer
     if they are not defined.
 - config_ctr: the importable class name of the model's config class
 - model_ctr: the importable class name of the model's model class
