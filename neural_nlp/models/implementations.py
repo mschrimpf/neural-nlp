@@ -481,9 +481,17 @@ class _PytorchTransformerWrapper(BrainModel):
             return sequence_output[:, 0]  # sentence features from first token (usually CLS)
         elif any(self.identifier.startswith(last_token_model) for last_token_model in
                  ['distilgpt2', 'openaigpt', 'gpt', 'xlnet', 'ctrl']):
-            return sequence_output[:, -1]  # sentence features from last token
+            # use the last "real" token, ignoring padding by checking attention
+            last_attended_token = []
+            for batch in range(sequence_output.shape[0]):  # padding can be different per batch element
+                attention = inputs['attention_mask'][batch]
+                last_attention = torch.where(attention)[0].max()  # last index where attention is non-zero
+                batch_token = sequence_output[batch, last_attention, :]
+                last_attended_token.append(batch_token)
+            last_attended_token = torch.stack(last_attended_token)
+            return last_attended_token
         else:
-            raise NotImplementedError(f"not clear if {self.identifier} should use "
+            raise NotImplementedError(f"undefined if {self.identifier} should use "
                                       "first or last token for sentence features")
 
     @property
