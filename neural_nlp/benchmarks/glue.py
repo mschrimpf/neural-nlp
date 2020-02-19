@@ -76,9 +76,10 @@ def set_seed(seed):
 
 
 def train(train_dataset, features_model, decoder_head, run_evaluation,
-          train_batch_size=8, gradient_accumulation_steps=1, num_train_epochs=3, weight_decay=0,
+          train_batch_size=8, gradient_accumulation_steps=1, num_train_epochs=50, weight_decay=0,
           learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0, max_grad_norm=1.0,
-          seed=42, device='cuda', logging_steps=500):
+          val_diff_threshold=.01,
+          seed=42, device='cuda'):
     """ Train the model """
     tb_writer = SummaryWriter()
     train_sampler = RandomSampler(train_dataset)
@@ -114,13 +115,13 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
 
     global_step = 0
     epochs_trained = 0
-
-    tr_loss, logging_loss = 0.0, 0.0
+    previous_val_score = -np.inf
     decoder_head.zero_grad()
     train_iterator = trange(epochs_trained, int(num_train_epochs), desc="Epoch")
     set_seed(seed)  # Added here for reproductibility
-    for _ in train_iterator:
+    for epoch in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
+        epoch_train_loss = 0
         for step, batch in enumerate(epoch_iterator):
             decoder_head.train()
             batch = tuple(t.to(device) for t in batch)
@@ -133,7 +134,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
                 loss = loss / gradient_accumulation_steps
             loss.backward()
 
-            tr_loss += loss.item()
+            epoch_train_loss += loss.item()
             if (step + 1) % gradient_accumulation_steps == 0:
                 torch.nn.utils.clip_grad_norm_(decoder_head.parameters(), max_grad_norm)
 
@@ -142,26 +143,42 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
                 decoder_head.zero_grad()
                 global_step += 1
 
-                if logging_steps > 0 and global_step % logging_steps == 0:
-                    logs = {}
-                    results = run_evaluation()
-                    for key, value in results.items():
-                        eval_key = "eval_{}".format(key)
-                        logs[eval_key] = value
+        # see if we can stop early
+        logs = {}
+        results = run_evaluation()
+        val_score = _get_val_stop_score(results)
+        if val_score > previous_val_score + val_diff_threshold:  # all good, continue
+            logger.info(f"validation score {val_score} > previous {previous_val_score} + {val_diff_threshold}")
+            previous_val_score = val_score
+        else:  # no more improvement --> stop
+            logger.info(f"Early stopping in epoch {epoch}: {results}, previously {previous_val_score}")
+            # we could load the previous checkpoint here, but won't bother since accuracy usually still increases
+            break
 
-                    loss_scalar = (tr_loss - logging_loss) / logging_steps
-                    learning_rate_scalar = scheduler.get_lr()[0]
-                    logs["learning_rate"] = learning_rate_scalar
-                    logs["loss"] = loss_scalar
-                    logging_loss = tr_loss
+        # log
+        for key, value in results.items():
+            eval_key = "eval_{}".format(key)
+            logs[eval_key] = value
 
-                    for key, value in logs.items():
-                        tb_writer.add_scalar(key, value, global_step)
-                    print(json.dumps({**logs, **{"step": global_step}}))
+        loss_scalar = epoch_train_loss / step
+        learning_rate_scalar = scheduler.get_lr()[0]
+        logs["learning_rate"] = learning_rate_scalar
+        logs["loss"] = loss_scalar
+
+        for key, value in logs.items():
+            tb_writer.add_scalar(key, value, global_step)
+        print(json.dumps({**logs, **{"step": global_step}}))
 
     tb_writer.close()
 
-    return global_step, tr_loss / global_step
+
+def _get_val_stop_score(results):
+    if 'acc' in results:  # acc,[f1,acc_and_f1]
+        return results['acc']
+    elif 'corr' in results:  # pearson,spearman,corr
+        return results['corr']
+    else:
+        raise ValueError(f"Unknown results {results}")
 
 
 def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
@@ -276,10 +293,9 @@ class GLUEBenchmark:
         examples, label_list, output_mode = get_examples(data_dir=data_dir, task=self.task_name, evaluate=False)
         train_dataset = model.glue_dataset(task=self.task_name, examples=examples, label_list=label_list,
                                            output_mode=output_mode, max_seq_length=max_seq_length)
-        global_step, tr_loss = train(features_model=model, decoder_head=decoder_head,
-                                     train_dataset=train_dataset, run_evaluation=run_evaluation,
-                                     seed=self.seed, device=device)
-        logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+        train(features_model=model, decoder_head=decoder_head,
+              train_dataset=train_dataset, run_evaluation=run_evaluation,
+              seed=self.seed, device=device)
 
         # Evaluation
         logger.info("Evaluate")
