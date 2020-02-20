@@ -71,7 +71,7 @@ def ecog_best(benchmark='Fedorenko2016-encoding'):
 
 
 def overall():
-    whole_best(benchmark='overall', title='overall')
+    whole_best(benchmark='overall-encoding', title='overall-encoding')
 
 
 def wikitext_best(benchmark='wikitext-2'):
@@ -97,11 +97,12 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
 
 
 def get_ceiling_error(benchmark):
-    if benchmark != 'overall':
-        ceiling = benchmark_pool[benchmark]().ceiling
+    if not benchmark.startswith('overall'):
+        ceiling = benchmark_pool[benchmark].ceiling
         return ceiling.sel(aggregation='error').values
     else:
-        ceilings = [benchmark_pool[part]().ceiling for part in overall_benchmarks]
+        metric = benchmark[len('overall-'):]
+        ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling for part in overall_benchmarks]
         return np.mean([ceiling.sel(aggregation='error').values for ceiling in ceilings])
 
 
@@ -164,7 +165,7 @@ def benchmark_correlations(best_layer=True):
     for _x, r, p in zip(x, data['r'].values, data['p'].values):
         ax.text(_x, r + .05, significance_stars(p) if p < .05 else 'n.s.', fontsize=12,
                 horizontalalignment='center', verticalalignment='center')
-    savefig(fig, 'benchmark-correlations')
+    savefig(fig, 'benchmark-correlations' + ('-best' if best_layer else '-layers'))
 
 
 if __name__ == '__main__':
