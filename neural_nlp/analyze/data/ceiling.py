@@ -1,19 +1,18 @@
 import fire
 import itertools
 import numpy as np
+import scipy.stats
 import seaborn
 from brainio_base.assemblies import walk_coords
 from matplotlib import pyplot
 from matplotlib.ticker import MaxNLocator
 from pathlib import Path
-from scipy.optimize import curve_fit
 from tqdm import tqdm
 
 from brainscore.metrics import Score
 from brainscore.metrics.regression import pearsonr_correlation
 from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import benchmark_pool
-from neural_nlp.benchmarks.neural import extrapolation_ceiling
 from neural_nlp.neural_data.fmri import load_voxels
 from result_caching import store
 
@@ -63,44 +62,52 @@ def average_subregions(assembly):
     return assembly
 
 
-def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
-    benchmark_impl = benchmark_pool[benchmark]()
-    ceilings = extrapolation_ceiling(identifier=benchmark, assembly=benchmark_impl._target_assembly,
-                                     subject_column='subject' if benchmark.startswith('Pereira') else 'subject_UID',
-                                     metric=benchmark_impl._metric)
-    # work from raw values to treat sub_subjects and split all as splits and then median/std on those
-    ceilings = ceilings.raw
-    if hasattr(ceilings, 'experiment'):  # Pereira
-        ceilings = ceilings.mean('experiment')  # neuroid(median) will take care of atlas, but not ideal
-    if hasattr(ceilings, 'neuroid'):  # not true for RDMs
-        ceilings = ceilings.median('neuroid')
-    ceilings = ceilings.stack(subsplit=['sub_subjects', 'split'])  # introduces lots of nans due to non-overlap subjects
-    y, yerr = ceilings.mean('subsplit'), ceilings.std('subsplit')
+def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
+    benchmark_impl = benchmark_pool[benchmark]
+    ceilings = benchmark_impl.ceiling
 
-    # extrapolation
+    fig, ax = pyplot.subplots()
+    raw_ceilings = ceilings.raw
+    num_splits = raw_ceilings.stack(numsplit=['num_subjects', 'sub_subjects', 'split'])
+    ax.scatter(num_splits['num_subjects'].values + (-.25 + .5 * np.random.rand(len(num_splits))), num_splits.values,
+               s=1)
+
+    # bootstrap and average fits
     def v(x, v0, tau0):
         return v0 * (1 - np.exp(-x / tau0))
 
-    params, pcov = curve_fit(v, ceilings['num_subjects'], y)
-    asymptote_threshold = .0005
-    for interpolation_x in range(999):
-        if v(interpolation_x + 1, *params) - v(interpolation_x, *params) < asymptote_threshold:
-            break
-    extrapolation_x = np.arange(interpolation_x + 3)
-    extrapolation_y = v(extrapolation_x, *params)
-    # plot
-    fig, ax = pyplot.subplots()
-    ax.errorbar(ceilings['num_subjects'].values, y.values, yerr=yerr.values)
-    ax.plot(extrapolation_x, extrapolation_y, linestyle='dashed', color='gray')
-    ax.text(.5, .1, s=f"~asymptote {params[0]:.2f} at #={np.ceil(interpolation_x):.0f}",
+    x = np.arange(0, ceilings.endpoint_x + 1)
+    ys = np.array([v(x, *params) for params in ceilings.bootstrapped_params])
+    for y in ys:
+        ax.plot(x, y, alpha=.05, color='gray')
+    median_ys = np.median(ys, axis=0)
+    error = scipy.stats.median_absolute_deviation(ys, axis=0)
+    ax.errorbar(x=x, y=median_ys, yerr=error, linestyle='dashed', color='gray')
+    estimated_ceiling = ceilings.sel(aggregation='center').values
+    ax.text(.5, .1, s=f"~asymptote {estimated_ceiling :.2f} at #={ceilings.endpoint_x}",
             ha='center', va='center', transform=ax.transAxes)
+
     # plot meta
     ax.set_title(benchmark)
     ax.set_xlabel('# subjects')
     ax.set_ylabel('ceiling')
+    ax.set_ylim([min(num_splits.values), 2 * estimated_ceiling])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
     fig.savefig(Path(__file__).parent / f'extrapolation-{benchmark}.png')
+
+
+def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):
+    benchmark_impl = benchmark_pool[benchmark]
+    ceilings = benchmark_impl.ceiling
+    raw_ceilings = ceilings.raw.median('neuroid')
+    num_splits = raw_ceilings.stack(numsplit=['num_subjects', 'sub_subjects'])
+    fig, axes = pyplot.subplots(ncols=len(np.unique(num_splits['num_subjects'])))
+    for ax, ns in zip(axes.flatten(), np.unique(num_splits['num_subjects'])):
+        ax.hist(num_splits.sel(num_subjects=ns).values.flatten())
+        ax.set_xlabel(f"{ns}")
+    fig.tight_layout()
+    fig.savefig(Path(__file__).parent / f'hist-{benchmark}.png')
 
 
 if __name__ == '__main__':
