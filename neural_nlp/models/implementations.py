@@ -507,7 +507,7 @@ class _PytorchTransformerWrapper(BrainModel):
         return tokenized_text
 
     def tokens_to_inputs(self, tokens):
-        return self._tokenizer.build_inputs_with_special_tokens(tokens)
+        return np.array(self._tokenizer.build_inputs_with_special_tokens(tokens.tolist()))
 
     def glue_dataset(self, task, examples, label_list, output_mode, max_seq_length):
         import torch
