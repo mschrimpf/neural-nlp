@@ -67,10 +67,13 @@ def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
     ceilings = benchmark_impl.ceiling
 
     fig, ax = pyplot.subplots()
+
+    # plot actual data splits
     raw_ceilings = ceilings.raw
     num_splits = raw_ceilings.stack(numsplit=['num_subjects', 'sub_subjects', 'split'])
-    ax.scatter(num_splits['num_subjects'].values + (-.25 + .5 * np.random.rand(len(num_splits))), num_splits.values,
-               s=1)
+    jitter = .25
+    ax.scatter(num_splits['num_subjects'].values + (-jitter / 2 + jitter * np.random.rand(len(num_splits))),
+               num_splits.values, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
     def v(x, v0, tau0):
@@ -84,14 +87,14 @@ def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
     error = scipy.stats.median_absolute_deviation(ys, axis=0)
     ax.errorbar(x=x, y=median_ys, yerr=error, linestyle='dashed', color='gray')
     estimated_ceiling = ceilings.sel(aggregation='center').values
-    ax.text(.5, .1, s=f"~asymptote {estimated_ceiling :.2f} at #={ceilings.endpoint_x}",
+    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #={ceilings.endpoint_x}",
             ha='center', va='center', transform=ax.transAxes)
 
     # plot meta
     ax.set_title(benchmark)
     ax.set_xlabel('# subjects')
     ax.set_ylabel('ceiling')
-    ax.set_ylim([min(num_splits.values), 2 * estimated_ceiling])
+    ax.set_ylim([min(num_splits.values), min([2 * estimated_ceiling, 1.2 * max(num_splits.values)])])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
     fig.savefig(Path(__file__).parent / f'extrapolation-{benchmark}.png')
