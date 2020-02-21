@@ -42,7 +42,7 @@ def load_Fedorenko2016(electrodes, version):
         if version == 2:
             filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_lang.mat'))
 
-        print('Running Fedorenko2016 benchmark with language responsive electrodes, data version: ', version)
+        _logger.debug('Running Fedorenko2016 benchmark with language responsive electrodes, data version: ', version)
 
     # For non-noisy electrodes
     if electrodes == 'all':
@@ -60,7 +60,7 @@ def load_Fedorenko2016(electrodes, version):
         if version == 2:
             filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_all.mat'))
 
-        print('Running Fedorenko2016 benchmark with non-noisy electrodes, data version: ', version)
+        _logger.debug('Running Fedorenko2016 benchmark with non-noisy electrodes, data version: ', version)
 
         # For non-noisy electrodes
     if electrodes == 'non-language':
@@ -73,7 +73,7 @@ def load_Fedorenko2016(electrodes, version):
         subject4 = np.repeat(4, 19)
         subject5 = np.repeat(5, 16)
 
-        print('Running Fedorenko2016 benchmark with non-language electrodes')
+        _logger.debug('Running Fedorenko2016 benchmark with non-language electrodes')
 
     ecog_mat = sio.loadmat(filepath_neural[0])
     ecog_mtrix = ecog_mat['ecog']
