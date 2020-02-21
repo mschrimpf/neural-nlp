@@ -1,84 +1,151 @@
-import xarray as xr
-import logging
 import os
-import re
 from glob import glob
 
+import logging
 import numpy as np
-import pandas as pd
-from result_caching import store
+import scipy.io as sio
+import xarray as xr
+from brainio_base.assemblies import NeuroidAssembly
+from pathlib import Path
+from scipy import stats
 
-neural_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..',
-                                               'ressources', 'neural_data', 'ecog'))
+from neural_nlp.stimuli import StimulusSet
+
 _logger = logging.getLogger(__name__)
 
 
-def _combine_columns(recordings, column_name):
-    columns = [column for column in recordings.columns if column.startswith(f'{column_name}_')]
-    recordings[column_name] = [[getattr(row, field) for field in columns]
-                               for _, row in recordings.iterrows()]
-    recordings.drop(columns, axis='columns', inplace=True)
+# no need to @store()  since it is a very small file
+def load_Fedorenko2016(electrodes, version):
+    # MANUAL DIR: To give access to other people running it from different directories
+    ressources_dir = Path(__file__).parent.parent.parent / 'ressources'
+    neural_data_dir = ressources_dir / 'neural_data' / 'ecog-Fedorenko2016/'
+    stim_data_dir = ressources_dir / 'stimuli' / 'sentences_8'
+    _logger.info(f'Neural data directory: {neural_data_dir}')
+    filepaths_stim = glob(os.path.join(stim_data_dir, '*.txt'))
 
-
-@store()
-def load():
-    filepaths = glob(os.path.join(neural_data_dir, '*.mat'))
+    # ECoG
     data = None
-    for filepath in filepaths:
-        print(filepath, '...')
-        subject = re.search('all_subj_info_S([0-9]+)\.mat', filepath)
-        subject = int(subject.group(1))
-        if subject != 6: continue
 
-        electrode_meta = pd.read_csv(filepath + '-electrodes.csv')
-        for combine_column in ['native_coords', 'norm_coords']:
-            _combine_columns(electrode_meta, combine_column)
+    # For language responsive electrodes:
+    if electrodes == 'language':
 
-        recordings = pd.read_csv(filepath + '-recordings.csv')
+        # Create a subject ID list corresponding to language electrodes
+        subject1 = np.repeat(1, 47)
+        subject2 = np.repeat(2, 9)
+        subject3 = np.repeat(3, 9)
+        subject4 = np.repeat(4, 15)
+        subject5 = np.repeat(5, 18)
 
-        for combine_column in ['HGA_avg_eois', 'HGA_avg_lang', 'WordList']:
-            _combine_columns(recordings, combine_column)
+        if version == 1:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*ecog.mat'))
 
-        hga_columns = [column for column in recordings.columns if re.match('HGA_[0-9]+', column)]
-        # TODO: fix row- vs column-major ordering
-        # The HGA field in trial info contains high-gamma data for each trial (e.g. for subject 1 trial 1,
-        # the 135x128x8 matrix contains 135 time points for each of 8 words in 128 electrodes.
-        num_electrodes = len(electrode_meta)
-        num_words = len(next(recordings.iterrows())[1]['WordList'])
-        recordings['HGA'] = [np.array([getattr(row, field) for field in hga_columns], order='F')
-                                 .reshape((-1, num_electrodes, num_words)) for _, row in recordings.iterrows()]
-        recordings.drop(hga_columns, axis='columns', inplace=True)
+        if version == 2:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_lang.mat'))
 
-        recordings['subject'] = subject
+        print('Running Fedorenko2016 benchmark with language responsive electrodes, data version: ', version)
 
-        assembly = xr.DataArray(recordings['HGA'],
-                                coords={
-                                    # timepoint
-                                    'timepoint': ('timepoint', list(range(recordings['HGA'].shape[0]))),
-                                    # electrode
-                                    'electrode_num': ('electrode', electrode_meta['num']),
-                                    'electrode_cat': ('electrode', electrode_meta['cat']),
-                                    'electrode_native_coords': ('electrode', electrode_meta['native_coords']),
-                                    'electrode_norm_coords': ('electrode', electrode_meta['norm_coords']),
-                                    # presentation
-                                    'trial_num': ('presentation', recordings['TrialNum']),
-                                    'subject': ('presentation', [subject] * len(recordings)),
-                                    'run_num': ('presentation', recordings['RunNum']),
-                                    'item_num': ('presentation', recordings['ItemNum']),
-                                    'word_type': ('presentation', recordings['WordType']),
-                                    'correct': ('presentation', recordings['Correct']),
-                                    'trial_onset': ('presentation', recordings['trial_onset']),
-                                    # word
-                                    'word_list': ('word', recordings['WordList']),
-                                    'avg_eois': ('word', recordings['HGA_avg_eois']),
-                                    'avg_lang': ('word', recordings['HGA_avg_lang']),
-                                },
-                                dims=['timepoint', 'electrode', 'presentation', 'word'])
+    # For non-noisy electrodes
+    if electrodes == 'all':
 
-        data = assembly if data is None else xr.concat(data, assembly)
-    return data
+        # Create a subject ID list corresponding to non-noisy electrodes
+        subject1 = np.repeat(1, 70)
+        subject2 = np.repeat(2, 35)
+        subject3 = np.repeat(3, 20)
+        subject4 = np.repeat(4, 29)
+        subject5 = np.repeat(5, 26)
 
+        if version == 1:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*ecog_all.mat'))
 
-if __name__ == '__main__':
-    data = load()
-    pass
+        if version == 2:
+            filepath_neural = glob(os.path.join(neural_data_dir, '*metadata_all.mat'))
+
+        print('Running Fedorenko2016 benchmark with non-noisy electrodes, data version: ', version)
+
+        # For non-noisy electrodes
+    if electrodes == 'non-language':
+        filepath_neural = glob(os.path.join(neural_data_dir, '*nonlang.mat'))
+
+        # Create a subject ID list corresponding to non-language electrodes
+        subject1 = np.repeat(1, 28)
+        subject2 = np.repeat(2, 31)
+        subject3 = np.repeat(3, 14)
+        subject4 = np.repeat(4, 19)
+        subject5 = np.repeat(5, 16)
+
+        print('Running Fedorenko2016 benchmark with non-language electrodes')
+
+    ecog_mat = sio.loadmat(filepath_neural[0])
+    ecog_mtrix = ecog_mat['ecog']
+
+    if version == 1:  # Manually z-score the version 1 data
+        ecog_z = stats.zscore(ecog_mtrix, 1)
+    if version == 2:
+        ecog_z = ecog_mtrix
+
+    ecog_mtrix_T = np.transpose(ecog_z)
+
+    num_words = list(range(np.shape(ecog_mtrix_T)[0]))
+    new_sent_idx = num_words[::8]
+
+    # Average across word representations
+    sent_avg_ecog = []
+    for i in new_sent_idx:
+        eight_words = ecog_mtrix_T[i:i + 8, :]
+        sent_avg = np.mean(eight_words, 0)
+        sent_avg_ecog.append(sent_avg)
+
+    # Stimuli
+    for filepath in filepaths_stim:
+        with open(filepath, 'r') as file1:
+            f1 = file1.readlines()
+
+        _logger.debug(f1)
+
+        sentences = []
+        sentence_words, word_nums = [], []
+        for sentence in f1:
+            sentence = sentence.split(' ')
+            sentences.append(sentence)
+            word_counter = 0
+
+            for word in sentence:
+                if word == '\n':
+                    continue
+                word = word.rstrip('\n')
+                sentence_words.append(word)
+                word_nums.append(word_counter)
+                word_counter += 1
+
+        _logger.debug(sentence_words)
+
+    # Create sentenceID list
+    sentence_lst = list(range(0, 52))
+    sentenceID = np.repeat(sentence_lst, 8)
+
+    subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5], axis=0)
+
+    # Create a list for each word number
+    word_number = list(range(np.shape(ecog_mtrix_T)[0]))
+
+    # Add a pd df as the stimulus_set
+    zipped_lst = list(zip(sentenceID, word_number, sentence_words))
+    df_stimulus_set = StimulusSet(zipped_lst, columns=['sentence_id', 'stimulus_id', 'word'])
+    df_stimulus_set.name = 'Fedorenko2016.ecog'
+
+    # xarray
+    electrode_numbers = list(range(np.shape(ecog_mtrix_T)[1]))
+    assembly = xr.DataArray(ecog_mtrix_T,
+                            dims=('presentation', 'neuroid'),
+                            coords={'stimulus_id': ('presentation', word_number),
+                                    'word': ('presentation', sentence_words),
+                                    'word_num': ('presentation', word_nums),
+                                    'sentence_id': ('presentation', sentenceID),
+                                    'electrode': ('neuroid', electrode_numbers),
+                                    'neuroid_id': ('neuroid', electrode_numbers),
+                                    'subject_UID': ('neuroid', subjectID),  # Name is subject_UID for consistency
+                                    })
+
+    assembly.attrs['stimulus_set'] = df_stimulus_set  # Add the stimulus_set dataframe
+    data = assembly if data is None else xr.concat(data, assembly)
+    return NeuroidAssembly(data)
