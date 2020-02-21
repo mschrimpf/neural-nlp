@@ -497,5 +497,7 @@ def savefig(fig, savename):
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    for ignore_logger in ['matplotlib']:
+        logging.getLogger(ignore_logger).setLevel(logging.INFO)
     seaborn.set(context='talk')
     fire.Fire()
