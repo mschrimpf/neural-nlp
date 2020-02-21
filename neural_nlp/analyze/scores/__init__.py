@@ -11,6 +11,7 @@ import sys
 from functools import reduce
 from matplotlib import pyplot
 from matplotlib.colors import to_rgba
+from matplotlib.text import Text
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
 from scipy.stats import pearsonr, spearmanr
@@ -217,17 +218,35 @@ def collect_scores(benchmark, models):
     return data
 
 
-def fmri_experiment_correlations(choose_best=False):
-    experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(choose_best)
+def compare_glue(benchmark2='Pereira2018-encoding'):
+    from neural_nlp.benchmarks.glue import benchmark_pool as glue_benchmark_pool
+    fig, axes = pyplot.subplots(nrows=2, ncols=4, sharey=True)
+    for ax, glue_benchmark in zip(axes.flatten(), glue_benchmark_pool):
+        compare(benchmark1=glue_benchmark, benchmark2=benchmark2, ax=ax)
+        # reduce font sizes
+        ax.set_xlabel(ax.get_xlabel(), fontsize=8)
+        ax.set_ylabel(ax.get_ylabel(), fontsize=8)
+        ax.set_xticklabels([f"{tick:.1f}" for tick in ax.get_xticks()], fontsize=8)
+        ax.set_yticklabels([f"{tick:.1f}" for tick in ax.get_yticks()], fontsize=8)
+        for element in ax.get_children():
+            if not isinstance(element, Text):
+                continue
+            size = 4 if not any(element._text.startswith(corr) for corr in ['pearson', 'spearman']) else 6
+            element._fontproperties._size = 5  # size
+    savefig(fig, f"glue-{benchmark2}")
+
+
+def fmri_experiment_correlations(best_layer=False):
+    experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(best_layer)
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
-    fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if choose_best else .2,
-                              score_annotations=experiment2_scores['model'].values if choose_best else None,
+    fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if best_layer else .2,
+                              score_annotations=experiment2_scores['model'].values if best_layer else None,
                               xlabel='Exp. 2 (384sentences)', ylabel='Exp. 3 (243sentences)')
     scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
     ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='black')
-    savefig(fig, savename='fmri-correlations')
+    savefig(fig, savename='fmri-correlations' + ('-best' if best_layer else '-layers'))
 
 
 def collect_Pereira_experiment_scores(best_layer=False):
