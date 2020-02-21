@@ -3,7 +3,7 @@ import pytest
 from pytest import approx
 
 from neural_nlp import neural_data
-from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
+from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank, \
     load_Pereira2018_Blank_languageresiduals
 

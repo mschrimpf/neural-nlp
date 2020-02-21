@@ -15,7 +15,7 @@ from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
-from neural_nlp.neural_data.ecog_greta import load_Fedorenko2016
+from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
     load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
 from neural_nlp.stimuli import load_stimuli, StimulusSet
@@ -404,7 +404,7 @@ def Fedorenko2016AllV2Encoding(identifier):
 def Fedorenko2016NonLangEncoding(identifier):
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = load_Fedorenko2016(electrodes='non-language',
-                                                    version=2)  # Version 2 - do not z-score in ecog_greta.py
+                                                    version=2)  # Version 2 - do not z-score in ecog.py
     return benchmark
 
 
