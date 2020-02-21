@@ -186,26 +186,33 @@ def collect_scores(benchmark, models):
         data = data.groupby(['model', 'layer']).mean().reset_index()  # mean across benchmarks per model-layer
         data['benchmark'] = benchmark
     else:
-        data = []
+        data, missing_models = [], []
+        previous_resultcaching_cachedonly = os.getenv('RESULTCACHING_CACHEDONLY', '0')
+        os.environ['RESULTCACHING_CACHEDONLY'] = '1'
         for model in tqdm(models, desc='model scores'):
-            os.environ['RESULTCACHING_CACHEDONLY'] = '1'
             try:
                 model_scores = score(benchmark=benchmark, model=model)
             except NotCachedError:
-                logger.warning(f"No score cached for model {model} on benchmark {benchmark}")
+                missing_models.append(model)
                 continue
             adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
             for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
                 adjunct_values = dict(zip(adjunct_columns, adjunct_values))
                 current_score = model_scores.sel(**adjunct_values)
                 center, error = get_score_center_err(current_score)
-                data.append(
-                    {**adjunct_values, **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
+                data.append({**adjunct_values,
+                             **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
+        if missing_models:
+            logger.warning(f"No score cached for models {missing_models} on benchmark {benchmark}")
         data = pd.DataFrame(data)
-        if benchmark.startswith('wikitext'):
+        if any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
             data['layer'] = -1
             data['error'] = 0  # nans will otherwise be dropped later on
+        if benchmark.startswith('wikitext'):
             data = data[data['measure'] == 'test_loss']
+        if benchmark == 'glue-mnli':  # only consider mnli (not mnli-mm)
+            data = data[data['eval_task'] == 'mnli']
+        os.environ['RESULTCACHING_CACHEDONLY'] = previous_resultcaching_cachedonly
     data.to_csv(store_file, index=False)
     return data
 
@@ -241,7 +248,7 @@ def align_scores(scores1, scores2, identifier_set=('model', 'layer')):
     identifiers1 = list(zip(*[scores1[identifier_key].values for identifier_key in identifier_set]))
     identifiers2 = list(zip(*[scores2[identifier_key].values for identifier_key in identifier_set]))
     overlap = list(set(identifiers1).intersection(set(identifiers2)))
-    non_overlap = list(set(identifiers1).difference(set(identifiers2)))
+    non_overlap = list(set(identifiers1).symmetric_difference(set(identifiers2)))
     if len(non_overlap) > 0:
         logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")
     scores1 = scores1.iloc[[identifiers1.index(identifier) for identifier in overlap]]
@@ -405,8 +412,13 @@ def get_score_center_err(s, combine_layers=True):
     if hasattr(s, 'aggregation'):
         return s.sel(aggregation='center').values.tolist(), s.sel(aggregation='error').values.tolist()
     if hasattr(s, 'measure'):
-        # s = s.sel(measure='test_perplexity') if len(s['measure'].values.shape) > 0 else s
-        s = s.sel(measure='test_loss') if len(s['measure'].values.shape) > 0 else s
+        if len(s['measure'].values.shape) > 0:
+            if 'test_loss' in s['measure'].values:  # wikitext
+                s = s.sel(measure='test_loss')
+            elif 'acc_and_f1' in s['measure'].values:  # glue with acc,f1,acc_and_f1
+                s = s.sel(measure='acc')
+            elif 'pearson' in s['measure'].values:  # glue with pearson,spearman,corr
+                s = s.sel(measure='pearson')
         s = s.values.tolist()
         return s, np.nan
     if isinstance(s, (int, float)):
@@ -420,13 +432,13 @@ def ceiling_normalize(scores):
     for benchmark in set(scores['benchmark'].values):
         if benchmark.startswith('overall'):
             metric = benchmark[len('overall-'):]
-            ceilings = [benchmark_pool[f"{part}-{metric}"]().ceiling.sel(aggregation='center')
+            ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling.sel(aggregation='center')
                         for part in overall_benchmarks]
             benchmark_ceilings[benchmark] = np.mean(ceilings)
-        elif benchmark.startswith('wikitext'):
-            benchmark_ceilings[benchmark] = np.nan
+        elif any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
+            benchmark_ceilings[benchmark] = 1
         else:
-            benchmark_ceilings[benchmark] = benchmark_pool[benchmark]().ceiling.sel(aggregation='center') \
+            benchmark_ceilings[benchmark] = benchmark_pool[benchmark].ceiling.sel(aggregation='center') \
                 .values.tolist()
     scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
     if not benchmark.startswith('wikitext'):
