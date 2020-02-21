@@ -89,9 +89,12 @@ models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 overall_benchmarks = ('Pereira2018', 'Fedorenko2016', 'stories_froi_bold4s')
+performance_benchmarks = ['wikitext', 'glue']
 
 
-def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', best_layer=True, normalize=True):
+def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm',
+            best_layer=True, normalize=True, ax=None):
+    ax_given = ax is not None
     all_models = models
     scores1 = collect_scores(benchmark=benchmark1, models=all_models)
     scores2 = collect_scores(benchmark=benchmark2, models=all_models)
@@ -103,19 +106,38 @@ def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm', bes
     scores1, scores2 = align_scores(scores1, scores2, identifier_set=['model'] if best_layer else ['model', 'layer'])
     colors = [model_colors[model.replace('-untrained', '')] for model in scores1['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
-    savename = f"{benchmark1}__{benchmark2}"
     fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
                               score_annotations=scores1['model'].values if best_layer else None,
-                              xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'))
-    savefig(fig, savename=savename)
+                              xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
+                              ax=ax)
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
+    normalize_y = normalize and not any(benchmark2.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
+    if normalize_x:
+        xlim = [0, 1]
+    if normalize_y:
+        ylim = [0, 1]
+    if normalize_x:
+        ax.plot([0, 1], [0, 1], color='gray', linestyle='dashed')
+        ceiling_err = get_ceiling_error(benchmark1)
+        shaded_errorbar(y=ylim, x=[1, 1], error=ceiling_err, ax=ax, vertical=True,
+                        alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
+    if normalize_y:
+        ceiling_err = get_ceiling_error(benchmark2)
+        shaded_errorbar(x=xlim, y=[1, 1], error=ceiling_err, ax=ax,
+                        alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    if not ax_given:
+        savefig(fig, savename=f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers'))
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=True,
-                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, **kwargs):
+                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, ax=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
-    fig, ax = pyplot.subplots()
+    fig, ax = pyplot.subplots() if ax is None else (None, ax)
     ax.scatter(x=x, y=y, c=color, s=2)
     ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
     if score_annotations is not None:
