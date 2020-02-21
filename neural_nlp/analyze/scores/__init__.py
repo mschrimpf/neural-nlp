@@ -30,44 +30,46 @@ model_colors = {
     # controls / embeddings
     'sentence-length': 'lightgray',
     'word2vec': 'silver',
-    'skip-thoughts': 'darkgray',
     'glove': 'gray',
     # semantic?
     'topicETM': 'bisque',
-    # LSTMs
+    # RNNs
     'lm_1b': 'slategrey',
+    'skip-thoughts': 'darkgray',
     # naive transformer
     'transformer': 'rosybrown',
     # BERT
+    'distilbert-base-uncased': 'salmon',
     'bert-base-uncased': 'tomato',
     'bert-base-multilingual-cased': 'r',
     'bert-large-uncased': 'orangered',
     'bert-large-uncased-whole-word-masking': 'red',
-    'distilbert-base-uncased': 'salmon',
     # RoBERTa
     'distilroberta-base': 'firebrick',
     'roberta-base': 'brown',
     'roberta-large': 'maroon',
-    # GPT
-    'distilgpt2': 'lightblue',
-    'openaigpt': 'cadetblue',
-    'gpt2': 'steelblue',
-    'gpt2-medium': 'c',
-    'gpt2-large': 'teal',
-    'gpt2-xl': 'darkslategray',
+    # XLM
+    'xlm-mlm-enfr-1024': 'darkorange',
+    'xlm-clm-enfr-1024': 'chocolate',
+    'xlm-mlm-xnli15-1024': 'goldenrod',
+    'xlm-mlm-100-1280': 'darkgoldenrod',
+    'xlm-mlm-en-2048': 'orange',
+    # XLM-RoBERTa
+    'xlm-roberta-base': '#bc6229',
+    'xlm-roberta-large': '#974e20',
     # Transformer-XL
     'transfo-xl-wt103': 'peru',
     # XLNet
-    'xlnet-base-cased': 'yellow',
-    'xlnet-large-cased': 'gold',
-    # XLM
-    'xlm-mlm-en-2048': 'orange',
-    'xlm-mlm-enfr-1024': 'darkorange',
-    'xlm-mlm-xnli15-1024': 'goldenrod',
-    'xlm-clm-enfr-1024': 'chocolate',
-    'xlm-mlm-100-1280': 'darkgoldenrod',
+    'xlnet-base-cased': 'gold',
+    'xlnet-large-cased': '#ffbf00',
     # CTRL
-    'ctrl': 'blue',
+    'ctrl': '#009EDB',
+    # T5
+    't5-small': 'mediumpurple',
+    't5-base': 'blueviolet',
+    't5-large': 'mediumorchid',
+    't5-3b': 'darkviolet',
+    't5-11b': 'rebeccapurple',
     # AlBERT
     'albert-base-v1': 'limegreen',
     'albert-base-v2': 'limegreen',
@@ -77,15 +79,13 @@ model_colors = {
     'albert-xlarge-v2': 'green',
     'albert-xxlarge-v1': 'darkgreen',
     'albert-xxlarge-v2': 'darkgreen',
-    # T5
-    't5-small': 'mediumpurple',
-    't5-base': 'blueviolet',
-    't5-large': 'mediumorchid',
-    't5-3b': 'darkviolet',
-    't5-11b': 'rebeccapurple',
-    # XLM-RoBERTa
-    'xlm-roberta-base': 'magenta',
-    'xlm-roberta-large': 'm',
+    # GPT
+    'openaigpt': 'lightblue',
+    'distilgpt2': 'cadetblue',
+    'gpt2': 'steelblue',
+    'gpt2-medium': 'c',
+    'gpt2-large': 'teal',
+    'gpt2-xl': 'darkslategray',
 }
 models = tuple(model_colors.keys())
 
