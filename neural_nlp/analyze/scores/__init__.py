@@ -17,8 +17,6 @@ from scipy.stats import pearsonr, spearmanr
 from tqdm import tqdm
 
 from neural_nlp import score, model_layers, benchmark_pool
-from neural_nlp.analyze.sampled_architectures.neural_scores import score_all_models, \
-    _score_model as score_architecture_model
 from neural_nlp.benchmarks.neural import aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
@@ -150,28 +148,6 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
 
 def significance_stars(p, max_stars=5):
     return '*' * max([i for i in range(max_stars + 1) if p <= 0.5 / (10 ** i)])
-
-
-def sampled_architectures(zoo_dir='/braintree/data2/active/users/msch/zoo.wmt17-lm',
-                          benchmark='Pereira2018-encoding-min'):
-    scores = score_all_models(zoo_dir, benchmark=benchmark, perplexity_threshold=20)
-    model_dirs, scores = list(scores.keys()), list(scores.values())
-    architectures = [model_dir.name[:5] for model_dir in model_dirs]
-    zoo_name = Path(zoo_dir).name
-    fig, ax = _bars(architectures, scores, ylabel=f"MT model scores on {benchmark}")
-    ax.set_ylim([ax.get_ylim()[0], 0.3])
-    savefig(fig, savename=f"{zoo_name}-{benchmark}")
-
-
-def lstm_mt_vs_lm(benchmark='Pereira2018-encoding-min'):
-    mt_score = score_architecture_model('/braintree/data2/active/users/msch/zoo.wmt17/'  # this is actually -mt
-                                        'eb082aa158bb3ae2f9c5c3d4c5ff7bae2f93f901',
-                                        benchmark=benchmark)
-    lm_score = score(model='lm_1b', benchmark=benchmark)
-    fig, ax = _bars(['MT: WMT\'17', 'LM: 1B'], [mt_score, lm_score], fig_kwargs=dict(figsize=(5, 5)))
-    ax.set_ylim([ax.get_ylim()[0], 0.3])
-    ax.set_title('LSTM trained on Machine Translation/Language Modeling')
-    savefig(fig, 'lstm_mt_lm')
 
 
 def collect_scores(benchmark, models):
