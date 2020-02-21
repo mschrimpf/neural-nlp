@@ -437,6 +437,28 @@ def ceiling_normalize(scores):
     return scores
 
 
+def get_ceiling_error(benchmark):
+    if not benchmark.startswith('overall'):
+        ceiling = benchmark_pool[benchmark].ceiling
+        return ceiling.sel(aggregation='error').values
+    else:
+        metric = benchmark[len('overall-'):]
+        ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling for part in overall_benchmarks]
+        return np.mean([ceiling.sel(aggregation='error').values for ceiling in ceilings])
+
+
+def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, vertical=False, **kwargs):
+    shaded_kwargs = shaded_kwargs or {}
+    shaded_kwargs = {**dict(linewidth=0.0), **shaded_kwargs}
+    ax = ax or pyplot.gca()
+    line = ax.plot(x, y, **kwargs)
+    if not vertical:
+        ax.fill_between(x, y - error, y + error, **shaded_kwargs)
+    else:
+        ax.fill_betweenx(y, x - error, x + error, **shaded_kwargs)
+    return line
+
+
 def savefig(fig, savename):
     fig.tight_layout()
     savepath = Path(__file__).parent / f"{savename}.png"

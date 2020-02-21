@@ -5,7 +5,7 @@ from matplotlib import pyplot
 from pathlib import Path
 
 from neural_nlp import model_layers
-from neural_nlp.analyze.scores import collect_scores, models as all_models, fmri_atlases, model_colors
+from neural_nlp.analyze.scores import collect_scores, models as all_models, fmri_atlases, model_colors, shaded_errorbar
 
 model_groups = [
     # BERT
@@ -112,15 +112,6 @@ def layer_training_delta(models=None):
     # save
     fig.tight_layout()
     fig.savefig(Path(__file__).parent / 'layer_ordering-deltas.png', dpi=600)
-
-
-def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, **kwargs):
-    shaded_kwargs = shaded_kwargs or {}
-    shaded_kwargs = {**dict(linewidth=0.0), **shaded_kwargs}
-    ax = ax or pyplot.gca()
-    line = ax.plot(x, y, **kwargs)
-    ax.fill_between(x, y - error, y + error, **shaded_kwargs)
-    return line
 
 
 if __name__ == '__main__':

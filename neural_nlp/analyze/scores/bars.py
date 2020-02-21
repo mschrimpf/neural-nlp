@@ -3,6 +3,7 @@ from decimal import Decimal
 import fire
 import itertools
 import logging
+import matplotlib
 import numpy as np
 import pandas as pd
 import seaborn
@@ -10,11 +11,9 @@ import sys
 from matplotlib import pyplot
 from scipy.stats import pearsonr
 
-from neural_nlp import benchmark_pool
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, ceiling_normalize, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars, overall_benchmarks
-from neural_nlp.analyze.scores.layers import shaded_errorbar
+    align_scores, savefig, significance_stars, get_ceiling_error, shaded_errorbar
 
 _logger = logging.getLogger(__name__)
 
@@ -84,7 +83,7 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
     models = [model for model in all_models if model in data['model'].values]
     fig, ax = pyplot.subplots(figsize=(5, 4))
     ax.set_title(title, **(title_kwargs or {}))
-    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=9)), **kwargs)
+    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)), **kwargs)
     ceiling_err = get_ceiling_error(benchmark)
     ceiling_y = 1  # we already normalized so ceiling == 1
     xlim = ax.get_xlim()
@@ -93,17 +92,19 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
     ax.set_xlim(xlim)
     ax.set_xticks([])
     ax.set_xticklabels([])
+
+    @matplotlib.ticker.FuncFormatter
+    def score_formatter(score, pos):
+        if 0 <= score < 1:
+            return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
+        elif np.abs(score - 1) < .001:
+            return "1."
+        else:
+            return f"{score:.1f}"
+
+    ax.yaxis.set_major_formatter(score_formatter)
+    ax.spines['bottom'].set_position(('data', 0))
     savefig(fig, f'bars-{benchmark}')
-
-
-def get_ceiling_error(benchmark):
-    if not benchmark.startswith('overall'):
-        ceiling = benchmark_pool[benchmark].ceiling
-        return ceiling.sel(aggregation='error').values
-    else:
-        metric = benchmark[len('overall-'):]
-        ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling for part in overall_benchmarks]
-        return np.mean([ceiling.sel(aggregation='error').values for ceiling in ceilings])
 
 
 def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predictivity (r / c)", text_kwargs=None):
@@ -117,7 +118,7 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predic
         model_x = x - offset * width + model_iter * width
         ax.bar(model_x, height=y, yerr=yerr, width=width, edgecolor='none', color=model_colors[model])
         for xpos in model_x:
-            ax.text(x=xpos + .8 * width / 2, y=.01, s=model,
+            ax.text(x=xpos + .8 * width / 2, y=.005, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
     ax.set_ylabel(ylabel, fontdict=dict(fontsize=10))
     if ylim is not None and ylim <= 1:
