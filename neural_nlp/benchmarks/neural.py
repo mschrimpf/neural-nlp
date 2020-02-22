@@ -457,7 +457,8 @@ def extrapolation_ceiling(identifier, assembly, metric, average_function, subjec
     subject_subsamples = list(range(2, len(subjects) + 1))
     scores = []
     for num_subjects in tqdm(subject_subsamples, desc='num subjects'):
-        for sub_subjects in itertools.combinations(subjects, num_subjects):
+        subset_combinations = list(itertools.combinations(subjects, num_subjects))
+        for sub_subjects in tqdm(subset_combinations, desc='subject subsets'):
             # use a subset assembly with only a subset of the subjects
             sub_assembly = assembly[{'neuroid': [subject in sub_subjects for subject in
                                                  assembly[subject_column].values]}]
@@ -469,6 +470,7 @@ def extrapolation_ceiling(identifier, assembly, metric, average_function, subjec
             score['sub_subjects'] = [str(sub_subjects)]
             scores.append(score.raw)
     scores = Score.merge(*scores)
+    subject_subsamples = list(sorted(set(scores['num_subjects'].values)))  # e.g. for Pereira, not all combos possible
 
     # bootstrapped extrapolations
     def v(x, v0, tau0):
