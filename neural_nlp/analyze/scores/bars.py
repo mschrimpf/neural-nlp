@@ -85,11 +85,12 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
     ax.set_title(title, **(title_kwargs or {}))
     _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)), **kwargs)
     ceiling_err = get_ceiling_error(benchmark)
-    ceiling_y = 1  # we already normalized so ceiling == 1
-    xlim = ax.get_xlim()
-    shaded_errorbar(x=[-50, +50], y=[ceiling_y, ceiling_y], error=ceiling_err, ax=ax,
-                    alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
-    ax.set_xlim(xlim)
+    if not np.isnan(ceiling_err):  # performance benchmarks
+        ceiling_y = 1  # we already normalized so ceiling == 1
+        xlim = ax.get_xlim()
+        shaded_errorbar(x=[-50, +50], y=[ceiling_y, ceiling_y], error=ceiling_err, ax=ax,
+                        alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
+        ax.set_xlim(xlim)
     ax.set_xticks([])
     ax.set_xticklabels([])
 

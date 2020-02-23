@@ -479,13 +479,15 @@ def ceiling_normalize(scores):
 
 
 def get_ceiling_error(benchmark):
-    if not benchmark.startswith('overall'):
-        ceiling = benchmark_pool[benchmark].ceiling
-        return ceiling.sel(aggregation='error').values
-    else:
+    if benchmark.startswith('overall'):
         metric = benchmark[len('overall-'):]
         ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling for part in overall_benchmarks]
         return np.mean([ceiling.sel(aggregation='error').values for ceiling in ceilings])
+    elif any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
+        return np.nan
+    else:
+        ceiling = benchmark_pool[benchmark].ceiling
+        return ceiling.sel(aggregation='error').values
 
 
 def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, vertical=False, **kwargs):
