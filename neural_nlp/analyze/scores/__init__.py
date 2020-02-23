@@ -94,14 +94,15 @@ performance_benchmarks = ['wikitext', 'glue']
 
 
 def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm',
-            best_layer=True, normalize=True, ax=None):
+            best_layer=True, normalize=True, reference_best=False, ax=None):
     ax_given = ax is not None
     all_models = models
     scores1 = collect_scores(benchmark=benchmark1, models=all_models)
     scores2 = collect_scores(benchmark=benchmark2, models=all_models)
     scores1, scores2 = average_adjacent(scores1).dropna(), average_adjacent(scores2).dropna()
     if best_layer:
-        scores1, scores2 = choose_best_scores(scores1), choose_best_scores(scores2)
+        choose_best = choose_best_scores if not reference_best else reference_best_scores
+        scores1, scores2 = choose_best(scores1), choose_best(scores2)
     if normalize:
         scores1, scores2 = ceiling_normalize(scores1), ceiling_normalize(scores2)
     scores1, scores2 = align_scores(scores1, scores2, identifier_set=['model'] if best_layer else ['model', 'layer'])
@@ -362,6 +363,17 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
     savefig(fig, savename=f"untrained_trained-{benchmark}")
+
+
+def reference_best_scores(scores, reference_benchmark='Pereira2018-encoding'):
+    reference_scores = collect_scores(benchmark=reference_benchmark, models=set(scores['model'].values))
+    reference_scores = average_adjacent(reference_scores).dropna()
+    best_reference_scores = choose_best_scores(reference_scores)
+    selection_columns = ['model', 'layer']
+    best_selection = set([tuple(identifier) for identifier in best_reference_scores[selection_columns].values])
+    index = [tuple(identifier) in best_selection for identifier in scores[selection_columns].values]
+    scores = scores[index]
+    return scores
 
 
 def choose_best_scores(scores):
