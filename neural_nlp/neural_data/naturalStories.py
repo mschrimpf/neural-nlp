@@ -76,10 +76,22 @@ def load_naturalStories():
     # get sentence_IDs (finds 481 sentences)
     sentence_ID = []
     len_voc_word = len(voc_word)
+    idx = 1
+    for i,elm in enumerate(voc_word):
+        sentence_ID.append(idx)
+        if elm.endswith((".","?","!",".'","?'","!'",";'")):
+            if i+1 < len(voc_word):
+                if not (voc_word[i+1].islower() or voc_word[i] == "Mr."):
+                    idx += 1
+
+
+    # get IDs of words within a sentence
+    word_within_a_sentence_ID = []
+    len_voc_word = len(voc_word)
     idx = 0
     for i,elm in enumerate(voc_word):
         idx += 1
-        sentence_ID.append(idx)
+        word_within_a_sentence_ID.append(idx)
         if elm.endswith((".","?","!",".'","?'","!'",";'")):
             if i+1 < len(voc_word):
                 if not (voc_word[i+1].islower() or voc_word[i] == "Mr."):
@@ -104,19 +116,20 @@ def load_naturalStories():
     # subjects = WorkerIDs
     # correct_meta = number of correct answers in comprehension questions
     assembly = xr.DataArray(matrix,
-                        dims = ('presentation','subjects'),
-                        coords={'word': ('presentation', voc_word),
-                                'story_id': ('presentation', voc_item_ID),
-                                'word_id': ('presentation', voc_zone_ID),
-                                'sentence_id': ('presentation', sentence_ID),
-                                'stimulus_id': ('presentation', stimulus_ID),
-                                'subjectid': ('subjects', subjects),
-                                'correct': ('subjects', correct_meta),
-                                'WorkTimeInSeconds': ('subjects', WorkTimeInSeconds_meta)
-                               })
+                            dims = ('presentation','subjects'),
+                            coords={'word': ('presentation', voc_word),
+                                    'story_id': ('presentation', voc_item_ID),
+                                    'word_id': ('presentation', voc_zone_ID),
+                                    'word_within_sentence_id': ('presentation', word_within_a_sentence_ID),
+                                    'sentence_id': ('presentation', sentence_ID),
+                                    'stimulus_id': ('presentation', stimulus_ID),
+                                    'subjectid': ('subjects', subjects),
+                                    'correct': ('subjects', correct_meta),
+                                    'WorkTimeInSeconds': ('subjects', WorkTimeInSeconds_meta)
+                                   })
 
     assembly.attrs['stimulus_set'] = df_stimulus_set  # Add the stimulus_set dataframe
-    return assembly
+    print(assembly)
 
 if __name__ == '__main__':
     data = load_naturalStories()
