@@ -6,6 +6,7 @@ from neural_nlp import neural_data
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_Pereira2018, load_Pereira2018_Blank, \
     load_Pereira2018_Blank_languageresiduals
+from neural_nlp.neural_data.naturalStories import load_naturalStories
 
 
 class TestPereiraLanguageResiduals:
@@ -116,3 +117,13 @@ def test_Fedorenko2016_all():
     assert len(assembly['presentation']) == 416
     assert len(assembly['neuroid']) == 180
     assert len(np.unique(assembly['subject_UID'])) == 5
+
+
+def test_natural_stories():
+    assembly = load_naturalStories()
+    assert len(assembly['word']) == 10256
+    assert len(set(assembly['story_id'].values)) == 10
+    assert len(set(assembly['sentence_id'].values)) == 481
+    assert len(set(assembly['subject_id'].values)) == 180
+    mean_assembly = assembly.mean('subjects')
+    assert not np.isnan(mean_assembly).any()
