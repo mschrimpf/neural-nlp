@@ -248,6 +248,10 @@ class _PereiraBenchmark(Benchmark):
 
 
 def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
+    """
+    Pass a `stimulus_set` through a model `candidate`.
+    Operates on a sentence-based `stimulus_set`.
+    """
     activations = []
     for story in ordered_set(stimulus_set[reset_column].values):
         story_stimuli = stimulus_set[stimulus_set[reset_column] == story]
@@ -260,6 +264,33 @@ def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=Tr
            itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
     assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
     model_activations = model_activations[{'presentation': idx}]
+    return model_activations
+
+
+def read_words(candidate, stimulus_set, reset_column='sentence_id', copy_columns=(), average_sentence=False):
+    """
+    Pass a `stimulus_set` through a model `candidate`.
+    In contrast to the `listen_to` function, this function operates on a word-based `stimulus_set`.
+    """
+    # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
+    activations = []
+    for i, reset_id in enumerate(ordered_set(stimulus_set[reset_column].values)):
+        part_stimuli = stimulus_set[stimulus_set[reset_column] == reset_id]
+        # stimulus_ids = part_stimuli['stimulus_id']
+        sentence_stimuli = StimulusSet({'sentence': ' '.join(part_stimuli['word']),
+                                        reset_column: list(set(part_stimuli[reset_column]))})
+        sentence_stimuli.name = f"{stimulus_set.name}-{reset_id}"
+        sentence_activations = candidate(stimuli=sentence_stimuli, average_sentence=average_sentence)
+        for column in copy_columns:
+            sentence_activations[column] = ('presentation', part_stimuli[column])
+        activations.append(sentence_activations)
+    model_activations = merge_data_arrays(activations)
+    # merging does not maintain stimulus order. the following orders again
+    idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
+           itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
+    assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
+    model_activations = model_activations[{'presentation': idx}]
+
     return model_activations
 
 
@@ -345,31 +376,9 @@ class _Fedorenko2016:
     def __call__(self, candidate):
         _logger.info('Computing activations')
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-        model_activations = self._read_words(candidate, stimulus_set)
+        model_activations = read_words(candidate, stimulus_set, average_sentence=self._average_sentence)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
-
-    @classmethod
-    def _read_words(cls, candidate, stimulus_set):  # This is a new version of the listen_to_stories function
-        # Input: stimulus_set = pandas df, col 1 with sentence ID and 2nd col as word.
-        activations = []
-        for i, sentence_id in enumerate(ordered_set(stimulus_set['sentence_id'].values)):
-            sentence_stimuli = stimulus_set[stimulus_set['sentence_id'] == sentence_id]
-            sentence_stimuli = StimulusSet({'sentence': ' '.join(sentence_stimuli['word']),
-                                            'sentence_id': list(set(sentence_stimuli['sentence_id']))})
-            sentence_stimuli.name = f"{stimulus_set.name}-{sentence_id}"
-            sentence_activations = candidate(stimuli=sentence_stimuli, average_sentence=False)
-            sentence_activations['stimulus_id'] = ('presentation', 8 * i + np.arange(0, 8))
-            sentence_activations['sentence_id'] = ('presentation', [sentence_id] * 8)
-            activations.append(sentence_activations)
-        model_activations = merge_data_arrays(activations)
-        # merging does not maintain stimulus order. the following orders again
-        idx = [model_activations['stimulus_id'].values.tolist().index(stimulus_id) for stimulus_id in
-               itertools.chain.from_iterable(s['stimulus_id'].values for s in activations)]
-        assert len(set(idx)) == len(idx), "Found duplicate indices to order activations"
-        model_activations = model_activations[{'presentation': idx}]
-
-        return model_activations
 
 
 def Fedorenko2016Encoding(identifier):

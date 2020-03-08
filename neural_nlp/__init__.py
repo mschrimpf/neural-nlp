@@ -19,12 +19,16 @@ def score(benchmark, model, layers=None, model_impl=None, subsample=None):
     layers = layers or model_layers[model]
 
     _logger.info('Loading benchmark')
-    benchmark_impl = benchmark_pool[benchmark]()
+    benchmark_impl = benchmark_pool[benchmark]
 
     _logger.info('Running')
-    # shortcut for behavioral benchmarks
-    if benchmark in ['wikitext-2']:
+    # shortcut for performance benchmarks
+    if any(benchmark.startswith(performance_prefix) for performance_prefix in ['wikitext', 'glue']):
         return benchmark_impl(model_impl)
+
+    # only last layer for behavioral benchmarks
+    if benchmark.startswith('stories_readingtime'):
+        layers = layers[-1:]
 
     layer_scores = []
     for i, layer in enumerate(tqdm(layers, desc='layers')):
