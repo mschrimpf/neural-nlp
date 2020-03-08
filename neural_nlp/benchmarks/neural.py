@@ -3,11 +3,7 @@ import warnings
 import itertools
 import logging
 import numpy as np
-import scipy.stats
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
-from numpy.random.mtrand import RandomState
-from scipy.optimize import curve_fit
-from tqdm import tqdm, trange
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
@@ -15,6 +11,7 @@ from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
+from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
     load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
@@ -127,6 +124,7 @@ class StoriesVoxelEncoding(Benchmark):
         self._metric = CrossRegressedCorrelation(
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
+        self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
 
     @property
     def identifier(self):
@@ -138,9 +136,7 @@ class StoriesVoxelEncoding(Benchmark):
 
     @property
     def ceiling(self):
-        return extrapolation_ceiling(
-            identifier=self.identifier, assembly=self._target_assembly, metric=self._metric,
-            average_function=lambda scores: scores.median('neuroid'), subject_column='subject_UID')
+        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -204,6 +200,7 @@ class _PereiraBenchmark(Benchmark):
         self._data_version = data_version
         self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
+        self._ceiler = self.PereiraExtrapolationCeiling()
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     @property
@@ -235,6 +232,7 @@ class _PereiraBenchmark(Benchmark):
 
     def _apply_cross(self, source_assembly, cross_assembly):
         cross_assembly = cross_assembly.dropna('neuroid')  # some subjects have only done one experiment
+        source_assembly = source_assembly.dropna('neuroid')  # only relevant when running audio-visual self as "model"
         assert len(cross_assembly['presentation']) in [243, 384]
         assert not np.isnan(cross_assembly).any()
         source_assembly = source_assembly[{'presentation': [stimulus_id in cross_assembly['stimulus_id'].values
@@ -243,8 +241,36 @@ class _PereiraBenchmark(Benchmark):
 
     @property
     def ceiling(self):
-        return extrapolation_ceiling(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric,
-                                     average_function=lambda scores: scores.mean('experiment').median('neuroid'))
+        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
+
+    class PereiraExtrapolationCeiling(ExtrapolationCeiling):
+        def iterate_subsets(self, assembly, num_subjects):
+            # cross experiment to obtain more subjects to extrapolate.
+            # don't worry about atlases here, cross-metric will take care of it.
+            experiments = set(assembly['experiment'].values)
+            for experiment in sorted(experiments):
+                experiment_assembly = assembly[{'presentation': [
+                    experiment_value == experiment for experiment_value in assembly['experiment'].values]}]
+                experiment_assembly = experiment_assembly.dropna('neuroid')  # drop subjects that haven't done this exp
+                if len(set(experiment_assembly[self.subject_column].values)) < num_subjects:
+                    continue  # not enough subjects
+                for selection, sub_assembly in super(_PereiraBenchmark.PereiraExtrapolationCeiling, self). \
+                        iterate_subsets(assembly=experiment_assembly, num_subjects=num_subjects):
+                    selection.update({'experiment': experiment})
+                    yield selection, sub_assembly
+
+        def average_collected(self, scores):
+            return scores.mean('sub_experiment').mean('atlas')
+
+        def check_experiment_overlap(self, assembly):
+            for experiment in set(assembly['experiment'].values):
+                experiment_assembly = assembly[
+                    {'presentation': [exp == experiment for exp in assembly['experiment'].values]}]
+                experiment_assembly = experiment_assembly.dropna('neuroid')
+                if len(experiment_assembly['neuroid']) < 1 or \
+                        set(experiment_assembly['subject'].values) != set(assembly['subject'].values):
+                    return False  # no subject has done this experiment or no subject overlap for experiment
+            return True  # all good
 
 
 def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
@@ -337,31 +363,32 @@ class PereiraEncodingMin(_PereiraBenchmark):
 
 
 class PereiraDecoding(_PereiraBenchmark):
-    def __init__(self):
+    def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
             correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None))
         metric = Invert(metric)
-        super(PereiraDecoding, self).__init__(metric=metric)
+        super(PereiraDecoding, self).__init__(metric=metric, **kwargs)
 
 
 class PereiraRDM(_PereiraBenchmark):
-    def __init__(self):
+    def __init__(self, **kwargs):
         metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
                                         kfold=True, test_size=None))
-        super(PereiraRDM, self).__init__(metric=metric)
+        super(PereiraRDM, self).__init__(metric=metric, **kwargs)
 
 
 class _Fedorenko2016:
     def __init__(self, identifier, metric):
         self._identifier = identifier
-        assembly = load_Fedorenko2016(electrodes='language', version=1)
+        assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=1))
         self._target_assembly = assembly
         self._metric = metric
         self._average_sentence = False
+        self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
 
     @property
     def identifier(self):
@@ -369,9 +396,7 @@ class _Fedorenko2016:
 
     @property
     def ceiling(self):
-        return extrapolation_ceiling(
-            identifier=self.identifier, assembly=self._target_assembly, metric=self._metric,
-            average_function=lambda scores: scores.median('neuroid'), subject_column='subject_UID')
+        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -394,26 +419,26 @@ def Fedorenko2016Encoding(identifier):
 def Fedorenko2016V2Encoding(identifier):
     """ Fedorenko benchmark WITH z-scored recordings """
     benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='language', version=2)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=2))
     return benchmark
 
 
 def Fedorenko2016AllEncoding(identifier):
     benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=1)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=1))
     return benchmark
 
 
 def Fedorenko2016AllV2Encoding(identifier):
     benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='all', version=2)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=2))
     return benchmark
 
 
 def Fedorenko2016NonLangEncoding(identifier):
     benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = load_Fedorenko2016(electrodes='non-language',
-                                                    version=2)  # Version 2 - do not z-score in ecog.py
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language',
+                                                                     version=2))  # Version 2 - do not z-score in ecog.py
     return benchmark
 
 
@@ -427,98 +452,21 @@ def Fedorenko2016RDM(identifier):
     return _Fedorenko2016(identifier=identifier, metric=metric)
 
 
-def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
-    subjects = set(assembly[subject_column].values)
-    scores = []
-    for subject in tqdm(subjects, desc='heldout subject'):
-        subject_assembly = assembly[{'neuroid': [subject_value == subject
-                                                 for subject_value in assembly[subject_column].values]}]
-        # run subject pool as neural candidate
-        subject_pool = subjects - {subject}
-        pool_assembly = assembly[{'neuroid': [subject in subject_pool for subject in assembly[subject_column].values]}]
-        score = metric(pool_assembly, subject_assembly)
-        # store scores
-        score = score.expand_dims(subject_column, _apply_raw=False)
-        score.__setitem__(subject_column, [subject], _apply_raw=False)
-        scores.append(score)
-
-    scores = Score.merge(*scores)
-    error = scores.sel(aggregation='center').std(subject_column)
-    scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
-    scores.loc[{'aggregation': 'error'}] = error
-    return scores
-
-
-def _check_Pereira_experiment_overlap(assembly):
-    for experiment in set(assembly['experiment'].values):
-        experiment_assembly = assembly[{'presentation': [exp == experiment for exp in assembly['experiment'].values]}]
-        experiment_assembly = experiment_assembly.dropna('neuroid')
-        if len(experiment_assembly['neuroid']) < 1 or \
-                set(experiment_assembly['subject'].values) != set(assembly['subject'].values):
-            return False  # no subject has done this experiment or no subject overlap for experiment
-    return True  # all good
-
-
-@store(identifier_ignore=['assembly', 'metric', 'subject_column', 'average_function'])
-def extrapolation_ceiling(identifier, assembly, metric, average_function, subject_column='subject'):
-    # collect
-    subjects = set(assembly[subject_column].values)
-    subject_subsamples = list(range(2, len(subjects) + 1))
-    scores = []
-    for num_subjects in tqdm(subject_subsamples, desc='num subjects'):
-        subset_combinations = list(itertools.combinations(subjects, num_subjects))
-        for sub_subjects in tqdm(subset_combinations, desc='subject subsets'):
-            # use a subset assembly with only a subset of the subjects
-            sub_assembly = assembly[{'neuroid': [subject in sub_subjects for subject in
-                                                 assembly[subject_column].values]}]
-            if identifier.startswith('Pereira') and not _check_Pereira_experiment_overlap(sub_assembly):
-                continue  # no two subjects have done same experiment
-            score = holdout_subject_ceiling(assembly=sub_assembly, metric=metric, subject_column=subject_column)
-            score = score.expand_dims('num_subjects').expand_dims('sub_subjects')
-            score['num_subjects'] = [num_subjects]
-            score['sub_subjects'] = [str(sub_subjects)]
-            scores.append(score.raw)
-    scores = Score.merge(*scores)
-    subject_subsamples = list(sorted(set(scores['num_subjects'].values)))  # e.g. for Pereira, not all combos possible
-
-    # bootstrapped extrapolations
-    def v(x, v0, tau0):
-        return v0 * (1 - np.exp(-x / tau0))
-
-    ceilings = average_function(scores)
-    ceilings.attrs['raw'] = scores
-    num_bootstraps = 100
-    rng = RandomState(0)
-    bootstrap_params = []
-    for _ in trange(num_bootstraps, desc='bootstraps'):
-        bootstrapped_scores = []
-        for num_subjects in subject_subsamples:
-            num_scores = ceilings.sel(num_subjects=num_subjects)
-            num_scores = num_scores.dropna('sub_subjects')  # the sub_subjects dimension creates nans, get rid of those
-            assert set(num_scores.dims) == {'sub_subjects', 'split'}
-            # choose from subject subsets and the splits therein, with replacement for variance
-            choices = num_scores.values.flatten()
-            bootstrapped_score = rng.choice(choices, size=len(choices), replace=True)
-            bootstrapped_scores.append(np.mean(bootstrapped_score))
-
-        params, pcov = curve_fit(v, subject_subsamples, bootstrapped_scores)
-        bootstrap_params.append(params)
-
-    # find endpoint and error
-    asymptote_threshold = .0005
-    interpolation_xs = np.arange(1000)
-    ys = np.array([v(interpolation_xs, *params) for params in bootstrap_params])
-    median_ys = np.median(ys, axis=0)
-    diffs = np.diff(median_ys)
-    end_x = np.where(diffs < asymptote_threshold)[0].min()  # first x where increase smaller than threshold
-
-    # put together
-    score = Score([median_ys[end_x], scipy.stats.median_absolute_deviation(ys[:, end_x])],
-                  coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
-    score.attrs['raw'] = ceilings
-    score.attrs['bootstrapped_params'] = bootstrap_params
-    score.attrs['endpoint_x'] = end_x
-    return score
+def Fedorenko2016AllLastEncoding(identifier):
+    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
+    correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+    metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
+                                       crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
+                                                                   # nothing to stratify over only 1 sample per sentence
+                                                                   stratification_coord=None, ))
+    benchmark = _Fedorenko2016(identifier=identifier, metric=metric)
+    assembly = load_Fedorenko2016(electrodes='all')
+    assert len(set(assembly['word_num'].values)) == 8  # every sentence has exactly 8 words in this dataset
+    assembly = assembly[{'presentation': [word in [6, 7, 8] for word in assembly['word'].values]}]
+    benchmark._target_assembly = assembly
+    benchmark._average_sentence = True
+    benchmark._target_assembly.attrs['stimulus_set'].name += '-last'
+    return benchmark
 
 
 def aggregate(score, combine_layers=True):
