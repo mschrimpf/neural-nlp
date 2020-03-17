@@ -5,7 +5,7 @@ import numpy as np
 from collections import Counter
 import scipy.io as sio
 
-def createBrainMatrix(subject_ID = '018', score_name = 'benchmark=Pereira2018-encoding,model=glove,subsample=None.pkl'):
+def createBrainMatrix(subjectID = '018', score_name = 'benchmark=Pereira2018-encoding,model=glove,subsample=None.pkl'):
 
     # Define variables and file names
     SPM_dim = (79,95,69)
@@ -42,10 +42,6 @@ def createBrainMatrix(subject_ID = '018', score_name = 'benchmark=Pereira2018-en
     # Group by (unique) neuroid
     _, index = np.unique(s3['neuroid_id'], return_index = True)
     
-    # Finding the average brain-scores for each roi 
-    # s3_roi = s3.groupby('roi').mean()
-    # rois = (s3_roi['roi'].values)
-    
     # Maintain the order of neuroids
     s4 = s3.isel(neuroid = np.sort(index))
     
@@ -61,5 +57,4 @@ def createBrainMatrix(subject_ID = '018', score_name = 'benchmark=Pereira2018-en
         brain[(s5.col_to_coord_1.values[idx])-1, (s5.col_to_coord_2.values[idx])-1, (s5.col_to_coord_3.values[idx])-1] = element
     
     # Save brain matrix
-    sio.savemat(matfile_name, {'brain_matrix':brain})
-
+    sio.savemat(matfile_name, {'brain_matrix':brain}, {'mean_brainscore':s5.mean().values, 'max_brainscore':s5.max().values, 'min_brainscore':s5.min().values, 'best_layer':s5.layer.values})
