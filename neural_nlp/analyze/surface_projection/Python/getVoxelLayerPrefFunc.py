@@ -33,7 +33,7 @@ def getVoxelLayerPref(subjectID = '018', score_name = 'benchmark=Pereira2018-enc
     t4 = t3.isel(neuroid = np.sort(index))
     
     # Test NaNs
-    if np.isnan(t4).any() == True:
+    if np.isnan(t4).any():
         nan_sum = np.isnan(t4).sum()
         nan_perc = nan_sum / (t4.shape[0] * t4.shape[1]) * 100
     
