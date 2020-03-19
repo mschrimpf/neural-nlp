@@ -1,3 +1,9 @@
+from collections import defaultdict
+
+import sys
+
+import logging
+
 import fire
 import itertools
 import numpy as np
@@ -6,6 +12,7 @@ import seaborn
 from brainio_base.assemblies import walk_coords
 from matplotlib import pyplot
 from matplotlib.ticker import MaxNLocator
+from numpy.random.mtrand import RandomState
 from pathlib import Path
 from tqdm import tqdm
 
@@ -62,7 +69,7 @@ def average_subregions(assembly):
     return assembly
 
 
-def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
+def plot_extrapolation_ceiling(benchmark='stories_readingtime-encoding'):
     benchmark_impl = benchmark_pool[benchmark]
     ceilings = benchmark_impl.ceiling
 
@@ -70,16 +77,19 @@ def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
 
     # plot actual data splits
     raw_ceilings = ceilings.raw
-    num_splits = raw_ceilings.stack(numsplit=['num_subjects', 'sub_subjects', 'split'])
+    subject_columns = prefixdict(default='sub_subject_UID', Pereira='sub_subject', stories='sub_subject_id')
+    subject_column = subject_columns[benchmark]
+    num_splits = raw_ceilings.stack(numsplit=['num_subjects', subject_column, 'split'])
     jitter = .25
-    ax.scatter(num_splits['num_subjects'].values + (-jitter / 2 + jitter * np.random.rand(len(num_splits))),
+    rng = RandomState(0)
+    ax.scatter(num_splits['num_subjects'].values + (-jitter / 2 + jitter * rng.rand(len(num_splits))),
                num_splits.values, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
-    def v(x, v0, tau0):
-        return v0 * (1 - np.exp(-x / tau0))
+    def v(x, v0, tau0, a):
+        return v0 * (1 - np.exp((-x + a) / tau0))
 
-    x = np.arange(0, ceilings.endpoint_x + 1)
+    x = np.arange(0, max(ceilings.endpoint_x, max(raw_ceilings['num_subjects'].values)) + 2)
     ys = np.array([v(x, *params) for params in ceilings.bootstrapped_params])
     for y in ys:
         ax.plot(x, y, alpha=.05, color='gray')
@@ -93,8 +103,8 @@ def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
     # plot meta
     ax.set_title(benchmark)
     ax.set_xlabel('# subjects')
-    ax.set_ylabel('ceiling')
-    ax.set_ylim([min(num_splits.values), min([2 * estimated_ceiling, 1.2 * max(num_splits.values)])])
+    ax.set_ylabel('estimated ceiling')
+    ax.set_ylim([0.9 * np.nanmin(num_splits.values), max([2 * estimated_ceiling, 1.2 * np.nanmax(num_splits.values)])])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
     fig.savefig(Path(__file__).parent / f'extrapolation-{benchmark}.png')
@@ -113,9 +123,24 @@ def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):
     fig.savefig(Path(__file__).parent / f'hist-{benchmark}.png')
 
 
+class prefixdict(defaultdict):
+    def __init__(self, default=None, **kwargs):
+        super(prefixdict, self).__init__(default_factory=lambda: default, **kwargs)
+
+    def __getitem__(self, item):
+        subitem = item
+        while len(subitem) > 1:
+            try:
+                return super(prefixdict, self).__getitem__(subitem)
+            except KeyError:
+                subitem = subitem[:-1]
+        raise KeyError(item)
+
+
 if __name__ == '__main__':
     import warnings
 
-    warnings.simplefilter(action='ignore')  # , category=FutureWarning)
+    warnings.simplefilter(action='ignore', category=FutureWarning)
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     seaborn.set(context='talk')
     fire.Fire()

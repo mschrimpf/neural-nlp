@@ -10,71 +10,78 @@ from brainscore.metrics.transformations import apply_aggregate
 from result_caching import store
 
 
-def holdout_subject_ceiling(assembly, metric, subject_column='subject'):
-    subjects = set(assembly[subject_column].values)
-    scores = []
-    for subject in tqdm(subjects, desc='heldout subject'):
-        subject_assembly = assembly[{'neuroid': [subject_value == subject
-                                                 for subject_value in assembly[subject_column].values]}]
-        # run subject pool as neural candidate
-        subject_pool = subjects - {subject}
-        pool_assembly = assembly[{'neuroid': [subject in subject_pool for subject in assembly[subject_column].values]}]
-        score = metric(pool_assembly, subject_assembly)
-        # store scores
-        score = score.expand_dims(subject_column, _apply_raw=False)
-        score.__setitem__(subject_column, [subject], _apply_raw=False)
-        scores.append(score)
+class HoldoutSubjectCeiling:
+    def __init__(self, subject_column):
+        self.subject_column = subject_column
 
-    scores = Score.merge(*scores)
-    error = scores.sel(aggregation='center').std(subject_column)
-    scores = apply_aggregate(lambda scores: scores.mean(subject_column), scores)
-    scores.loc[{'aggregation': 'error'}] = error
-    return scores
+    def __call__(self, assembly, metric):
+        subjects = set(assembly[self.subject_column].values)
+        scores = []
+        iterate_subjects = self.get_subject_iterations(subjects)
+        for subject in tqdm(iterate_subjects, desc='heldout subject'):
+            try:
+                subject_assembly = assembly[{'neuroid': [subject_value == subject
+                                                         for subject_value in assembly[self.subject_column].values]}]
+                # run subject pool as neural candidate
+                subject_pool = subjects - {subject}
+                pool_assembly = assembly[
+                    {'neuroid': [subject in subject_pool for subject in assembly[self.subject_column].values]}]
+                score = self.score(pool_assembly, subject_assembly, metric=metric)
+                # store scores
+                score = score.expand_dims(self.subject_column, _apply_raw=False)
+                score.__setitem__(self.subject_column, [subject], _apply_raw=False)
+                scores.append(score)
+            except NoOverlapException:
+                continue  # ignore
 
+        scores = Score.merge(*scores)
+        error = scores.sel(aggregation='center').std(self.subject_column)
+        scores = apply_aggregate(lambda scores: scores.mean(self.subject_column), scores)
+        scores.loc[{'aggregation': 'error'}] = error
+        return scores
 
-class GeneratorLen(object):
-    def __init__(self, gen, length):
-        self.gen = gen
-        self.length = length
+    def get_subject_iterations(self, subjects):
+        return subjects  # iterate over all subjects
 
-    def __len__(self):
-        return self.length
-
-    def __iter__(self):
-        return self.gen
+    def score(self, pool_assembly, subject_assembly, metric):
+        return metric(pool_assembly, subject_assembly)
 
 
 class ExtrapolationCeiling:
     def __init__(self, subject_column='subject'):
         self.subject_column = subject_column
+        self.holdout_ceiling = HoldoutSubjectCeiling(subject_column=subject_column)
 
     @store(identifier_ignore=['assembly', 'metric'])
     def __call__(self, identifier, assembly, metric):
         scores = self.collect(identifier, assembly=assembly, metric=metric)
-        ceilings = self.average_collected(scores)
-        ceilings.attrs['raw'] = scores
-        return self.extrapolate(ceilings)
+        return self.extrapolate(scores)
 
     def collect(self, identifier, assembly, metric):
         subjects = set(assembly[self.subject_column].values)
-        subject_subsamples = list(range(2, len(subjects) + 1))
+        subject_subsamples = self.build_subject_subsamples(subjects)
         scores = []
         for num_subjects in tqdm(subject_subsamples, desc='num subjects'):
             selection_combinations = self.iterate_subsets(assembly, num_subjects=num_subjects)
             for selections, sub_assembly in tqdm(selection_combinations, desc='selections'):
-                score = holdout_subject_ceiling(assembly=sub_assembly, metric=metric,
-                                                subject_column=self.subject_column)
-                score = score.expand_dims('num_subjects')
-                score['num_subjects'] = [num_subjects]
-                for key, selection in selections.items():
-                    expand_dim = f'sub_{key}'
-                    score = score.expand_dims(expand_dim)
-                    score[expand_dim] = [str(selection)]
-                scores.append(score.raw)
+                try:
+                    score = self.holdout_ceiling(assembly=sub_assembly, metric=metric)
+                    score = score.expand_dims('num_subjects')
+                    score['num_subjects'] = [num_subjects]
+                    for key, selection in selections.items():
+                        expand_dim = f'sub_{key}'
+                        score = score.expand_dims(expand_dim)
+                        score[expand_dim] = [str(selection)]
+                    scores.append(score.raw)
+                except KeyError:  # nothing to merge
+                    continue
         scores = Score.merge(*scores)
         ceilings = self.average_collected(scores)
         ceilings.attrs['raw'] = scores
         return ceilings
+
+    def build_subject_subsamples(self, subjects):
+        return tuple(range(2, len(subjects) + 1))
 
     def iterate_subsets(self, assembly, num_subjects):
         subjects = set(assembly[self.subject_column].values)
@@ -124,3 +131,7 @@ class ExtrapolationCeiling:
         score.attrs['bootstrapped_params'] = bootstrap_params
         score.attrs['endpoint_x'] = end_x
         return score
+
+
+class NoOverlapException(Exception):
+    pass
