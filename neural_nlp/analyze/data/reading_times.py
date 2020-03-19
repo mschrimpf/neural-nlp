@@ -1,3 +1,4 @@
+import fire
 import numpy as np
 from matplotlib import pyplot
 from pathlib import Path
@@ -8,19 +9,36 @@ from neural_nlp import benchmark_pool
 def plot_nans():
     benchmark = benchmark_pool['stories_readingtime-encoding']
     assembly = benchmark._target_assembly
+    assembly = assembly.transpose('neuroid', 'presentation')
     nans = np.isnan(assembly)
 
-    fig, ax = pyplot.subplots(figsize=(5, 50))
+    fig, ax = pyplot.subplots(figsize=(50, 5))
     ax.imshow(nans)
-    xtick_frequency, ytick_frequency = 20, 25
-    xticks = np.arange(0, len(nans['subject_id']), xtick_frequency)
+    xtick_frequency, ytick_frequency = 25, 20
+    xticks = np.arange(0, len(nans['word']), xtick_frequency)
     ax.set_xticks(xticks)
-    ax.set_xticklabels(nans['subject_id'].values[xticks], rotation=90)
-    yticks = np.arange(0, len(nans['word']), ytick_frequency)
+    ax.set_xticklabels(nans['word'].values[xticks], rotation=90)
+    yticks = np.arange(0, len(nans['subject_id']), ytick_frequency)
     ax.set_yticks(yticks)
-    ax.set_yticklabels(nans['word'].values[yticks])
+    ax.set_yticklabels(nans['subject_id'].values[yticks])
     fig.savefig(Path(__file__).parent / "reading_times-nans.png")
 
 
+def plot_histogram(datapoint_cutoff=None):
+    benchmark = benchmark_pool['stories_readingtime-encoding']
+    assembly = benchmark._target_assembly
+    non_nans = ~np.isnan(assembly)
+    sums = non_nans.sum('presentation')
+    if datapoint_cutoff is not None:
+        sums = sums[sums < datapoint_cutoff]
+
+    fig, ax = pyplot.subplots()
+    ax.hist(sums, bins=100)
+    ax.set_xlabel('number of data points (not nan)')
+    ax.set_ylabel('number of subjects')
+    fig.savefig(Path(__file__).parent / ("reading_times-nans_hist" +
+                                         (f'-{datapoint_cutoff}' if datapoint_cutoff is not None else '') + ".png"))
+
+
 if __name__ == '__main__':
-    plot_nans()
+    fire.Fire()
