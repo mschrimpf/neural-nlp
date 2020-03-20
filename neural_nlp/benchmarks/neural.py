@@ -4,6 +4,8 @@ import itertools
 import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
+from numpy.random.mtrand import RandomState
+from tqdm import tqdm
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
@@ -11,7 +13,7 @@ from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
-from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling
+from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
     load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
@@ -389,14 +391,11 @@ class _Fedorenko2016:
         self._metric = metric
         self._average_sentence = False
         self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
+        self._electrode_ceiler = self.ElectrodeExtrapolation(subject_column='subject_UID')
 
     @property
     def identifier(self):
         return self._identifier
-
-    @property
-    def ceiling(self):
-        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -404,6 +403,65 @@ class _Fedorenko2016:
         model_activations = read_words(candidate, stimulus_set, average_sentence=self._average_sentence)
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
+
+    @property
+    def ceiling(self):
+        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
+
+    @property
+    def electrode_ceiling(self):
+        return self._electrode_ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
+
+    class ElectrodeExtrapolation(ExtrapolationCeiling):
+        """ extrapolate to infinitely many electrodes """
+
+        def __init__(self, *args, **kwargs):
+            super(_Fedorenko2016.ElectrodeExtrapolation, self).__init__(*args, **kwargs)
+            self._rng = RandomState(0)
+            self._num_samples = 15  # number of samples per electrode selection
+
+        def collect(self, identifier, assembly, metric):
+            """ Instead of iterating over subject combinations and then afterwards over holdout subjects,
+            we here iterate over holdout subjects and then over electrode sub-combinations of the remaining pool. """
+            subjects = set(assembly[self.subject_column].values)
+            scores = []
+            for holdout_subject in tqdm(subjects, desc='subjects'):
+                subject_pool = subjects - {holdout_subject}
+                subject_pool_assembly = assembly[{'neuroid': [subject in subject_pool
+                                                              for subject in assembly[self.subject_column].values]}]
+                holdout_subject_assembly = assembly[{'neuroid': [subject == holdout_subject
+                                                                 for subject in assembly[self.subject_column].values]}]
+
+                electrodes = subject_pool_assembly['neuroid_id'].values
+                electrodes_range = np.arange(5, len(electrodes), 5)
+                for num_electrodes in tqdm(electrodes_range, desc='num electrodes'):
+                    electrodes_combinations = self._choose_electrodes(electrodes, num_electrodes,
+                                                                      num_choices=self._num_samples)
+                    for electrodes_split, electrodes_selection in enumerate(electrodes_combinations):
+                        electrodes_assembly = subject_pool_assembly[{'neuroid': [
+                            neuroid_id in electrodes_selection
+                            for neuroid_id in subject_pool_assembly['neuroid_id'].values]}]
+                        score = metric(electrodes_assembly, holdout_subject_assembly)
+                        # store scores
+                        score = score.expand_dims(f"sub_{self.subject_column}")
+                        score.__setitem__(f"sub_{self.subject_column}", [holdout_subject])
+                        score = score.expand_dims('num_electrodes').expand_dims('electrodes_split')
+                        score['num_electrodes'] = [num_electrodes]
+                        score['electrodes_split'] = [electrodes_split]
+                        scores.append(score)
+
+            scores = Score.merge(*scores)
+            ceilings = scores.raw
+            ceilings = self.average_collected(ceilings)
+            ceilings.attrs['raw'] = scores
+            return ceilings
+
+        def _choose_electrodes(self, electrodes, num_electrodes, num_choices):
+            choices = [self._rng.choice(electrodes, size=num_electrodes, replace=False) for _ in range(num_choices)]
+            return choices
+
+        def average_collected(self, scores):
+            return scores.median('neuroid').rename({'split': 'subsplit'}).stack(split=['electrodes_split', 'subsplit'])
 
 
 def Fedorenko2016Encoding(identifier):
