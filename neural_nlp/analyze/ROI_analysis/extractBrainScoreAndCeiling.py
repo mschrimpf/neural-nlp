@@ -4,8 +4,7 @@ import numpy as np
 import scipy.io as sio
 import matplotlib.pyplot as plt
 
-def extractBrainScoreAndCeiling(subjectID = '018', 
-                                score_name = 'benchmark=Pereira2018-encoding,model=gpt2-xl,subsample=None.pkl',
+def extractBrainScoreAndCeiling(score_name = 'benchmark=Pereira2018-encoding,model=gpt2-xl,subsample=None.pkl',
                                 ceil_name = 'neural_nlp.benchmarks.neural.PereiraEncoding.ceiling.pkl'):
     
     # Extracts the brain-score for each ROI, across all subject. Can either be ceiled or not. Saves pkl file.
