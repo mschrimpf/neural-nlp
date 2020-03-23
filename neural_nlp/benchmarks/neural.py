@@ -202,7 +202,7 @@ class _PereiraBenchmark(Benchmark):
         self._data_version = data_version
         self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
-        self._ceiler = self.PereiraExtrapolationCeiling()
+        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject')
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     @property
@@ -246,6 +246,13 @@ class _PereiraBenchmark(Benchmark):
         return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
     class PereiraExtrapolationCeiling(ExtrapolationCeiling):
+        def __init__(self, subject_column, *args, **kwargs):
+            super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).__init__(
+                subject_column, *args, **kwargs)
+            self._num_subsamples = 5
+            self.holdout_ceiling = _PereiraBenchmark.PereiraHoldoutSubjectCeiling(subject_column=subject_column)
+            self._rng = RandomState(0)
+
         def iterate_subsets(self, assembly, num_subjects):
             # cross experiment to obtain more subjects to extrapolate.
             # don't worry about atlases here, cross-metric will take care of it.
@@ -256,13 +263,24 @@ class _PereiraBenchmark(Benchmark):
                 experiment_assembly = experiment_assembly.dropna('neuroid')  # drop subjects that haven't done this exp
                 if len(set(experiment_assembly[self.subject_column].values)) < num_subjects:
                     continue  # not enough subjects
-                for selection, sub_assembly in super(_PereiraBenchmark.PereiraExtrapolationCeiling, self). \
-                        iterate_subsets(assembly=experiment_assembly, num_subjects=num_subjects):
-                    selection.update({'experiment': experiment})
-                    yield selection, sub_assembly
+                for sub_subjects in self._random_combinations(
+                        subjects=set(experiment_assembly[self.subject_column].values),
+                        num_subjects=num_subjects, choice=self._num_subsamples, rng=self._rng):
+                    sub_assembly = assembly[{'neuroid': [subject in sub_subjects
+                                                         for subject in assembly[self.subject_column].values]}]
+                    yield {self.subject_column: sub_subjects, 'experiment': experiment}, sub_assembly
+
+        def _random_combinations(self, subjects, num_subjects, choice, rng):
+            # following https://stackoverflow.com/a/55929159/2225200. Also see similar method in `behavioral.py`.
+            subjects = np.array(list(subjects))
+            combinations = set()
+            while len(combinations) < choice:
+                elements = rng.choice(subjects, size=num_subjects, replace=False)
+                combinations.add(tuple(elements))
+            return combinations
 
         def average_collected(self, scores):
-            return scores.mean('sub_experiment').mean('atlas')
+            return scores.mean('sub_experiment').mean('experiment').median('neuroid')
 
         def check_experiment_overlap(self, assembly):
             for experiment in set(assembly['experiment'].values):
@@ -273,6 +291,14 @@ class _PereiraBenchmark(Benchmark):
                         set(experiment_assembly['subject'].values) != set(assembly['subject'].values):
                     return False  # no subject has done this experiment or no subject overlap for experiment
             return True  # all good
+
+    class PereiraHoldoutSubjectCeiling(HoldoutSubjectCeiling):
+        def __init__(self, *args, **kwargs):
+            super(_PereiraBenchmark.PereiraHoldoutSubjectCeiling, self).__init__(*args, **kwargs)
+            self._rng = RandomState(0)
+
+        def get_subject_iterations(self, subjects):
+            return [self._rng.choice(list(subjects))]  # use only a single subject
 
 
 def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
