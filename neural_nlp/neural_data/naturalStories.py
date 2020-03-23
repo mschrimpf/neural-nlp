@@ -5,6 +5,7 @@ import xarray as xr
 from pathlib import Path
 from tqdm import tqdm
 
+from neural_nlp.stimuli import StimulusSet
 from result_caching import store
 
 _logger = logging.getLogger(__name__)
@@ -67,19 +68,16 @@ def load_naturalStories():
 
     # get sentence_IDs (finds 481 sentences)
     sentence_ID = []
-    len_voc_word = len(voc_word)
     idx = 1
-    for i,elm in enumerate(voc_word):
+    for i, elm in enumerate(voc_word):
         sentence_ID.append(idx)
-        if elm.endswith((".","?","!",".'","?'","!'",";'")):
-            if i+1 < len(voc_word):
-                if not (voc_word[i+1].islower() or voc_word[i] == "Mr."):
+        if elm.endswith((".", "?", "!", ".'", "?'", "!'", ";'")):
+            if i + 1 < len(voc_word):
+                if not (voc_word[i + 1].islower() or voc_word[i] == "Mr."):
                     idx += 1
-
 
     # get IDs of words within a sentence
     word_within_a_sentence_ID = []
-    len_voc_word = len(voc_word)
     idx = 0
     for i, elm in enumerate(voc_word):
         idx += 1
@@ -96,6 +94,12 @@ def load_naturalStories():
 
     # set df_stimulus_set for attributes
     df_stimulus_set = word_df[['word', 'item', 'zone']]
+    df_stimulus_set = StimulusSet(df_stimulus_set)
+    df_stimulus_set['story_id'] = df_stimulus_set['item']
+    df_stimulus_set['stimulus_id'] = stimulus_ID
+    df_stimulus_set['sentence_id'] = sentence_ID
+    df_stimulus_set['word_id'] = voc_zone_ID
+    df_stimulus_set['word_within_sentence_id'] = word_within_a_sentence_ID
     df_stimulus_set.name = 'naturalStories'
 
     # build xarray

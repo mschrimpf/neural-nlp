@@ -122,8 +122,17 @@ def test_Fedorenko2016_all():
 def test_natural_stories():
     assembly = load_naturalStories()
     assert len(assembly['word']) == 10256
+    assert len(set(assembly['stimulus_id'].values)) == len(assembly['presentation'])
     assert len(set(assembly['story_id'].values)) == 10
     assert len(set(assembly['sentence_id'].values)) == 481
     assert len(set(assembly['subject_id'].values)) == 180
+
+    stimulus_set = assembly.stimulus_set
+    assert set(stimulus_set['stimulus_id'].values) == set(assembly['stimulus_id'].values)
+    assert len(set(stimulus_set['story_id'].values)) == len(set(assembly['story_id'].values))
+    assert len(set(stimulus_set['sentence_id'].values)) == len(set(assembly['sentence_id'].values))
+    assert ' '.join(stimulus_set['word']) == ' '.join(assembly['word'].values)
+    assert stimulus_set.name == 'naturalStories'
+
     mean_assembly = assembly.mean('subjects')
     assert not np.isnan(mean_assembly).any()
