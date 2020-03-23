@@ -4,10 +4,12 @@ import xarray
 from brainio_base.assemblies import NeuroidAssembly
 from brainio_collection.fetch import fullname
 from numpy.random.mtrand import RandomState
+from tqdm import tqdm
 
 from brainscore.benchmarks import Benchmark
+from brainscore.metrics import Score
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct
+from brainscore.metrics.transformations import CartesianProduct, apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling, NoOverlapException
 from neural_nlp.benchmarks.neural import read_words
@@ -84,7 +86,7 @@ class StoriesReadingTimeEncoding(Benchmark):
                 subject_column, *args, **kwargs)
             self._rng = RandomState(0)
             self._num_subsamples = 5
-            self.holdout_ceiling = StoriesReadingTimeEncoding.AveragePoolHoldoutCeiling(subject_column=subject_column)
+            self.holdout_ceiling = StoriesReadingTimeEncoding.SplitHalfPoolCeiling(subject_column=subject_column)
 
         def build_subject_subsamples(self, subjects):
             return tuple(range(2, len(subjects) + 1, 5))  # reduce computational cost by only using every 5th point
@@ -95,7 +97,7 @@ class StoriesReadingTimeEncoding(Benchmark):
             subjects = set(assembly[self.subject_column].values)
             subject_combinations = self._random_combinations(subjects, num_subjects,
                                                              choice=self._num_subsamples, rng=self._rng)
-            for sub_subjects in subject_combinations:
+            for sub_subjects in tqdm(subject_combinations, desc="subject combinations"):
                 sub_assembly = assembly[{'neuroid': [subject in sub_subjects
                                                      for subject in assembly[self.subject_column].values]}]
                 yield {self.subject_column: sub_subjects}, sub_assembly
@@ -111,40 +113,66 @@ class StoriesReadingTimeEncoding(Benchmark):
                 combinations.add(tuple(elements))
             return combinations
 
-    class AveragePoolHoldoutCeiling(HoldoutSubjectCeiling):
+    class SplitHalfPoolCeiling(HoldoutSubjectCeiling):
         def __init__(self, *args, **kwargs):
-            super(StoriesReadingTimeEncoding.AveragePoolHoldoutCeiling, self).__init__(*args, **kwargs)
+            super(StoriesReadingTimeEncoding.SplitHalfPoolCeiling, self).__init__(*args, **kwargs)
             self._rng = RandomState(0)
+            self._num_bootstraps = 3
 
-        def get_subject_iterations(self, subjects):
-            return [self._rng.choice(list(subjects))]  # use only a single subject
+        def __call__(self, assembly, metric):
+            subjects = set(assembly[self.subject_column].values)
+            scores = []
+            for bootstrap in tqdm(range(self._num_bootstraps), desc='split-half bootstrap'):
+                try:
+                    half1 = self._rng.choice(list(subjects), size=len(subjects) // 2, replace=False)
+                    half2 = subjects - set(half1)
+                    half1_assembly = assembly[{'neuroid': [subject_value in half1
+                                                           for subject_value in assembly[self.subject_column].values]}]
+                    half2_assembly = assembly[{'neuroid': [subject_value in half2
+                                                           for subject_value in assembly[self.subject_column].values]}]
+                    # run half2 as neural candidate for half1
+                    score = self.score(half2_assembly, half1_assembly, metric=metric)
+                    # store scores
+                    score = score.expand_dims("bootstrap", _apply_raw=False)
+                    score.__setitem__("bootstrap", [bootstrap], _apply_raw=False)
+                    scores.append(score)
+                except NoOverlapException as e:
+                    self._logger.debug(f"Ignoring no overlap ({e})")
+                    continue  # ignore
 
-        def score(self, pool_assembly, subject_assembly, metric):
-            # mean the pool (if we were to keep every subject, we'd have a lot of nans), drop nans
-            pool_subjects = pool_assembly['subject_id'].values
-            pool_assembly = pool_assembly.mean('neuroid')
-            pool_assembly = pool_assembly.dropna('presentation')
-            pool_assembly = pool_assembly.expand_dims('neuroid')
-            pool_assembly['neuroid_id'] = 'neuroid', [0]
-            pool_assembly['subject_id'] = 'neuroid', [",".join(pool_subjects)]
-            subject_assembly = subject_assembly.dropna('presentation')
-            # align to the same stimuli that are non-nan in both pool and subject
-            pool_assembly = pool_assembly[{'presentation': [
-                stimulus_id in subject_assembly['stimulus_id'].values
-                for stimulus_id in pool_assembly['stimulus_id'].values]}]
-            if len(pool_assembly['presentation']) < 10:  # if not enough overlap: skip
-                raise NoOverlapException(f"Only {len(pool_assembly)} stimuli left "
-                                         f"for pool {pool_subjects} "
-                                         f"against subject {subject_assembly['subject_id'].values}")
-            subject_assembly = subject_assembly[{'presentation': [
-                stimulus_id in pool_assembly['stimulus_id'].values
-                for stimulus_id in subject_assembly['stimulus_id'].values]}]
-            if len(subject_assembly['presentation']) < 10:  # if not enough overlap: skip
-                raise NoOverlapException(f"Only {len(subject_assembly)} stimuli left "
-                                         f"for subject {subject_assembly['subject_id'].values} "
-                                         f"against pool {pool_subjects}")
-            return super(StoriesReadingTimeEncoding.AveragePoolHoldoutCeiling, self).score(
-                pool_assembly=pool_assembly, subject_assembly=subject_assembly, metric=metric)
+            scores = Score.merge(*scores)
+            error = scores.sel(aggregation='center').std("bootstrap")
+            scores = apply_aggregate(lambda scores: scores.mean("bootstrap"), scores)
+            scores.loc[{'aggregation': 'error'}] = error
+            return scores
+
+        def score(self, source_assembly, target_assembly, metric):
+            # mean, drop nans
+            source_assembly, source_subjects = self.mean_subjects(source_assembly)
+            target_assembly, target_subjects = self.mean_subjects(target_assembly)
+            source_assembly = source_assembly.dropna('presentation')
+            target_assembly = target_assembly.dropna('presentation')
+            # align to the same stimuli that are non-nan in both source and target
+            source_assembly = source_assembly[{'presentation': [
+                stimulus_id in target_assembly['stimulus_id'].values
+                for stimulus_id in source_assembly['stimulus_id'].values]}]
+            exception_suffix = f"for source subjects {source_subjects} against target subjects {target_subjects}"
+            if len(source_assembly['presentation']) < 10:  # if not enough overlap: skip
+                raise NoOverlapException(f"Only {len(source_assembly)} stimuli left {exception_suffix}")
+            target_assembly = target_assembly[{'presentation': [
+                stimulus_id in source_assembly['stimulus_id'].values
+                for stimulus_id in target_assembly['stimulus_id'].values]}]
+            if len(target_assembly['presentation']) < 10:  # if not enough overlap: skip
+                raise NoOverlapException(f"Only {len(target_assembly)} stimuli left {exception_suffix}")
+            return super(StoriesReadingTimeEncoding.SplitHalfPoolCeiling, self).score(
+                pool_assembly=source_assembly, subject_assembly=target_assembly, metric=metric)
+
+        def mean_subjects(self, assembly):
+            subjects = assembly['subject_id'].values
+            assembly = assembly.mean('neuroid').expand_dims('neuroid')
+            assembly['neuroid_id'] = 'neuroid', [0]
+            assembly['subject_id'] = 'neuroid', [','.join(subjects)]
+            return assembly, subjects
 
 
 class StoriesReadingTimeMeanEncoding(Benchmark):
