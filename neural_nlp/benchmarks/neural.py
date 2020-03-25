@@ -426,7 +426,8 @@ class _Fedorenko2016:
     def __call__(self, candidate):
         _logger.info('Computing activations')
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-        model_activations = read_words(candidate, stimulus_set, average_sentence=self._average_sentence)
+        model_activations = read_words(candidate, stimulus_set,
+                                       average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         return self._metric(model_activations, self._target_assembly)
 
