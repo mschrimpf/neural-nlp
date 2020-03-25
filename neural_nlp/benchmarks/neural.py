@@ -114,7 +114,13 @@ def align(source, target, on):
     return aligned
 
 
-class StoriesVoxelEncoding(Benchmark):
+class Blank2014VoxelEncoding(Benchmark):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
     def __init__(self, identifier, bold_shift=4):
         self._identifier = identifier
         assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
@@ -148,9 +154,15 @@ class StoriesVoxelEncoding(Benchmark):
         return self._metric(model_activations, self._target_assembly)
 
 
-class StoriesfROIEncoding(StoriesVoxelEncoding):
+class Blank2014fROIEncoding(Blank2014VoxelEncoding):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
     def __init__(self, *args, **kwargs):
-        super(StoriesfROIEncoding, self).__init__(*args, **kwargs)
+        super(Blank2014fROIEncoding, self).__init__(*args, **kwargs)
 
         regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
@@ -161,7 +173,7 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
 
     def _load_assembly(self, bold_shift):
-        assembly = super(StoriesfROIEncoding, self)._load_assembly(bold_shift)
+        assembly = super(Blank2014fROIEncoding, self)._load_assembly(bold_shift)
         assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
         return assembly
 
@@ -187,9 +199,15 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
         return averaged_assembly
 
 
-class StoriesfROIRDM(StoriesfROIEncoding):
+class Blank2014fROIRDM(Blank2014fROIEncoding):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
     def __init__(self, *args, **kwargs):
-        super(StoriesfROIRDM, self).__init__(*args, **kwargs)
+        super(Blank2014fROIRDM, self).__init__(*args, **kwargs)
         self._metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
@@ -197,6 +215,12 @@ class StoriesfROIRDM(StoriesfROIEncoding):
 
 
 class _PereiraBenchmark(Benchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, identifier, metric, data_version='base'):
         self._identifier = identifier
         self._data_version = data_version
@@ -349,6 +373,12 @@ def read_words(candidate, stimulus_set, reset_column='sentence_id', copy_columns
 
 
 class PereiraEncoding(_PereiraBenchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
@@ -358,39 +388,57 @@ class PereiraEncoding(_PereiraBenchmark):
 
 
 class PereiraLanguageResidualsEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraLanguageResidualsEncoding, self).__init__()
         self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
 
 
 class PereiraICAEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraICAEncoding, self).__init__(data_version='ICA')
 
 
 class PereiraDemeanEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraDemeanEncoding, self).__init__(data_version='Demean')
 
 
 class PereiraNovisaudEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraNovisaudEncoding, self).__init__(data_version='NoVisAud')
 
 
-class PereiraEncodingMin(_PereiraBenchmark):
-    def __init__(self):
-        metric = CrossRegressedCorrelation(
-            regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
-            correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=2))
-        super(PereiraEncodingMin, self).__init__(metric=metric)
-        self._target_assembly = self._target_assembly.sel(subject='018')
-        self._target_assembly['subject'] = 'neuroid', ['018'] * len(self._target_assembly['neuroid'])
-        self._target_assembly = NeuroidAssembly(self._target_assembly)  # re-index with subject
-
-
 class PereiraDecoding(_PereiraBenchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
@@ -401,6 +449,12 @@ class PereiraDecoding(_PereiraBenchmark):
 
 
 class PereiraRDM(_PereiraBenchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, **kwargs):
         metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
@@ -410,6 +464,12 @@ class PereiraRDM(_PereiraBenchmark):
 
 
 class _Fedorenko2016:
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
+
     def __init__(self, identifier, metric):
         self._identifier = identifier
         assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=1))
@@ -492,7 +552,13 @@ class _Fedorenko2016:
 
 
 def Fedorenko2016Encoding(identifier):
-    """ Fedorenko benchmark with NO z-scored recordings """
+    """
+    Fedorenko benchmark with NO z-scored recordings
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
@@ -502,54 +568,101 @@ def Fedorenko2016Encoding(identifier):
 
 
 def Fedorenko2016V2Encoding(identifier):
-    """ Fedorenko benchmark WITH z-scored recordings """
+    """
+    Fedorenko benchmark WITH z-scored recordings
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=2))
     return benchmark
 
 
 def Fedorenko2016AllEncoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=1))
     return benchmark
 
 
 def Fedorenko2016AllV2Encoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=2))
     return benchmark
 
 
 def Fedorenko2016NonLangEncoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language',
                                                                      version=2))  # Version 2 - do not z-score in ecog.py
     return benchmark
 
+
 # Version 3 - based on data March 24th
 def Fedorenko2016V3Encoding(identifier):
-    """ Fedorenko benchmark, language electrodes
-    Data 03/24/2020: sentence_electrode_lang_elec_max_window_dat (not demeaned across sentences)"""
+    """
+    Fedorenko benchmark, language electrodes
+    Data 03/24/2020: sentence_electrode_lang_elec_max_window_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
     return benchmark
 
-def Fedorenko2016NonLangV3Encoding(identifier):
-    """ Fedorenko benchmark, non-language electrodes (only sorted based on signal)
-    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)"""
+
+def Fedorenko2016V3NonLangEncoding(identifier):
+    """
+    Fedorenko benchmark, non-language electrodes (only sorted based on signal)
+    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=3))
     return benchmark
 
+
 def Fedorenko2016V3AllEncoding(identifier):
-    """ Fedorenko benchmark, all electrodes (only sorted based on signal)
-    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)"""
+    """
+    Fedorenko benchmark, all electrodes (only sorted based on signal)
+    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
     return benchmark
 
 
 def Fedorenko2016RDM(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     metric = RDMCrossValidated(
         comparison_coord='stimulus_id',
         crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
@@ -560,6 +673,11 @@ def Fedorenko2016RDM(identifier):
 
 
 def Fedorenko2016AllLastEncoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
@@ -590,10 +708,9 @@ def aggregate(score, combine_layers=True):
 
 
 benchmark_pool = [
-    ('stories_voxel_bold4s-encoding', StoriesVoxelEncoding),
-    ('stories_froi_bold4s-encoding', StoriesfROIEncoding),
-    ('stories_froi_bold4s-rdm', StoriesfROIRDM),
-    ('rdm', StoriesRDMBenchmark),
+    ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
+    ('Blank2014fROI-encoding', Blank2014fROIEncoding),
+    ('Blank2014-rdm', Blank2014fROIRDM),
     ('Pereira2018-encoding', PereiraEncoding),
     ('Pereira2018ICA-encoding', PereiraICAEncoding),
     ('Pereira2018Demean-encoding', PereiraDemeanEncoding),

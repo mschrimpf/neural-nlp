@@ -61,8 +61,8 @@ def fmri_best(benchmark='Pereira2018-encoding'):
     whole_best(benchmark=benchmark, title=benchmark)
 
 
-def stories_best(benchmark='stories_froi_bold4s-encoding'):
-    whole_best(benchmark=benchmark, title='stories fROI')
+def stories_best(benchmark='Blank2014fROI-encoding'):
+    whole_best(benchmark=benchmark, title='Blank2014fROI')
 
 
 def ecog_best(benchmark='Fedorenko2016-encoding'):
@@ -142,7 +142,7 @@ def benchmark_correlations(best_layer=True):
     correlation_Pereira, p_Pereira = pearsonr(Pereira_experiment2_scores, Pereira_experiment3_scores)
     data.append(dict(benchmark1='Pereira Exp. 2', benchmark2='Pereira Exp. 3', r=correlation_Pereira, p=p_Pereira))
     # cross-benchmark
-    benchmarks = ('Pereira2018-encoding', 'stories_froi_bold4s-encoding', 'Fedorenko2016-encoding')
+    benchmarks = ('Pereira2018-encoding', 'Blank2014fROI-encoding', 'Fedorenko2016-encoding')
     for benchmark1, benchmark2 in itertools.combinations(benchmarks, 2):
         benchmark1_scores = collect_scores(benchmark=benchmark1, models=all_models)
         benchmark2_scores = collect_scores(benchmark=benchmark2, models=all_models)

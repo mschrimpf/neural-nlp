@@ -1,10 +1,13 @@
+import logging
+import sys
+
 import numpy as np
 import os
 
 import seaborn
 from matplotlib import pyplot
 
-from neural_nlp.benchmarks.neural import StoriesVoxelEncoding, PereiraEncoding
+from neural_nlp.benchmarks.neural import Blank2014VoxelEncoding, PereiraEncoding
 import fire
 
 seaborn.set()
@@ -29,7 +32,7 @@ def subject_stimuli():
 
 
 def subject_voxels():
-    benchmark = StoriesVoxelEncoding()
+    benchmark = Blank2014VoxelEncoding()
     data = benchmark._target_assembly
     subject_voxels = {}
     for subject in set(data['subject_UID'].values):

@@ -16,7 +16,15 @@ from neural_nlp.benchmarks.neural import read_words
 from neural_nlp.neural_data.naturalStories import load_naturalStories
 
 
-class StoriesReadingTimeEncoding(Benchmark):
+class Futrell2018Encoding(Benchmark):
+    """
+    predict individual human reading times of natural stories.
+
+    data source:
+        Futrell et al., International Conference on Language Resources and Evaluation (LREC) 2018
+        http://www.lrec-conf.org/proceedings/lrec2018/pdf/337.pdf
+    """
+
     def __init__(self, identifier):
         self._logger = logging.getLogger(fullname(self))
         self._identifier = identifier
@@ -82,11 +90,11 @@ class StoriesReadingTimeEncoding(Benchmark):
 
     class ManySubjectExtrapolationCeiling(ExtrapolationCeiling):
         def __init__(self, subject_column, *args, **kwargs):
-            super(StoriesReadingTimeEncoding.ManySubjectExtrapolationCeiling, self).__init__(
+            super(Futrell2018Encoding.ManySubjectExtrapolationCeiling, self).__init__(
                 subject_column, *args, **kwargs)
             self._rng = RandomState(0)
             self._num_subsamples = 5
-            self.holdout_ceiling = StoriesReadingTimeEncoding.SplitHalfPoolCeiling(subject_column=subject_column)
+            self.holdout_ceiling = Futrell2018Encoding.SplitHalfPoolCeiling(subject_column=subject_column)
 
         def build_subject_subsamples(self, subjects):
             return tuple(range(2, len(subjects) + 1, 5))  # reduce computational cost by only using every 5th point
@@ -115,7 +123,7 @@ class StoriesReadingTimeEncoding(Benchmark):
 
     class SplitHalfPoolCeiling(HoldoutSubjectCeiling):
         def __init__(self, *args, **kwargs):
-            super(StoriesReadingTimeEncoding.SplitHalfPoolCeiling, self).__init__(*args, **kwargs)
+            super(Futrell2018Encoding.SplitHalfPoolCeiling, self).__init__(*args, **kwargs)
             self._rng = RandomState(0)
             self._num_bootstraps = 3
 
@@ -164,7 +172,7 @@ class StoriesReadingTimeEncoding(Benchmark):
                 for stimulus_id in target_assembly['stimulus_id'].values]}]
             if len(target_assembly['presentation']) < 10:  # if not enough overlap: skip
                 raise NoOverlapException(f"Only {len(target_assembly)} stimuli left {exception_suffix}")
-            return super(StoriesReadingTimeEncoding.SplitHalfPoolCeiling, self).score(
+            return super(Futrell2018Encoding.SplitHalfPoolCeiling, self).score(
                 pool_assembly=source_assembly, subject_assembly=target_assembly, metric=metric)
 
         def mean_subjects(self, assembly):
@@ -175,7 +183,15 @@ class StoriesReadingTimeEncoding(Benchmark):
             return assembly, subjects
 
 
-class StoriesReadingTimeMeanEncoding(Benchmark):
+class Futrell2018MeanEncoding(Benchmark):
+    """
+    predict mean human reading times of natural stories.
+
+    data source:
+        Futrell et al., International Conference on Language Resources and Evaluation (LREC) 2018
+        http://www.lrec-conf.org/proceedings/lrec2018/pdf/337.pdf
+    """
+
     def __init__(self, identifier):
         self._logger = logging.getLogger(fullname(self))
         self._identifier = identifier
@@ -221,8 +237,8 @@ class StoriesReadingTimeMeanEncoding(Benchmark):
 
 
 benchmark_pool = [
-    ('stories_readingtime-encoding', StoriesReadingTimeEncoding),
-    ('stories_readingtime_mean-encoding', StoriesReadingTimeMeanEncoding),
+    ('Futrell2018-encoding', Futrell2018Encoding),
+    ('Futrell2018mean-encoding', Futrell2018MeanEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}

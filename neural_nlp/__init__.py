@@ -27,7 +27,7 @@ def score(benchmark, model, layers=None, model_impl=None, subsample=None):
         return benchmark_impl(model_impl)
 
     # only last layer for behavioral benchmarks
-    if benchmark.startswith('stories_readingtime'):
+    if benchmark.startswith('Futrell2018'):
         layers = layers[-1:]
 
     layer_scores = []
