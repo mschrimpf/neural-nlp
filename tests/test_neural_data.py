@@ -105,17 +105,17 @@ def _single_element(array):
     return unique_values[0]
 
 
-def test_Fedorenko2016_language():
-    assembly = load_Fedorenko2016(electrodes='language')
+@pytest.mark.parametrize('version, electrodes, expected_neuroids', [
+    (2, 'language', 98),
+    (2, 'all', 180),
+    (3, 'language', 97),
+    (3, 'all', 177),
+    (3, 'non-language', 105),
+])
+def test_Fedorenko2016(version, electrodes, expected_neuroids):
+    assembly = load_Fedorenko2016(version=version, electrodes=electrodes)
     assert len(assembly['presentation']) == 416
-    assert len(assembly['neuroid']) == 98
-    assert len(np.unique(assembly['subject_UID'])) == 5
-
-
-def test_Fedorenko2016_all():
-    assembly = load_Fedorenko2016(electrodes='all')
-    assert len(assembly['presentation']) == 416
-    assert len(assembly['neuroid']) == 180
+    assert len(assembly['neuroid']) == expected_neuroids
     assert len(np.unique(assembly['subject_UID'])) == 5
 
 
