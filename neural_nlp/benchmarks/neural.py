@@ -441,6 +441,28 @@ def Fedorenko2016NonLangEncoding(identifier):
                                                                      version=2))  # Version 2 - do not z-score in ecog.py
     return benchmark
 
+# Version 3 - based on data March 24th
+def Fedorenko2016V3Encoding(identifier):
+    """ Fedorenko benchmark, language electrodes
+    Data 03/24/2020: sentence_electrode_lang_elec_max_window_dat (not demeaned across sentences)"""
+    benchmark = Fedorenko2016Encoding(identifier)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+    return benchmark
+
+def Fedorenko2016NonLangV3Encoding(identifier):
+    """ Fedorenko benchmark, non-language electrodes (only sorted based on signal)
+    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)"""
+    benchmark = Fedorenko2016Encoding(identifier)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=3))
+    return benchmark
+
+def Fedorenko2016V3AllEncoding(identifier):
+    """ Fedorenko benchmark, all electrodes (only sorted based on signal)
+    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)"""
+    benchmark = Fedorenko2016Encoding(identifier)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
+    return benchmark
+
 
 def Fedorenko2016RDM(identifier):
     metric = RDMCrossValidated(
@@ -500,6 +522,9 @@ benchmark_pool = [
     ('Fedorenko2016all-encoding', Fedorenko2016AllEncoding),
     ('Fedorenko2016allv2-encoding', Fedorenko2016AllV2Encoding),
     ('Fedorenko2016nonlangv2-encoding', Fedorenko2016NonLangEncoding),
+    ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
+    ('Fedorenko2016nonlangv3-encoding', Fedorenko2016NonLangV3Encoding),
+    ('Fedorenko2016allv3-encoding', Fedorenko2016AllV3Encoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}
