@@ -608,8 +608,8 @@ benchmark_pool = [
     ('Fedorenko2016allv2-encoding', Fedorenko2016AllV2Encoding),
     ('Fedorenko2016nonlangv2-encoding', Fedorenko2016NonLangEncoding),
     ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
-    ('Fedorenko2016nonlangv3-encoding', Fedorenko2016NonLangV3Encoding),
-    ('Fedorenko2016allv3-encoding', Fedorenko2016AllV3Encoding),
+    ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
+    ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}
