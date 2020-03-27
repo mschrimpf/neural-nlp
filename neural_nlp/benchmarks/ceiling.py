@@ -1,6 +1,7 @@
 import itertools
+import logging
 import numpy as np
-import scipy.stats
+from brainio_collection.fetch import fullname
 from numpy.random.mtrand import RandomState
 from scipy.optimize import curve_fit
 from tqdm import tqdm, trange
@@ -13,6 +14,7 @@ from result_caching import store
 class HoldoutSubjectCeiling:
     def __init__(self, subject_column):
         self.subject_column = subject_column
+        self._logger = logging.getLogger(fullname(self))
 
     def __call__(self, assembly, metric):
         subjects = set(assembly[self.subject_column].values)
@@ -31,8 +33,15 @@ class HoldoutSubjectCeiling:
                 score = score.expand_dims(self.subject_column, _apply_raw=False)
                 score.__setitem__(self.subject_column, [subject], _apply_raw=False)
                 scores.append(score)
-            except NoOverlapException:
+            except NoOverlapException as e:
+                self._logger.debug(f"Ignoring no overlap {e}")
                 continue  # ignore
+            except ValueError as e:
+                if "Found array with" in str(e):
+                    self._logger.debug(f"Ignoring empty array {e}")
+                    continue
+                else:
+                    raise e
 
         scores = Score.merge(*scores)
         error = scores.sel(aggregation='center').std(self.subject_column)
@@ -51,6 +60,7 @@ class ExtrapolationCeiling:
     def __init__(self, subject_column='subject'):
         self.subject_column = subject_column
         self.holdout_ceiling = HoldoutSubjectCeiling(subject_column=subject_column)
+        self._logger = logging.getLogger(fullname(self))
 
     @store(identifier_ignore=['assembly', 'metric'])
     def __call__(self, identifier, assembly, metric):
@@ -73,8 +83,12 @@ class ExtrapolationCeiling:
                         score = score.expand_dims(expand_dim)
                         score[expand_dim] = [str(selection)]
                     scores.append(score.raw)
-                except KeyError:  # nothing to merge
-                    continue
+                except KeyError as e:  # nothing to merge
+                    if str(e) == "'z'":
+                        self._logger.debug(f"Ignoring merge error {e}")
+                        continue
+                    else:
+                        raise e
         scores = Score.merge(*scores)
         ceilings = self.average_collected(scores)
         ceilings.attrs['raw'] = scores
