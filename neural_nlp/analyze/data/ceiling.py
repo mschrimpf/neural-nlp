@@ -86,18 +86,18 @@ def plot_extrapolation_ceiling(benchmark='stories_readingtime-encoding'):
                num_splits.values, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
-    def v(x, v0, tau0, a):
-        return v0 * (1 - np.exp((-x + a) / tau0))
+    def v(x, v0, tau0):
+        return v0 * (1 - np.exp(-x / tau0))
 
     x = np.arange(0, max(ceilings.endpoint_x, max(raw_ceilings['num_subjects'].values)) + 2)
     ys = np.array([v(x, *params) for params in ceilings.bootstrapped_params])
     for y in ys:
         ax.plot(x, y, alpha=.05, color='gray')
     median_ys = np.median(ys, axis=0)
-    error = scipy.stats.median_absolute_deviation(ys, axis=0)
-    ax.errorbar(x=x, y=median_ys, yerr=error, linestyle='dashed', color='gray')
+    error = confidence_interval(ys.T, centers=median_ys)
+    ax.errorbar(x=x, y=median_ys, yerr=list(zip(*error)), linestyle='dashed', color='gray')
     estimated_ceiling = ceilings.sel(aggregation='center').values
-    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #={ceilings.endpoint_x}",
+    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #~{ceilings.endpoint_x}",
             ha='center', va='center', transform=ax.transAxes)
 
     # plot meta
@@ -107,7 +107,18 @@ def plot_extrapolation_ceiling(benchmark='stories_readingtime-encoding'):
     ax.set_ylim([0.9 * np.nanmin(num_splits.values), max([2 * estimated_ceiling, 1.2 * np.nanmax(num_splits.values)])])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
-    fig.savefig(Path(__file__).parent / f'extrapolation-{benchmark}.png')
+    savepath = Path(__file__).parent / f'extrapolation-{benchmark}.png'
+    _logger.debug(f"Saving to {savepath}")
+    fig.savefig(savepath)
+
+
+def confidence_interval(data, centers, confidence=0.95):
+    assert len(data) == len(centers)
+    cis = []
+    for samples, center in zip(data, centers):
+        confidence_below, confidence_above = ci_error(samples, center, confidence)
+        cis.append((confidence_below, confidence_above))
+    return cis
 
 
 def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):

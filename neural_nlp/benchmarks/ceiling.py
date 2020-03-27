@@ -95,8 +95,8 @@ class ExtrapolationCeiling:
         return scores.median('neuroid')
 
     def extrapolate(self, ceilings):
-        def v(x, v0, tau0, a):
-            return v0 * (1 - np.exp((-x + a) / tau0))
+        def v(x, v0, tau0):
+            return v0 * (1 - np.exp(-x / tau0))
 
         # figure out how many extrapolation x points we have. E.g. for Pereira, also not all combinations are possible
         subject_subsamples = list(sorted(set(ceilings['num_subjects'].values)))
@@ -115,8 +115,13 @@ class ExtrapolationCeiling:
                 bootstrapped_score = rng.choice(choices, size=len(choices), replace=True)
                 bootstrapped_scores.append(np.mean(bootstrapped_score))
 
-            params, pcov = curve_fit(v, subject_subsamples, bootstrapped_scores)
-            bootstrap_params.append(params)
+            try:
+                params, pcov = curve_fit(v, subject_subsamples, bootstrapped_scores,
+                                         # v (i.e. max ceiling) is between 0 and 1, tau0 unconstrained
+                                         bounds=([0, -np.inf], [1, np.inf]))
+                bootstrap_params.append(params)
+            except RuntimeError:  # optimal parameters not found
+                continue
         # find endpoint and error
         asymptote_threshold = .0005
         interpolation_xs = np.arange(1000)
@@ -125,12 +130,21 @@ class ExtrapolationCeiling:
         diffs = np.diff(median_ys)
         end_x = np.where(diffs < asymptote_threshold)[0].min()  # first x where increase smaller than threshold
         # put together
-        score = Score([median_ys[end_x], scipy.stats.median_absolute_deviation(ys[:, end_x])],
-                      coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+        center = np.median(np.array(bootstrap_params)[:, 0])
+        error = ci_error(ys[:, end_x], center=center)
+        score = Score([center] + list(error),
+                      coords={'aggregation': ['center', 'error_low', 'error_high']}, dims=['aggregation'])
         score.attrs['raw'] = ceilings
         score.attrs['bootstrapped_params'] = bootstrap_params
         score.attrs['endpoint_x'] = end_x
         return score
+
+
+def ci_error(samples, center, confidence=.95):
+    low, high = 100 * (1 - confidence) / 2, 100 * 1 - ((1 - confidence) / 2)
+    confidence_below, confidence_above = np.percentile(samples, low), np.percentile(samples, high)
+    confidence_below, confidence_above = center - confidence_below, confidence_above - center
+    return confidence_below, confidence_above
 
 
 class NoOverlapException(Exception):
