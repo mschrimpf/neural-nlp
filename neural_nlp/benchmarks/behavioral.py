@@ -82,6 +82,8 @@ class Futrell2018Encoding(Benchmark):
         score = cross_scores.mean('subject_id')
         cross_subjects_std = cross_scores.sel(aggregation='center').std()
         score.__setitem__({'aggregation': score['aggregation'] == 'error'}, cross_subjects_std, _apply_raw=False)
+        per_subject = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score.attrs['raw'] = per_subject
         return score
 
     @property

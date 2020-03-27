@@ -3,7 +3,7 @@ import warnings
 import itertools
 import logging
 import numpy as np
-from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
+from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, array_is_element
 from numpy.random.mtrand import RandomState
 from tqdm import tqdm
 
@@ -151,7 +151,12 @@ class Blank2014VoxelEncoding(Benchmark):
         model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         _logger.info('Scoring model')
-        return self._metric(model_activations, self._target_assembly)
+        score = self._metric(model_activations, self._target_assembly)
+        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
+        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score.attrs['raw'] = raw_neuroids
+        return score
 
 
 class Blank2014fROIEncoding(Blank2014VoxelEncoding):
@@ -254,7 +259,13 @@ class _PereiraBenchmark(Benchmark):
         _logger.info('Scoring across experiments & atlases')
         cross_scores = self._cross(self._target_assembly, apply=
         lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
-        return cross_scores
+        score = cross_scores.sel(atlas='language', _apply_raw=False).mean('experiment')
+        subject_scores = score.raw.sel(atlas='language').groupby('subject')
+        subject_scores = subject_scores.median('neuroid').mean('split').mean('experiment')
+        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split').mean('experiment'), score.raw)
+        score.attrs['raw'] = raw_neuroids
+        return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
         cross_assembly = cross_assembly.dropna('neuroid')  # some subjects have only done one experiment
@@ -489,7 +500,12 @@ class _Fedorenko2016:
         model_activations = read_words(candidate, stimulus_set,
                                        average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        return self._metric(model_activations, self._target_assembly)
+        score = self._metric(model_activations, self._target_assembly)
+        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
+        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score.attrs['raw'] = raw_neuroids
+        return score
 
     @property
     def ceiling(self):
