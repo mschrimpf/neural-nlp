@@ -259,11 +259,13 @@ class _PereiraBenchmark(Benchmark):
         _logger.info('Scoring across experiments & atlases')
         cross_scores = self._cross(self._target_assembly, apply=
         lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
+        raw_scores = cross_scores.raw
         score = cross_scores.sel(atlas='language', _apply_raw=False).mean('experiment')
-        subject_scores = score.raw.sel(atlas='language').groupby('subject')
-        subject_scores = subject_scores.median('neuroid').mean('split').mean('experiment')
+        subject_scores = raw_scores.sel(atlas='language').groupby('subject').median('neuroid')
+        subject_scores = subject_scores.mean('split').mean('experiment')
         score.loc[{'aggregation': 'error'}] = subject_scores.std()
-        raw_neuroids = apply_aggregate(lambda values: values.mean('split').mean('experiment'), score.raw)
+        raw_neuroids = apply_aggregate(lambda values: values.sel(atlas='language').mean('split').mean('experiment'),
+                                       raw_scores)
         score.attrs['raw'] = raw_neuroids
         return score
 
