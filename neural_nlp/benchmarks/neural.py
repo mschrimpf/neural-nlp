@@ -286,7 +286,7 @@ class _PereiraBenchmark(Benchmark):
         def __init__(self, subject_column, *args, **kwargs):
             super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).__init__(
                 subject_column, *args, **kwargs)
-            self._num_subsamples = 5
+            self._num_subsamples = 3
             self.holdout_ceiling = _PereiraBenchmark.PereiraHoldoutSubjectCeiling(subject_column=subject_column)
             self._rng = RandomState(0)
 
@@ -333,9 +333,11 @@ class _PereiraBenchmark(Benchmark):
         def __init__(self, *args, **kwargs):
             super(_PereiraBenchmark.PereiraHoldoutSubjectCeiling, self).__init__(*args, **kwargs)
             self._rng = RandomState(0)
+            self._num_bootstraps = 5
 
         def get_subject_iterations(self, subjects):
-            return [self._rng.choice(list(subjects))]  # use only a single subject
+            # use only a subset of subjects
+            return self._rng.choice(list(subjects), size=self._num_bootstraps)
 
 
 def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
