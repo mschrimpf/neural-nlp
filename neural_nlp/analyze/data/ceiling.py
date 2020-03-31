@@ -1,14 +1,9 @@
-from collections import defaultdict
-
-import sys
-
-import logging
-
 import fire
 import itertools
+import logging
 import numpy as np
-import scipy.stats
 import seaborn
+import sys
 from brainio_base.assemblies import walk_coords
 from matplotlib import pyplot
 from matplotlib.ticker import MaxNLocator
@@ -20,8 +15,11 @@ from brainscore.metrics import Score
 from brainscore.metrics.regression import pearsonr_correlation
 from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import benchmark_pool
+from neural_nlp.benchmarks.ceiling import ci_error, v
 from neural_nlp.neural_data.fmri import load_voxels
 from result_caching import store
+
+_logger = logging.getLogger(__name__)
 
 
 @store()
@@ -69,42 +67,41 @@ def average_subregions(assembly):
     return assembly
 
 
-def plot_extrapolation_ceiling(benchmark='stories_readingtime-encoding'):
+def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
     benchmark_impl = benchmark_pool[benchmark]
-    ceilings = benchmark_impl.ceiling
+    ceiling = benchmark_impl.ceiling
 
     fig, ax = pyplot.subplots()
 
     # plot actual data splits
-    raw_ceilings = ceilings.raw
+    raw_ceilings = ceiling.raw.raw
     subject_columns = prefixdict(default='sub_subject_UID', Pereira='sub_subject', stories='sub_subject_id')
     subject_column = subject_columns[benchmark]
     num_splits = raw_ceilings.stack(numsplit=['num_subjects', subject_column, 'split'])
     jitter = .25
     rng = RandomState(0)
-    ax.scatter(num_splits['num_subjects'].values + (-jitter / 2 + jitter * rng.rand(len(num_splits))),
-               num_splits.values, color='black', s=1, zorder=10)
+    x = num_splits['num_subjects'].values + (-jitter / 2 + jitter * rng.rand(len(num_splits['num_subjects'])))
+    y = num_splits.median('neuroid').values
+    ax.scatter(x, y, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
-    def v(x, v0, tau0):
-        return v0 * (1 - np.exp(-x / tau0))
-
-    x = np.arange(0, max(ceilings.endpoint_x, max(raw_ceilings['num_subjects'].values)) + 2)
-    ys = np.array([v(x, *params) for params in ceilings.bootstrapped_params])
+    x = np.arange(0, max(ceiling.endpoint_x, max(raw_ceilings['num_subjects'].values)) + 2)
+    ys = np.array([v(x, *params) for params in ceiling.bootstrapped_params.values])
     for y in ys:
         ax.plot(x, y, alpha=.05, color='gray')
     median_ys = np.median(ys, axis=0)
     error = confidence_interval(ys.T, centers=median_ys)
     ax.errorbar(x=x, y=median_ys, yerr=list(zip(*error)), linestyle='dashed', color='gray')
-    estimated_ceiling = ceilings.sel(aggregation='center').values
-    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #~{ceilings.endpoint_x}",
+    estimated_ceiling = ceiling.sel(aggregation='center').values
+    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #~{ceiling.endpoint_x.values.tolist()}",
             ha='center', va='center', transform=ax.transAxes)
 
     # plot meta
     ax.set_title(benchmark)
     ax.set_xlabel('# subjects')
     ax.set_ylabel('estimated ceiling')
-    ax.set_ylim([0.9 * np.nanmin(num_splits.values), max([2 * estimated_ceiling, 1.2 * np.nanmax(num_splits.values)])])
+    ax.set_ylim([0.9 * np.nanmin(num_splits.values),
+                 (1.8 if benchmark.startswith('Fedorenko') else 1.2) * np.nanmax(num_splits.values)])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
     savepath = Path(__file__).parent / f'extrapolation-{benchmark}.png'
@@ -134,9 +131,10 @@ def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):
     fig.savefig(Path(__file__).parent / f'hist-{benchmark}.png')
 
 
-class prefixdict(defaultdict):
+class prefixdict(dict):
     def __init__(self, default=None, **kwargs):
-        super(prefixdict, self).__init__(default_factory=lambda: default, **kwargs)
+        super(prefixdict, self).__init__(**kwargs)
+        self._default = default
 
     def __getitem__(self, item):
         subitem = item
@@ -145,13 +143,13 @@ class prefixdict(defaultdict):
                 return super(prefixdict, self).__getitem__(subitem)
             except KeyError:
                 subitem = subitem[:-1]
-        raise KeyError(item)
+        return self._default
 
 
 if __name__ == '__main__':
     import warnings
 
-    warnings.simplefilter(action='ignore', category=FutureWarning)
+    warnings.simplefilter(action='ignore')
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     seaborn.set(context='talk')
     fire.Fire()

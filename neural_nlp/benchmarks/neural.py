@@ -132,7 +132,8 @@ class Blank2014VoxelEncoding(Benchmark):
         self._metric = CrossRegressedCorrelation(
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
-        self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
+
+        self._ceiler = ExtrapolationCeiling(subject_column='subject_UID', post_process=self.post_process_ceilings)
 
     @property
     def identifier(self):
@@ -141,6 +142,11 @@ class Blank2014VoxelEncoding(Benchmark):
     def _load_assembly(self, bold_shift):
         assembly = load_voxels(bold_shift_seconds=bold_shift)
         return assembly
+
+    def post_process_ceilings(self, scores):
+        scores['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+            scores[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        return scores
 
     @property
     def ceiling(self):
@@ -316,18 +322,9 @@ class _PereiraBenchmark(Benchmark):
                 combinations.add(tuple(elements))
             return combinations
 
-        def average_collected(self, scores):
-            return scores.mean('sub_experiment').mean('experiment').median('neuroid')
-
-        def check_experiment_overlap(self, assembly):
-            for experiment in set(assembly['experiment'].values):
-                experiment_assembly = assembly[
-                    {'presentation': [exp == experiment for exp in assembly['experiment'].values]}]
-                experiment_assembly = experiment_assembly.dropna('neuroid')
-                if len(experiment_assembly['neuroid']) < 1 or \
-                        set(experiment_assembly['subject'].values) != set(assembly['subject'].values):
-                    return False  # no subject has done this experiment or no subject overlap for experiment
-            return True  # all good
+        def post_process(self, scores):
+            scores = apply_aggregate(lambda values: values.mean('sub_experiment').mean('experiment'), scores)
+            return scores
 
     class PereiraHoldoutSubjectCeiling(HoldoutSubjectCeiling):
         def __init__(self, *args, **kwargs):
@@ -559,16 +556,13 @@ class _Fedorenko2016:
 
             scores = Score.merge(*scores)
             ceilings = scores.raw
-            ceilings = self.average_collected(ceilings)
+            ceilings = ceilings.rename({'split': 'subsplit'}).stack(split=['electrodes_split', 'subsplit'])
             ceilings.attrs['raw'] = scores
             return ceilings
 
         def _choose_electrodes(self, electrodes, num_electrodes, num_choices):
             choices = [self._rng.choice(electrodes, size=num_electrodes, replace=False) for _ in range(num_choices)]
             return choices
-
-        def average_collected(self, scores):
-            return scores.median('neuroid').rename({'split': 'subsplit'}).stack(split=['electrodes_split', 'subsplit'])
 
 
 def Fedorenko2016Encoding(identifier):
