@@ -1,11 +1,11 @@
 import itertools
 import logging
 import numpy as np
-from brainio_base.assemblies import DataAssembly, merge_data_arrays
+from brainio_base.assemblies import DataAssembly, merge_data_arrays, walk_coords, array_is_element
 from brainio_collection.fetch import fullname
 from numpy.random.mtrand import RandomState
 from scipy.optimize import curve_fit
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from brainscore.metrics import Score
 from brainscore.metrics.transformations import apply_aggregate
@@ -116,33 +116,39 @@ class ExtrapolationCeiling:
 
     def extrapolate(self, ceilings):
         neuroid_ceilings, bootstrap_params, endpoint_xs = [], [], []
-        for i, neuroid_id in enumerate(tqdm(ceilings['neuroid_id'].values, desc='neuroid extrapolations')):
+        for i in trange(len(ceilings['neuroid']), desc='neuroid extrapolations'):
             # extrapolate per-neuroid ceiling
-            neuroid_ceiling = ceilings.isel(neuroid=i)
-            extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling)
-            extrapolated_ceiling = extrapolated_ceiling.expand_dims('neuroid_id')
-            extrapolated_ceiling['neuroid_id'] = [neuroid_id]
+            neuroid_ceiling = ceilings.isel(neuroid=[i])
+            extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling.squeeze())
+            extrapolated_ceiling = self.add_neuroid_meta(extrapolated_ceiling, neuroid_ceiling)
             neuroid_ceilings.append(extrapolated_ceiling)
             # also keep track of bootstrapped parameters
             neuroid_bootstrap_params = extrapolated_ceiling.bootstrapped_params
-            neuroid_bootstrap_params = neuroid_bootstrap_params.expand_dims('neuroid_id')
-            neuroid_bootstrap_params['neuroid_id'] = [neuroid_id]
+            neuroid_bootstrap_params = self.add_neuroid_meta(neuroid_bootstrap_params, neuroid_ceiling)
             bootstrap_params.append(neuroid_bootstrap_params)
             # and endpoints
-            endpoint_x = extrapolated_ceiling.endpoint_x
-            endpoint_x = DataAssembly([endpoint_x], coords={'neuroid_id': [neuroid_id]}, dims=['neuroid_id'])
+            endpoint_x = DataAssembly(extrapolated_ceiling.endpoint_x)
+            endpoint_x = self.add_neuroid_meta(endpoint_x, neuroid_ceiling)
             endpoint_xs.append(endpoint_x)
         # merge and add meta
         neuroid_ceilings = Score.merge(*neuroid_ceilings)
-        neuroid_ceilings = neuroid_ceilings.stack(neuroid=['neuroid_id'])
         neuroid_ceilings.attrs['raw'] = ceilings
         bootstrap_params = merge_data_arrays(bootstrap_params)
-        bootstrap_params = bootstrap_params.stack(neuroid=['neuroid_id'])
         neuroid_ceilings.attrs['bootstrapped_params'] = bootstrap_params
         endpoint_xs = merge_data_arrays(endpoint_xs)
-        endpoint_xs = endpoint_xs.stack(neuroid=['neuroid_id'])
         neuroid_ceilings.attrs['endpoint_x'] = endpoint_xs
         # aggregate
+        ceiling = self.aggregate_neuroid_ceilings(neuroid_ceilings)
+        return ceiling
+
+    def add_neuroid_meta(self, target, source):
+        target = target.expand_dims('neuroid')
+        for coord, dims, values in walk_coords(source):
+            if array_is_element(dims, 'neuroid'):
+                target[coord] = dims, values
+        return target
+
+    def aggregate_neuroid_ceilings(self, neuroid_ceilings):
         ceiling = neuroid_ceilings.median('neuroid')
         ceiling.attrs['bootstrapped_params'] = neuroid_ceilings.bootstrapped_params.median('neuroid')
         ceiling.attrs['endpoint_x'] = neuroid_ceilings.endpoint_x.median('neuroid')
@@ -168,9 +174,7 @@ class ExtrapolationCeiling:
                 bootstrapped_scores.append(np.mean(bootstrapped_score))
 
             try:
-                params, pcov = curve_fit(v, subject_subsamples, bootstrapped_scores,
-                                         # v (i.e. max ceiling) is between 0 and 1, tau0 unconstrained
-                                         bounds=([0, -np.inf], [1, np.inf]))
+                params = self.fit(subject_subsamples, bootstrapped_scores)
                 params = DataAssembly([params], coords={'bootstrap': [bootstrap], 'param': ['v0', 'tau0']},
                                       dims=['bootstrap', 'param'])
                 bootstrap_params.append(params)
@@ -194,6 +198,12 @@ class ExtrapolationCeiling:
         score.attrs['endpoint_x'] = end_x
         return score
 
+    def fit(self, subject_subsamples, bootstrapped_scores):
+        params, pcov = curve_fit(v, subject_subsamples, bootstrapped_scores,
+                                 # v (i.e. max ceiling) is between 0 and 1, tau0 unconstrained
+                                 bounds=([0, -np.inf], [1, np.inf]))
+        return params
+
     def post_process(self, scores):
         if self._post_process is not None:
             scores = self._post_process(scores)
@@ -202,7 +212,7 @@ class ExtrapolationCeiling:
 
 def ci_error(samples, center, confidence=.95):
     low, high = 100 * (1 - confidence) / 2, 100 * 1 - ((1 - confidence) / 2)
-    confidence_below, confidence_above = np.percentile(samples, low), np.percentile(samples, high)
+    confidence_below, confidence_above = np.nanpercentile(samples, low), np.nanpercentile(samples, high)
     confidence_below, confidence_above = center - confidence_below, confidence_above - center
     return confidence_below, confidence_above
 

@@ -322,6 +322,20 @@ class _PereiraBenchmark(Benchmark):
                 combinations.add(tuple(elements))
             return combinations
 
+        def extrapolate(self, ceilings):
+            ceiling = super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).extrapolate(ceilings)
+            # compute aggregate ceiling only for language neuroids
+            neuroid_ceilings = ceiling.raw
+            language_ceilings = neuroid_ceilings.sel(atlas='language')
+            ceiling = self.aggregate_neuroid_ceilings(language_ceilings)
+            ceiling.attrs['raw'] = neuroid_ceilings  # reset to all neuroids
+            return ceiling
+
+        def fit(self, subject_subsamples, bootstrapped_scores):
+            valid = ~np.isnan(bootstrapped_scores)
+            return super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).fit(
+                np.array(subject_subsamples)[valid], np.array(bootstrapped_scores)[valid])
+
         def post_process(self, scores):
             scores = apply_aggregate(lambda values: values.mean('sub_experiment').mean('experiment'), scores)
             return scores
