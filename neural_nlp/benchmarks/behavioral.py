@@ -12,7 +12,7 @@ from brainscore.metrics.regression import linear_regression, pearsonr_correlatio
 from brainscore.metrics.transformations import CartesianProduct, apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling, NoOverlapException
-from neural_nlp.benchmarks.neural import read_words
+from neural_nlp.benchmarks.neural import read_words, explained_variance
 from neural_nlp.neural_data.naturalStories import load_naturalStories
 
 
@@ -79,11 +79,17 @@ class Futrell2018Encoding(Benchmark):
         self._logger.info('Scoring model')
         cross_scores = self._cross(self._target_assembly,
                                    apply=lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
-        score = cross_scores.mean('subject_id')
-        cross_subjects_std = cross_scores.sel(aggregation='center').std()
-        score.__setitem__({'aggregation': score['aggregation'] == 'error'}, cross_subjects_std, _apply_raw=False)
-        per_subject = apply_aggregate(lambda values: values.mean('split'), score.raw)
-        score.attrs['raw'] = per_subject
+        # normalize by ceiling
+        # Note that we normalize by an overall ceiling, so the scores per subject are not normalized wrt. that subject
+        # and should thus not be used by themselves. Only the aggregate makes sense to report
+        normalized_subject_scores = explained_variance(cross_scores.sel(aggregation='center'),
+                                                       self.ceiling.sel(aggregation='center'))
+        score = normalized_subject_scores.mean('subject_id')
+        std = normalized_subject_scores.std('subject_id')
+        std['aggregation'] = 'error'
+        score = Score.merge(score.expand_dims('aggregation'), std.expand_dims('aggregation'))
+        score.attrs['raw'] = cross_scores
+        score.attrs['ceiling'] = self.ceiling
         return score
 
     @property

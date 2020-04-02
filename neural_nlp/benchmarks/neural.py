@@ -158,10 +158,11 @@ class Blank2014VoxelEncoding(Benchmark):
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         _logger.info('Scoring model')
         score = self._metric(model_activations, self._target_assembly)
-        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
-        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
-        score.attrs['raw'] = raw_neuroids
+        raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+            raw_neuroids[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
 
@@ -266,13 +267,10 @@ class _PereiraBenchmark(Benchmark):
         cross_scores = self._cross(self._target_assembly, apply=
         lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
         raw_scores = cross_scores.raw
-        score = cross_scores.sel(atlas='language', _apply_raw=False).mean('experiment')
-        subject_scores = raw_scores.sel(atlas='language').groupby('subject').median('neuroid')
-        subject_scores = subject_scores.mean('split').mean('experiment')
-        score.loc[{'aggregation': 'error'}] = subject_scores.std()
-        raw_neuroids = apply_aggregate(lambda values: values.sel(atlas='language').mean('split').mean('experiment'),
-                                       raw_scores)
-        score.attrs['raw'] = raw_neuroids
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split').mean('experiment'), raw_scores)
+
+        score = ceil_neuroids(raw_neuroids, self.ceiling)
+        score = score.sel(atlas='language', _apply_raw=False)
         return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
@@ -333,6 +331,8 @@ class _PereiraBenchmark(Benchmark):
 
         def fit(self, subject_subsamples, bootstrapped_scores):
             valid = ~np.isnan(bootstrapped_scores)
+            if sum(valid) < 1:
+                raise RuntimeError("No valid scores in sample")
             return super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).fit(
                 np.array(subject_subsamples)[valid], np.array(bootstrapped_scores)[valid])
 
@@ -516,10 +516,9 @@ class _Fedorenko2016:
                                        average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         score = self._metric(model_activations, self._target_assembly)
-        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
-        score.loc[{'aggregation': 'error'}] = subject_scores.std()
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
-        score.attrs['raw'] = raw_neuroids
+
+        score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
     @property
@@ -733,6 +732,32 @@ def aggregate(score, combine_layers=True):
         max_score.attrs['raw'] = score.copy()
         score = max_score
     return score
+
+
+def ceil_neuroids(raw_neuroids, ceiling, subject_column='subject'):
+    ceiled_neuroids = explained_variance_neuroids(raw_neuroids, ceiling.raw)
+    ceiled_neuroids.attrs['raw'] = raw_neuroids
+    ceiled_neuroids.attrs['ceiling'] = ceiling
+    subject_scores = ceiled_neuroids.groupby(subject_column).median()
+    center, error = subject_scores.median(), subject_scores.std()
+    score = Score([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+    score.attrs['raw'] = ceiled_neuroids
+    return score
+
+
+def explained_variance_neuroids(neuroids, ceiling_neuroids):
+    assert set(neuroids['neuroid_id'].values) == set(ceiling_neuroids['neuroid_id'].values)
+    ceiling_neuroids = ceiling_neuroids[{'neuroid': [neuroids['neuroid_id'].values.tolist().index(neuroid_id)
+                                                     for neuroid_id in neuroids['neuroid_id'].values]}]  # align
+    ceiling_neuroids = ceiling_neuroids.sel(aggregation='center')
+    values = explained_variance(neuroids.values, ceiling_neuroids.values)
+    neuroids = type(neuroids)(values, coords={coord: (dims, values) for coord, dims, values in walk_coords(neuroids)},
+                              dims=neuroids.dims)
+    return neuroids
+
+
+def explained_variance(score, ceiling):
+    return np.power(score / ceiling, 2)
 
 
 benchmark_pool = [
