@@ -123,6 +123,16 @@ class Futrell2018Encoding(Benchmark):
                 combinations.add(tuple(elements))
             return combinations
 
+        def extrapolate(self, ceilings):
+            ceilings = ceilings.median('neuroid')  # same here, combine neuroids
+            extrapolated_ceiling = self.extrapolate_neuroid(ceilings)
+            return extrapolated_ceiling
+
+        def fit(self, subject_subsamples, bootstrapped_scores):
+            valid = ~np.isnan(bootstrapped_scores)
+            return super(Futrell2018Encoding.ManySubjectExtrapolationCeiling, self).fit(
+                np.array(subject_subsamples)[valid], np.array(bootstrapped_scores)[valid])
+
     class SplitHalfPoolCeiling(HoldoutSubjectCeiling):
         def __init__(self, *args, **kwargs):
             super(Futrell2018Encoding.SplitHalfPoolCeiling, self).__init__(*args, **kwargs)

@@ -127,8 +127,7 @@ class ExtrapolationCeiling:
             neuroid_bootstrap_params = self.add_neuroid_meta(neuroid_bootstrap_params, neuroid_ceiling)
             bootstrap_params.append(neuroid_bootstrap_params)
             # and endpoints
-            endpoint_x = DataAssembly(extrapolated_ceiling.endpoint_x)
-            endpoint_x = self.add_neuroid_meta(endpoint_x, neuroid_ceiling)
+            endpoint_x = self.add_neuroid_meta(extrapolated_ceiling.endpoint_x, neuroid_ceiling)
             endpoint_xs.append(endpoint_x)
         # merge and add meta
         neuroid_ceilings = Score.merge(*neuroid_ceilings)
@@ -195,7 +194,7 @@ class ExtrapolationCeiling:
                       coords={'aggregation': ['center', 'error_low', 'error_high']}, dims=['aggregation'])
         score.attrs['raw'] = ceilings
         score.attrs['bootstrapped_params'] = bootstrap_params
-        score.attrs['endpoint_x'] = end_x
+        score.attrs['endpoint_x'] = DataAssembly(end_x)
         return score
 
     def fit(self, subject_subsamples, bootstrapped_scores):
