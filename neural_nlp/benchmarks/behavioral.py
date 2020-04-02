@@ -1,18 +1,30 @@
 import logging
+import numpy as np
 import xarray
 from brainio_base.assemblies import NeuroidAssembly
 from brainio_collection.fetch import fullname
+from numpy.random.mtrand import RandomState
+from tqdm import tqdm
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct
+from brainscore.metrics.transformations import CartesianProduct, apply_aggregate
 from brainscore.utils import LazyLoad
+from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling, NoOverlapException
 from neural_nlp.benchmarks.neural import read_words
 from neural_nlp.neural_data.naturalStories import load_naturalStories
 
 
-class StoriesReadingTimeEncoding(Benchmark):
+class Futrell2018Encoding(Benchmark):
+    """
+    predict individual human reading times of natural stories.
+
+    data source:
+        Futrell et al., International Conference on Language Resources and Evaluation (LREC) 2018
+        http://www.lrec-conf.org/proceedings/lrec2018/pdf/337.pdf
+    """
+
     def __init__(self, identifier):
         self._logger = logging.getLogger(fullname(self))
         self._identifier = identifier
@@ -27,7 +39,7 @@ class StoriesReadingTimeEncoding(Benchmark):
             crossvalidation_kwargs=dict(splits=5, kfold=True,
                                         split_coord='word_id', stratification_coord='sentence_id'))
         self._cross = CartesianProduct(dividers=['subject_id'])
-        # self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
+        self._ceiler = self.ManySubjectExtrapolationCeiling(subject_column='subject_id')
 
     @property
     def identifier(self):
@@ -35,16 +47,14 @@ class StoriesReadingTimeEncoding(Benchmark):
 
     def _load_assembly(self):
         assembly = load_naturalStories()
-        # we're going to treat subjects as "neuroids" to make it easier for our metrics
+        # we're going to treat subjects as "neuroids" to make it easier for our metrics which mostly deal with neurons
         assembly = assembly.rename({'subjects': 'neuroid'})
         assembly['neuroid_id'] = 'neuroid', assembly['subject_id']
         assembly = NeuroidAssembly(assembly)
+        # this one subject only has 6 reading times that are above threshold (i.e. not nan). That is not enough for
+        # 5-fold cross-validation where we cannot compute correlation on a single data point.
+        assembly = assembly[{'neuroid': [subject != 'A2VG5S4UL5UGRS' for subject in assembly['subject_id'].values]}]
         return assembly
-
-    @property
-    def ceiling(self):
-        return Score([1, 0], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])  # FIXME
-        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
     def _apply_cross(self, source_assembly, cross_assembly):
         # for several subjects there are many nans when their performance was below threshold. We here drop those words
@@ -69,10 +79,121 @@ class StoriesReadingTimeEncoding(Benchmark):
         self._logger.info('Scoring model')
         cross_scores = self._cross(self._target_assembly,
                                    apply=lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
-        return cross_scores
+        score = cross_scores.mean('subject_id')
+        cross_subjects_std = cross_scores.sel(aggregation='center').std()
+        score.__setitem__({'aggregation': score['aggregation'] == 'error'}, cross_subjects_std, _apply_raw=False)
+        per_subject = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score.attrs['raw'] = per_subject
+        return score
+
+    @property
+    def ceiling(self):
+        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
+
+    class ManySubjectExtrapolationCeiling(ExtrapolationCeiling):
+        def __init__(self, subject_column, *args, **kwargs):
+            super(Futrell2018Encoding.ManySubjectExtrapolationCeiling, self).__init__(
+                subject_column, *args, **kwargs)
+            self._rng = RandomState(0)
+            self._num_subsamples = 5
+            self.holdout_ceiling = Futrell2018Encoding.SplitHalfPoolCeiling(subject_column=subject_column)
+
+        def build_subject_subsamples(self, subjects):
+            return tuple(range(2, len(subjects) + 1, 5))  # reduce computational cost by only using every 5th point
+
+        def iterate_subsets(self, assembly, num_subjects):
+            # there are 180 subjects which makes for millions of combinations.
+            # to avoid this computational explosion, we choose only a subset of the possible subject sub-samples.
+            subjects = set(assembly[self.subject_column].values)
+            subject_combinations = self._random_combinations(subjects, num_subjects,
+                                                             choice=self._num_subsamples, rng=self._rng)
+            for sub_subjects in tqdm(subject_combinations, desc="subject combinations"):
+                sub_assembly = assembly[{'neuroid': [subject in sub_subjects
+                                                     for subject in assembly[self.subject_column].values]}]
+                yield {self.subject_column: sub_subjects}, sub_assembly
+
+        def _random_combinations(self, subjects, num_subjects, choice, rng):
+            # following https://stackoverflow.com/a/55929159/2225200
+            # building all `itertools.combinations` followed by `rng.choice` subsampling
+            # would lead to >1 trillion initial samples.
+            subjects = np.array(list(subjects))
+            combinations = set()
+            while len(combinations) < choice:
+                elements = rng.choice(subjects, size=num_subjects, replace=False)
+                combinations.add(tuple(elements))
+            return combinations
+
+    class SplitHalfPoolCeiling(HoldoutSubjectCeiling):
+        def __init__(self, *args, **kwargs):
+            super(Futrell2018Encoding.SplitHalfPoolCeiling, self).__init__(*args, **kwargs)
+            self._rng = RandomState(0)
+            self._num_bootstraps = 3
+
+        def __call__(self, assembly, metric):
+            subjects = set(assembly[self.subject_column].values)
+            scores = []
+            for bootstrap in tqdm(range(self._num_bootstraps), desc='split-half bootstrap'):
+                try:
+                    half1 = self._rng.choice(list(subjects), size=len(subjects) // 2, replace=False)
+                    half2 = subjects - set(half1)
+                    half1_assembly = assembly[{'neuroid': [subject_value in half1
+                                                           for subject_value in assembly[self.subject_column].values]}]
+                    half2_assembly = assembly[{'neuroid': [subject_value in half2
+                                                           for subject_value in assembly[self.subject_column].values]}]
+                    # run half2 as neural candidate for half1
+                    score = self.score(half2_assembly, half1_assembly, metric=metric)
+                    # store scores
+                    score = score.expand_dims("bootstrap", _apply_raw=False)
+                    score.__setitem__("bootstrap", [bootstrap], _apply_raw=False)
+                    scores.append(score)
+                except NoOverlapException as e:
+                    self._logger.debug(f"Ignoring no overlap ({e})")
+                    continue  # ignore
+
+            scores = Score.merge(*scores)
+            error = scores.sel(aggregation='center').std("bootstrap")
+            scores = apply_aggregate(lambda scores: scores.mean("bootstrap"), scores)
+            scores.loc[{'aggregation': 'error'}] = error
+            return scores
+
+        def score(self, source_assembly, target_assembly, metric):
+            # mean, drop nans
+            source_assembly, source_subjects = self.mean_subjects(source_assembly)
+            target_assembly, target_subjects = self.mean_subjects(target_assembly)
+            source_assembly = source_assembly.dropna('presentation')
+            target_assembly = target_assembly.dropna('presentation')
+            # align to the same stimuli that are non-nan in both source and target
+            source_assembly = source_assembly[{'presentation': [
+                stimulus_id in target_assembly['stimulus_id'].values
+                for stimulus_id in source_assembly['stimulus_id'].values]}]
+            exception_suffix = f"for source subjects {source_subjects} against target subjects {target_subjects}"
+            if len(source_assembly['presentation']) < 10:  # if not enough overlap: skip
+                raise NoOverlapException(f"Only {len(source_assembly)} stimuli left {exception_suffix}")
+            target_assembly = target_assembly[{'presentation': [
+                stimulus_id in source_assembly['stimulus_id'].values
+                for stimulus_id in target_assembly['stimulus_id'].values]}]
+            if len(target_assembly['presentation']) < 10:  # if not enough overlap: skip
+                raise NoOverlapException(f"Only {len(target_assembly)} stimuli left {exception_suffix}")
+            return super(Futrell2018Encoding.SplitHalfPoolCeiling, self).score(
+                pool_assembly=source_assembly, subject_assembly=target_assembly, metric=metric)
+
+        def mean_subjects(self, assembly):
+            subjects = assembly['subject_id'].values
+            assembly = assembly.mean('neuroid').expand_dims('neuroid')
+            assembly['neuroid_id'] = 'neuroid', [0]
+            assembly['subject_id'] = 'neuroid', [','.join(subjects)]
+            return assembly, subjects
 
 
-class StoriesReadingTimeMeanEncoding(Benchmark):
+class Futrell2018MeanEncoding(Benchmark):
+    """
+    predict mean human reading times of natural stories.
+
+    data source:
+        Futrell et al., International Conference on Language Resources and Evaluation (LREC) 2018
+        http://www.lrec-conf.org/proceedings/lrec2018/pdf/337.pdf
+    """
+
     def __init__(self, identifier):
         self._logger = logging.getLogger(fullname(self))
         self._identifier = identifier
@@ -86,7 +207,6 @@ class StoriesReadingTimeMeanEncoding(Benchmark):
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True,
                                         split_coord='word_id', stratification_coord='sentence_id'))
-        # self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
 
     @property
     def identifier(self):
@@ -106,8 +226,8 @@ class StoriesReadingTimeMeanEncoding(Benchmark):
 
     @property
     def ceiling(self):
-        return Score([1, 0], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])  # FIXME
-        return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
+        raise NotImplementedError("since we're operating on subjects mean, "
+                                  "we have no consistent way of computing the ceiling")
 
     def __call__(self, candidate):
         self._logger.info('Computing activations')
@@ -119,8 +239,8 @@ class StoriesReadingTimeMeanEncoding(Benchmark):
 
 
 benchmark_pool = [
-    ('stories_readingtime-encoding', StoriesReadingTimeEncoding),
-    ('stories_readingtime_mean-encoding', StoriesReadingTimeMeanEncoding),
+    ('Futrell2018-encoding', Futrell2018Encoding),
+    ('Futrell2018mean-encoding', Futrell2018MeanEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}

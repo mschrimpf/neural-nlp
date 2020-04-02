@@ -3,7 +3,9 @@ import warnings
 import itertools
 import logging
 import numpy as np
-from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, NeuroidAssembly, array_is_element
+from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, array_is_element
+from numpy.random.mtrand import RandomState
+from tqdm import tqdm
 
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
@@ -11,7 +13,7 @@ from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
-from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling
+from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
     load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
@@ -112,7 +114,13 @@ def align(source, target, on):
     return aligned
 
 
-class StoriesVoxelEncoding(Benchmark):
+class Blank2014VoxelEncoding(Benchmark):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
     def __init__(self, identifier, bold_shift=4):
         self._identifier = identifier
         assembly = LazyLoad(lambda: self._load_assembly(bold_shift))
@@ -124,7 +132,8 @@ class StoriesVoxelEncoding(Benchmark):
         self._metric = CrossRegressedCorrelation(
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
-        self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
+
+        self._ceiler = ExtrapolationCeiling(subject_column='subject_UID', post_process=self.post_process_ceilings)
 
     @property
     def identifier(self):
@@ -133,6 +142,11 @@ class StoriesVoxelEncoding(Benchmark):
     def _load_assembly(self, bold_shift):
         assembly = load_voxels(bold_shift_seconds=bold_shift)
         return assembly
+
+    def post_process_ceilings(self, scores):
+        scores['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+            scores[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        return scores
 
     @property
     def ceiling(self):
@@ -143,12 +157,23 @@ class StoriesVoxelEncoding(Benchmark):
         model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         _logger.info('Scoring model')
-        return self._metric(model_activations, self._target_assembly)
+        score = self._metric(model_activations, self._target_assembly)
+        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
+        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score.attrs['raw'] = raw_neuroids
+        return score
 
 
-class StoriesfROIEncoding(StoriesVoxelEncoding):
+class Blank2014fROIEncoding(Blank2014VoxelEncoding):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
     def __init__(self, *args, **kwargs):
-        super(StoriesfROIEncoding, self).__init__(*args, **kwargs)
+        super(Blank2014fROIEncoding, self).__init__(*args, **kwargs)
 
         regression = linear_regression(xarray_kwargs=dict(
             stimulus_coord='stimulus_id', neuroid_coord='fROI_area'))
@@ -159,7 +184,7 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
 
     def _load_assembly(self, bold_shift):
-        assembly = super(StoriesfROIEncoding, self)._load_assembly(bold_shift)
+        assembly = super(Blank2014fROIEncoding, self)._load_assembly(bold_shift)
         assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
         return assembly
 
@@ -185,9 +210,15 @@ class StoriesfROIEncoding(StoriesVoxelEncoding):
         return averaged_assembly
 
 
-class StoriesfROIRDM(StoriesfROIEncoding):
+class Blank2014fROIRDM(Blank2014fROIEncoding):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
     def __init__(self, *args, **kwargs):
-        super(StoriesfROIRDM, self).__init__(*args, **kwargs)
+        super(Blank2014fROIRDM, self).__init__(*args, **kwargs)
         self._metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
@@ -195,12 +226,18 @@ class StoriesfROIRDM(StoriesfROIEncoding):
 
 
 class _PereiraBenchmark(Benchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, identifier, metric, data_version='base'):
         self._identifier = identifier
         self._data_version = data_version
         self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
-        self._ceiler = self.PereiraExtrapolationCeiling()
+        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject')
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     @property
@@ -228,7 +265,15 @@ class _PereiraBenchmark(Benchmark):
         _logger.info('Scoring across experiments & atlases')
         cross_scores = self._cross(self._target_assembly, apply=
         lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
-        return cross_scores
+        raw_scores = cross_scores.raw
+        score = cross_scores.sel(atlas='language', _apply_raw=False).mean('experiment')
+        subject_scores = raw_scores.sel(atlas='language').groupby('subject').median('neuroid')
+        subject_scores = subject_scores.mean('split').mean('experiment')
+        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+        raw_neuroids = apply_aggregate(lambda values: values.sel(atlas='language').mean('split').mean('experiment'),
+                                       raw_scores)
+        score.attrs['raw'] = raw_neuroids
+        return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
         cross_assembly = cross_assembly.dropna('neuroid')  # some subjects have only done one experiment
@@ -244,6 +289,13 @@ class _PereiraBenchmark(Benchmark):
         return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
     class PereiraExtrapolationCeiling(ExtrapolationCeiling):
+        def __init__(self, subject_column, *args, **kwargs):
+            super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).__init__(
+                subject_column, *args, **kwargs)
+            self._num_subsamples = 3
+            self.holdout_ceiling = _PereiraBenchmark.PereiraHoldoutSubjectCeiling(subject_column=subject_column)
+            self._rng = RandomState(0)
+
         def iterate_subsets(self, assembly, num_subjects):
             # cross experiment to obtain more subjects to extrapolate.
             # don't worry about atlases here, cross-metric will take care of it.
@@ -254,23 +306,49 @@ class _PereiraBenchmark(Benchmark):
                 experiment_assembly = experiment_assembly.dropna('neuroid')  # drop subjects that haven't done this exp
                 if len(set(experiment_assembly[self.subject_column].values)) < num_subjects:
                     continue  # not enough subjects
-                for selection, sub_assembly in super(_PereiraBenchmark.PereiraExtrapolationCeiling, self). \
-                        iterate_subsets(assembly=experiment_assembly, num_subjects=num_subjects):
-                    selection.update({'experiment': experiment})
-                    yield selection, sub_assembly
+                for sub_subjects in self._random_combinations(
+                        subjects=set(experiment_assembly[self.subject_column].values),
+                        num_subjects=num_subjects, choice=self._num_subsamples, rng=self._rng):
+                    sub_assembly = assembly[{'neuroid': [subject in sub_subjects
+                                                         for subject in assembly[self.subject_column].values]}]
+                    yield {self.subject_column: sub_subjects, 'experiment': experiment}, sub_assembly
 
-        def average_collected(self, scores):
-            return scores.mean('sub_experiment').mean('atlas')
+        def _random_combinations(self, subjects, num_subjects, choice, rng):
+            # following https://stackoverflow.com/a/55929159/2225200. Also see similar method in `behavioral.py`.
+            subjects = np.array(list(subjects))
+            combinations = set()
+            while len(combinations) < choice:
+                elements = rng.choice(subjects, size=num_subjects, replace=False)
+                combinations.add(tuple(elements))
+            return combinations
 
-        def check_experiment_overlap(self, assembly):
-            for experiment in set(assembly['experiment'].values):
-                experiment_assembly = assembly[
-                    {'presentation': [exp == experiment for exp in assembly['experiment'].values]}]
-                experiment_assembly = experiment_assembly.dropna('neuroid')
-                if len(experiment_assembly['neuroid']) < 1 or \
-                        set(experiment_assembly['subject'].values) != set(assembly['subject'].values):
-                    return False  # no subject has done this experiment or no subject overlap for experiment
-            return True  # all good
+        def extrapolate(self, ceilings):
+            ceiling = super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).extrapolate(ceilings)
+            # compute aggregate ceiling only for language neuroids
+            neuroid_ceilings = ceiling.raw
+            language_ceilings = neuroid_ceilings.sel(atlas='language')
+            ceiling = self.aggregate_neuroid_ceilings(language_ceilings)
+            ceiling.attrs['raw'] = neuroid_ceilings  # reset to all neuroids
+            return ceiling
+
+        def fit(self, subject_subsamples, bootstrapped_scores):
+            valid = ~np.isnan(bootstrapped_scores)
+            return super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).fit(
+                np.array(subject_subsamples)[valid], np.array(bootstrapped_scores)[valid])
+
+        def post_process(self, scores):
+            scores = apply_aggregate(lambda values: values.mean('sub_experiment').mean('experiment'), scores)
+            return scores
+
+    class PereiraHoldoutSubjectCeiling(HoldoutSubjectCeiling):
+        def __init__(self, *args, **kwargs):
+            super(_PereiraBenchmark.PereiraHoldoutSubjectCeiling, self).__init__(*args, **kwargs)
+            self._rng = RandomState(0)
+            self._num_bootstraps = 5
+
+        def get_subject_iterations(self, subjects):
+            # use only a subset of subjects
+            return self._rng.choice(list(subjects), size=self._num_bootstraps)
 
 
 def listen_to(candidate, stimulus_set, reset_column='story', average_sentence=True):
@@ -321,6 +399,12 @@ def read_words(candidate, stimulus_set, reset_column='sentence_id', copy_columns
 
 
 class PereiraEncoding(_PereiraBenchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
@@ -330,39 +414,57 @@ class PereiraEncoding(_PereiraBenchmark):
 
 
 class PereiraLanguageResidualsEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraLanguageResidualsEncoding, self).__init__()
         self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
 
 
 class PereiraICAEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraICAEncoding, self).__init__(data_version='ICA')
 
 
 class PereiraDemeanEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraDemeanEncoding, self).__init__(data_version='Demean')
 
 
 class PereiraNovisaudEncoding(PereiraEncoding):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self):
         super(PereiraNovisaudEncoding, self).__init__(data_version='NoVisAud')
 
 
-class PereiraEncodingMin(_PereiraBenchmark):
-    def __init__(self):
-        metric = CrossRegressedCorrelation(
-            regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
-            correlation=pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id')),
-            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=2))
-        super(PereiraEncodingMin, self).__init__(metric=metric)
-        self._target_assembly = self._target_assembly.sel(subject='018')
-        self._target_assembly['subject'] = 'neuroid', ['018'] * len(self._target_assembly['neuroid'])
-        self._target_assembly = NeuroidAssembly(self._target_assembly)  # re-index with subject
-
-
 class PereiraDecoding(_PereiraBenchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, **kwargs):
         metric = CrossRegressedCorrelation(
             regression=linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id')),
@@ -373,6 +475,12 @@ class PereiraDecoding(_PereiraBenchmark):
 
 
 class PereiraRDM(_PereiraBenchmark):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
     def __init__(self, **kwargs):
         metric = RDMCrossValidated(
             comparison_coord='stimulus_id',
@@ -382,6 +490,12 @@ class PereiraRDM(_PereiraBenchmark):
 
 
 class _Fedorenko2016:
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
+
     def __init__(self, identifier, metric):
         self._identifier = identifier
         assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=1))
@@ -389,25 +503,90 @@ class _Fedorenko2016:
         self._metric = metric
         self._average_sentence = False
         self._ceiler = ExtrapolationCeiling(subject_column='subject_UID')
+        self._electrode_ceiler = self.ElectrodeExtrapolation(subject_column='subject_UID')
 
     @property
     def identifier(self):
         return self._identifier
 
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        stimulus_set = self._target_assembly.attrs['stimulus_set']
+        model_activations = read_words(candidate, stimulus_set,
+                                       average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
+        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
+        score = self._metric(model_activations, self._target_assembly)
+        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
+        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score.attrs['raw'] = raw_neuroids
+        return score
+
     @property
     def ceiling(self):
         return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-        stimulus_set = self._target_assembly.attrs['stimulus_set']
-        model_activations = read_words(candidate, stimulus_set, average_sentence=self._average_sentence)
-        assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        return self._metric(model_activations, self._target_assembly)
+    @property
+    def electrode_ceiling(self):
+        return self._electrode_ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
+
+    class ElectrodeExtrapolation(ExtrapolationCeiling):
+        """ extrapolate to infinitely many electrodes """
+
+        def __init__(self, *args, **kwargs):
+            super(_Fedorenko2016.ElectrodeExtrapolation, self).__init__(*args, **kwargs)
+            self._rng = RandomState(0)
+            self._num_samples = 15  # number of samples per electrode selection
+
+        def collect(self, identifier, assembly, metric):
+            """ Instead of iterating over subject combinations and then afterwards over holdout subjects,
+            we here iterate over holdout subjects and then over electrode sub-combinations of the remaining pool. """
+            subjects = set(assembly[self.subject_column].values)
+            scores = []
+            for holdout_subject in tqdm(subjects, desc='subjects'):
+                subject_pool = subjects - {holdout_subject}
+                subject_pool_assembly = assembly[{'neuroid': [subject in subject_pool
+                                                              for subject in assembly[self.subject_column].values]}]
+                holdout_subject_assembly = assembly[{'neuroid': [subject == holdout_subject
+                                                                 for subject in assembly[self.subject_column].values]}]
+
+                electrodes = subject_pool_assembly['neuroid_id'].values
+                electrodes_range = np.arange(5, len(electrodes), 5)
+                for num_electrodes in tqdm(electrodes_range, desc='num electrodes'):
+                    electrodes_combinations = self._choose_electrodes(electrodes, num_electrodes,
+                                                                      num_choices=self._num_samples)
+                    for electrodes_split, electrodes_selection in enumerate(electrodes_combinations):
+                        electrodes_assembly = subject_pool_assembly[{'neuroid': [
+                            neuroid_id in electrodes_selection
+                            for neuroid_id in subject_pool_assembly['neuroid_id'].values]}]
+                        score = metric(electrodes_assembly, holdout_subject_assembly)
+                        # store scores
+                        score = score.expand_dims(f"sub_{self.subject_column}")
+                        score.__setitem__(f"sub_{self.subject_column}", [holdout_subject])
+                        score = score.expand_dims('num_electrodes').expand_dims('electrodes_split')
+                        score['num_electrodes'] = [num_electrodes]
+                        score['electrodes_split'] = [electrodes_split]
+                        scores.append(score)
+
+            scores = Score.merge(*scores)
+            ceilings = scores.raw
+            ceilings = ceilings.rename({'split': 'subsplit'}).stack(split=['electrodes_split', 'subsplit'])
+            ceilings.attrs['raw'] = scores
+            return ceilings
+
+        def _choose_electrodes(self, electrodes, num_electrodes, num_choices):
+            choices = [self._rng.choice(electrodes, size=num_electrodes, replace=False) for _ in range(num_choices)]
+            return choices
 
 
 def Fedorenko2016Encoding(identifier):
-    """ Fedorenko benchmark with NO z-scored recordings """
+    """
+    Fedorenko benchmark with NO z-scored recordings
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
@@ -417,54 +596,101 @@ def Fedorenko2016Encoding(identifier):
 
 
 def Fedorenko2016V2Encoding(identifier):
-    """ Fedorenko benchmark WITH z-scored recordings """
+    """
+    Fedorenko benchmark WITH z-scored recordings
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=2))
     return benchmark
 
 
 def Fedorenko2016AllEncoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=1))
     return benchmark
 
 
 def Fedorenko2016AllV2Encoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=2))
     return benchmark
 
 
 def Fedorenko2016NonLangEncoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language',
                                                                      version=2))  # Version 2 - do not z-score in ecog.py
     return benchmark
 
+
 # Version 3 - based on data March 24th
 def Fedorenko2016V3Encoding(identifier):
-    """ Fedorenko benchmark, language electrodes
-    Data 03/24/2020: sentence_electrode_lang_elec_max_window_dat (not demeaned across sentences)"""
+    """
+    Fedorenko benchmark, language electrodes
+    Data 03/24/2020: sentence_electrode_lang_elec_max_window_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
     return benchmark
 
-def Fedorenko2016NonLangV3Encoding(identifier):
-    """ Fedorenko benchmark, non-language electrodes (only sorted based on signal)
-    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)"""
+
+def Fedorenko2016V3NonLangEncoding(identifier):
+    """
+    Fedorenko benchmark, non-language electrodes (only sorted based on signal)
+    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=3))
     return benchmark
 
+
 def Fedorenko2016V3AllEncoding(identifier):
-    """ Fedorenko benchmark, all electrodes (only sorted based on signal)
-    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)"""
+    """
+    Fedorenko benchmark, all electrodes (only sorted based on signal)
+    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
     return benchmark
 
 
 def Fedorenko2016RDM(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     metric = RDMCrossValidated(
         comparison_coord='stimulus_id',
         crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
@@ -475,6 +701,11 @@ def Fedorenko2016RDM(identifier):
 
 
 def Fedorenko2016AllLastEncoding(identifier):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
     regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
     correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
     metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
@@ -505,10 +736,9 @@ def aggregate(score, combine_layers=True):
 
 
 benchmark_pool = [
-    ('stories_voxel_bold4s-encoding', StoriesVoxelEncoding),
-    ('stories_froi_bold4s-encoding', StoriesfROIEncoding),
-    ('stories_froi_bold4s-rdm', StoriesfROIRDM),
-    ('rdm', StoriesRDMBenchmark),
+    ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
+    ('Blank2014fROI-encoding', Blank2014fROIEncoding),
+    ('Blank2014-rdm', Blank2014fROIRDM),
     ('Pereira2018-encoding', PereiraEncoding),
     ('Pereira2018ICA-encoding', PereiraICAEncoding),
     ('Pereira2018Demean-encoding', PereiraDemeanEncoding),
@@ -523,8 +753,8 @@ benchmark_pool = [
     ('Fedorenko2016allv2-encoding', Fedorenko2016AllV2Encoding),
     ('Fedorenko2016nonlangv2-encoding', Fedorenko2016NonLangEncoding),
     ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
-    ('Fedorenko2016nonlangv3-encoding', Fedorenko2016NonLangV3Encoding),
-    ('Fedorenko2016allv3-encoding', Fedorenko2016AllV3Encoding),
+    ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
+    ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}

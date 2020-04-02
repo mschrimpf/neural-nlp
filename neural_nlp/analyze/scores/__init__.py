@@ -89,7 +89,7 @@ model_colors = {
 models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
-overall_benchmarks = ('Pereira2018', 'Fedorenko2016', 'stories_froi_bold4s')
+overall_benchmarks = ('Pereira2018', 'Fedorenko2016', 'Blank2014fROI', 'Futrell2018')
 performance_benchmarks = ['wikitext', 'glue']
 
 
