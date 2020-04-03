@@ -62,9 +62,10 @@ class HoldoutSubjectCeiling:
 
 
 class ExtrapolationCeiling:
-    def __init__(self, subject_column='subject', post_process=None):
+    def __init__(self, subject_column='subject', num_bootstraps=100, post_process=None):
         self.subject_column = subject_column
         self.holdout_ceiling = HoldoutSubjectCeiling(subject_column=subject_column)
+        self.num_bootstraps = num_bootstraps
         self._logger = logging.getLogger(fullname(self))
         self._post_process = post_process
 
@@ -163,10 +164,9 @@ class ExtrapolationCeiling:
     def extrapolate_neuroid(self, ceilings):
         # figure out how many extrapolation x points we have. E.g. for Pereira, not all combinations are possible
         subject_subsamples = list(sorted(set(ceilings['num_subjects'].values)))
-        num_bootstraps = 100
         rng = RandomState(0)
         bootstrap_params = []
-        for bootstrap in range(num_bootstraps):
+        for bootstrap in range(self.num_bootstraps):
             bootstrapped_scores = []
             for num_subjects in subject_subsamples:
                 num_scores = ceilings.sel(num_subjects=num_subjects)

@@ -239,7 +239,7 @@ class _PereiraBenchmark(Benchmark):
         self._data_version = data_version
         self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
-        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject')
+        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject', num_bootstraps=10)
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     @property
