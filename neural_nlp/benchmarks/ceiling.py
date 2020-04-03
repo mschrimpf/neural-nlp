@@ -117,24 +117,30 @@ class ExtrapolationCeiling:
     def extrapolate(self, ceilings):
         neuroid_ceilings, bootstrap_params, endpoint_xs = [], [], []
         for i in trange(len(ceilings['neuroid']), desc='neuroid extrapolations'):
-            # extrapolate per-neuroid ceiling
-            neuroid_ceiling = ceilings.isel(neuroid=[i])
-            extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling.squeeze())
-            extrapolated_ceiling = self.add_neuroid_meta(extrapolated_ceiling, neuroid_ceiling)
-            neuroid_ceilings.append(extrapolated_ceiling)
-            # also keep track of bootstrapped parameters
-            neuroid_bootstrap_params = extrapolated_ceiling.bootstrapped_params
-            neuroid_bootstrap_params = self.add_neuroid_meta(neuroid_bootstrap_params, neuroid_ceiling)
-            bootstrap_params.append(neuroid_bootstrap_params)
-            # and endpoints
-            endpoint_x = self.add_neuroid_meta(extrapolated_ceiling.endpoint_x, neuroid_ceiling)
-            endpoint_xs.append(endpoint_x)
+            try:
+                # extrapolate per-neuroid ceiling
+                neuroid_ceiling = ceilings.isel(neuroid=[i])
+                extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling.squeeze())
+                extrapolated_ceiling = self.add_neuroid_meta(extrapolated_ceiling, neuroid_ceiling)
+                neuroid_ceilings.append(extrapolated_ceiling)
+                # also keep track of bootstrapped parameters
+                neuroid_bootstrap_params = extrapolated_ceiling.bootstrapped_params
+                neuroid_bootstrap_params = self.add_neuroid_meta(neuroid_bootstrap_params, neuroid_ceiling)
+                bootstrap_params.append(neuroid_bootstrap_params)
+                # and endpoints
+                endpoint_x = self.add_neuroid_meta(extrapolated_ceiling.endpoint_x, neuroid_ceiling)
+                endpoint_xs.append(endpoint_x)
+            except KeyError:  # no extrapolation successful (happens for 1 neuroid in Pereira)
+                continue
         # merge and add meta
-        neuroid_ceilings = Score.merge(*neuroid_ceilings)
+        self._logger.debug("Merging neuroid ceilings")
+        neuroid_ceilings = merge(*neuroid_ceilings)
         neuroid_ceilings.attrs['raw'] = ceilings
-        bootstrap_params = merge_data_arrays(bootstrap_params)
+        self._logger.debug("Merging bootstrap params")
+        bootstrap_params = merge(*bootstrap_params)
         neuroid_ceilings.attrs['bootstrapped_params'] = bootstrap_params
-        endpoint_xs = merge_data_arrays(endpoint_xs)
+        self._logger.debug("Merging endpoints")
+        endpoint_xs = merge(*endpoint_xs)
         neuroid_ceilings.attrs['endpoint_x'] = endpoint_xs
         # aggregate
         ceiling = self.aggregate_neuroid_ceilings(neuroid_ceilings)
@@ -214,6 +220,35 @@ def ci_error(samples, center, confidence=.95):
     confidence_below, confidence_above = np.nanpercentile(samples, low), np.nanpercentile(samples, high)
     confidence_below, confidence_above = center - confidence_below, confidence_above - center
     return confidence_below, confidence_above
+
+
+def merge(*elements, on='neuroid'):
+    dims = elements[0].dims
+    assert all(element.dims == dims for element in elements[1:])
+    merge_index = dims.index(on)
+    # the coordinates in the merge index should have the same keys
+    assert _coords_match(elements, dim=on, match_values=False)
+    # all other dimensions, their coordinates and values should already align
+    for dim in set(dims) - {on}:
+        assert _coords_match(elements, dim=dim, match_values=True)
+    # merge values without meta
+    merged_values = np.concatenate([element.values for element in elements], axis=merge_index)
+    # piece together with meta
+    result = type(elements[0])(merged_values, coords={
+        **{coord: (dims, values)
+           for coord, dims, values in walk_coords(elements[0])
+           if not array_is_element(dims, on)},
+        **{coord: (dims, np.concatenate([element[coord].values for element in elements]))
+           for coord, dims, _ in walk_coords(elements[0])
+           if array_is_element(dims, on)}}, dims=elements[0].dims)
+    return result
+
+
+def _coords_match(elements, dim, match_values=False):
+    merge_coords = [(key, tuple(value)) if match_values else key for _, key, value in walk_coords(elements[0][dim])]
+    return all(tuple(merge_coords) == tuple(
+        [(key, tuple(value)) if match_values else key for _, key, value in walk_coords(element[dim])])
+               for element in elements[1:])
 
 
 class NoOverlapException(Exception):
