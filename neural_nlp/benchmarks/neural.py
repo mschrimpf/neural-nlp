@@ -11,7 +11,8 @@ from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
+from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate, \
+    standard_error_of_the_mean
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
@@ -735,29 +736,30 @@ def aggregate(score, combine_layers=True):
 
 
 def ceil_neuroids(raw_neuroids, ceiling, subject_column='subject'):
-    ceiled_neuroids = explained_variance_neuroids(raw_neuroids, ceiling.raw)
+    ceiled_neuroids = consistency_neuroids(raw_neuroids, ceiling.raw)
     ceiled_neuroids.attrs['raw'] = raw_neuroids
-    ceiled_neuroids.attrs['ceiling'] = ceiling
+    ceiled_neuroids.attrs['ceiling'] = ceiling.raw
     subject_scores = ceiled_neuroids.groupby(subject_column).median()
-    center, error = subject_scores.median(), subject_scores.std()
+    center, error = subject_scores.median(subject_column), standard_error_of_the_mean(subject_scores, subject_column)
     score = Score([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
     score.attrs['raw'] = ceiled_neuroids
+    score.attrs['ceiling'] = ceiling
     return score
 
 
-def explained_variance_neuroids(neuroids, ceiling_neuroids):
+def consistency_neuroids(neuroids, ceiling_neuroids):
     assert set(neuroids['neuroid_id'].values) == set(ceiling_neuroids['neuroid_id'].values)
     ceiling_neuroids = ceiling_neuroids[{'neuroid': [neuroids['neuroid_id'].values.tolist().index(neuroid_id)
                                                      for neuroid_id in neuroids['neuroid_id'].values]}]  # align
     ceiling_neuroids = ceiling_neuroids.sel(aggregation='center')
-    values = explained_variance(neuroids.values, ceiling_neuroids.values)
+    values = consistency(neuroids.values, ceiling_neuroids.values)
     neuroids = type(neuroids)(values, coords={coord: (dims, values) for coord, dims, values in walk_coords(neuroids)},
                               dims=neuroids.dims)
     return neuroids
 
 
-def explained_variance(score, ceiling):
-    return np.power(score / ceiling, 2)
+def consistency(score, ceiling):
+    return score / ceiling
 
 
 benchmark_pool = [
