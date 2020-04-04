@@ -12,8 +12,9 @@ from matplotlib import pyplot
 from scipy.stats import pearsonr
 
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
-    collect_scores, average_adjacent, choose_best_scores, ceiling_normalize, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars, get_ceiling_error, shaded_errorbar
+    collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
+    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar
+from result_caching import is_iterable
 
 _logger = logging.getLogger(__name__)
 
@@ -57,40 +58,25 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
     savefig(fig, f'bars-network-{benchmark}')
 
 
-def fmri_best(benchmark='Pereira2018-encoding'):
-    whole_best(benchmark=benchmark, title=benchmark)
-
-
-def stories_best(benchmark='Blank2014fROI-encoding'):
-    whole_best(benchmark=benchmark, title='Blank2014fROI')
-
-
-def ecog_best(benchmark='Fedorenko2016-encoding'):
-    whole_best(benchmark=benchmark, title='ECoG')
-
-
-def overall():
-    whole_best(benchmark='overall-encoding', title='overall-encoding')
-
-
 def wikitext_best(benchmark='wikitext-2'):
     whole_best(benchmark=benchmark, title='wikitext-2', ylabel='NLL / Perplexity', ylim=50)
 
 
-def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
+def whole_best(title, benchmark=None, data=None, title_kwargs=None, normalize_error=False, **kwargs):
     data = data if data is not None else retrieve_scores(benchmark)
-    data = ceiling_normalize(data)
     models = [model for model in all_models if model in data['model'].values]
     fig, ax = pyplot.subplots(figsize=(5, 4))
     ax.set_title(title, **(title_kwargs or {}))
-    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)), **kwargs)
-    ceiling_err = get_ceiling_error(benchmark)
-    if not np.isnan(ceiling_err):  # performance benchmarks
+    ceiling, ceiling_err = get_ceiling(benchmark, which='both', normalize_scale=normalize_error)
+    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)),
+               normalize_error=ceiling if normalize_error else None, **kwargs)
+    if is_iterable(ceiling_err) or not np.isnan(ceiling_err):  # no performance benchmarks
         ceiling_y = 1  # we already normalized so ceiling == 1
         xlim = ax.get_xlim()
-        shaded_errorbar(x=[-50, +50], y=[ceiling_y, ceiling_y], error=ceiling_err, ax=ax,
+        shaded_errorbar(x=[-50, +50], y=np.array([ceiling_y, ceiling_y]), error=ceiling_err, ax=ax,
                         alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
         ax.set_xlim(xlim)
+        ax.set_ylim([-.05, 1.05 + ceiling_err[-1]])
     ax.set_xticks([])
     ax.set_xticklabels([])
 
@@ -105,23 +91,39 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, **kwargs):
 
     ax.yaxis.set_major_formatter(score_formatter)
     ax.spines['bottom'].set_position(('data', 0))
+    ax.spines['bottom'].set_linewidth(0.75)
     savefig(fig, f'bars-{benchmark}')
 
 
-def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predictivity (r / c)", text_kwargs=None):
+def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", text_kwargs=None,
+               normalize_error=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
     offset = len(models) / 2
     for model_iter, model in enumerate(models):
         model_score = data[data['model'] == model]
         y, yerr = model_score['score'], model_score['error']
+        if normalize_error:
+            yerr /= normalize_error
         x = np.arange(start=0, stop=len(y) * step, step=step)
         model_x = x - offset * width + model_iter * width
-        ax.bar(model_x, height=y, yerr=yerr, width=width, edgecolor='none', color=model_colors[model])
+        ax.bar(model_x, height=y, yerr=yerr, width=width,
+               edgecolor='none', color=model_colors[model], ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
         for xpos in model_x:
             ax.text(x=xpos + .8 * width / 2, y=.005, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
-    ax.set_ylabel(ylabel, fontdict=dict(fontsize=10))
+    for (model, annotate_x, width) in [
+        ('BERT', 0.21, 1.8),
+        ('XLM', 0.403, 2.65),
+        ('T5', 0.61, 1.3),
+        ('AlBERT', 0.738, 2.9),
+        ('GPT', 0.89, 2),
+    ]:
+        ax.annotate(model, xy=(annotate_x, -.0), xytext=(annotate_x, -.05), xycoords='axes fraction',
+                    fontsize=8, ha='center', va='bottom',
+                    arrowprops=dict(arrowstyle=f'-[, widthB={width}, lengthB=.3', lw=1.0, color='black'))
+
+    ax.set_ylabel(ylabel, fontdict=dict(fontsize=16))
     if ylim is not None and ylim <= 1:
         ax.set_yticks(np.arange(0, ylim, .1))
         ax.set_yticklabels([
