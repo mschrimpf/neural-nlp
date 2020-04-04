@@ -68,8 +68,7 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, normalize_er
     fig, ax = pyplot.subplots(figsize=(5, 4))
     ax.set_title(title, **(title_kwargs or {}))
     ceiling, ceiling_err = get_ceiling(benchmark, which='both', normalize_scale=normalize_error)
-    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)),
-               normalize_error=ceiling if normalize_error else None, **kwargs)
+    _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)), **kwargs)
     if is_iterable(ceiling_err) or not np.isnan(ceiling_err):  # no performance benchmarks
         ceiling_y = 1  # we already normalized so ceiling == 1
         xlim = ax.get_xlim()
@@ -95,16 +94,13 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, normalize_er
     savefig(fig, f'bars-{benchmark}')
 
 
-def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", text_kwargs=None,
-               normalize_error=None):
+def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
     offset = len(models) / 2
     for model_iter, model in enumerate(models):
         model_score = data[data['model'] == model]
         y, yerr = model_score['score'], model_score['error']
-        if normalize_error:
-            yerr /= normalize_error
         x = np.arange(start=0, stop=len(y) * step, step=step)
         model_x = x - offset * width + model_iter * width
         ax.bar(model_x, height=y, yerr=yerr, width=width,
