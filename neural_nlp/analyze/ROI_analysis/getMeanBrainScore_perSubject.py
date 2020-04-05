@@ -26,7 +26,7 @@ def getMeanBrainScore_perSubject(subjectID = '018',
     # Define variables and file names
     timestamp = '{:%Y-%m-%d}'.format(datetime.datetime.now())
     fname = score_name.split('=')
-    pngfile_name = subjectID + '_ROI_' + fname[1][:-5] + fname[2][:-10] + '.png'
+    pngfile_name = subjectID + '_ROI_' + timestamp + fname[1][:-5] + fname[2][:-10] + '.png'
     pngfile_name = pngfile_name.replace(',', '_')
     pngfile_name = pngfile_name.replace('-', '_')
     
