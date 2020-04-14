@@ -67,41 +67,48 @@ def average_subregions(assembly):
     return assembly
 
 
-def plot_extrapolation_ceiling(benchmark='Fedorenko2016-encoding'):
+def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
     benchmark_impl = benchmark_pool[benchmark]
     ceiling = benchmark_impl.ceiling
 
     fig, ax = pyplot.subplots()
 
     # plot actual data splits
-    raw_ceilings = ceiling.raw.raw
-    subject_columns = prefixdict(default='sub_subject_UID', Pereira='sub_subject', stories='sub_subject_id')
-    subject_column = subject_columns[benchmark]
+    bootstrapped_params = ceiling.bootstrapped_params
+    if benchmark.startswith('Futrell'):
+        raw_ceilings = ceiling.raw
+    elif benchmark.startswith('Pereira'):
+        raw_ceilings = ceiling.raw.raw.sel(atlas='language')
+        bootstrapped_params = ceiling.raw.bootstrapped_params.sel(atlas='language')
+        bootstrapped_params = bootstrapped_params.median('neuroid')
+    else:
+        raw_ceilings = ceiling.raw.raw
+    subject_column = "sub_" + subject_columns[benchmark]
     num_splits = raw_ceilings.stack(numsplit=['num_subjects', subject_column, 'split'])
-    jitter = .25
+    step_size = raw_ceilings['num_subjects'].values[1] - raw_ceilings['num_subjects'].values[0]
+    jitter = .25 * step_size
     rng = RandomState(0)
     x = num_splits['num_subjects'].values + (-jitter / 2 + jitter * rng.rand(len(num_splits['num_subjects'])))
-    y = num_splits.median('neuroid').values
+    y = num_splits.median('neuroid').values if not benchmark.startswith('Futrell') else num_splits.values
     ax.scatter(x, y, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
-    x = np.arange(0, max(ceiling.endpoint_x, max(raw_ceilings['num_subjects'].values)) + 2)
-    ys = np.array([v(x, *params) for params in ceiling.bootstrapped_params.values])
+    x = np.arange(0, max(ceiling.endpoint_x, max(raw_ceilings['num_subjects'].values)) * 1.3)
+    ys = np.array([v(x, *params) for params in bootstrapped_params.values])
     for y in ys:
-        ax.plot(x, y, alpha=.05, color='gray')
-    median_ys = np.median(ys, axis=0)
+        ax.plot(x, y, alpha=.05 if not benchmark.startswith('Pereira') else .1, color='gray')
+    median_ys = np.nanmedian(ys, axis=0)
     error = confidence_interval(ys.T, centers=median_ys)
     ax.errorbar(x=x, y=median_ys, yerr=list(zip(*error)), linestyle='dashed', color='gray')
     estimated_ceiling = ceiling.sel(aggregation='center').values
-    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #~{ceiling.endpoint_x.values.tolist()}",
+    ax.text(.65, .1, s=f"asymptote {estimated_ceiling :.2f} at #~{ceiling.endpoint_x.values.tolist():.0f}",
             ha='center', va='center', transform=ax.transAxes)
 
     # plot meta
     ax.set_title(benchmark)
     ax.set_xlabel('# subjects')
     ax.set_ylabel('estimated ceiling')
-    ax.set_ylim([0.9 * np.nanmin(num_splits.values),
-                 (1.8 if benchmark.startswith('Fedorenko') else 1.2) * np.nanmax(num_splits.values)])
+    ax.set_ylim([0.9 * np.min(y), .29 if benchmark.startswith('Fedorenko') else (1.2 * np.max(y))])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
     savepath = Path(__file__).parent / f'extrapolation-{benchmark}.png'
@@ -129,21 +136,6 @@ def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):
         ax.set_xlabel(f"{ns}")
     fig.tight_layout()
     fig.savefig(Path(__file__).parent / f'hist-{benchmark}.png')
-
-
-class prefixdict(dict):
-    def __init__(self, default=None, **kwargs):
-        super(prefixdict, self).__init__(**kwargs)
-        self._default = default
-
-    def __getitem__(self, item):
-        subitem = item
-        while len(subitem) > 1:
-            try:
-                return super(prefixdict, self).__getitem__(subitem)
-            except KeyError:
-                subitem = subitem[:-1]
-        return self._default
 
 
 if __name__ == '__main__':

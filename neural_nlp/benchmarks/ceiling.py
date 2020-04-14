@@ -3,6 +3,7 @@ import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, merge_data_arrays, walk_coords, array_is_element
 from brainio_collection.fetch import fullname
+from numpy import AxisError
 from numpy.random.mtrand import RandomState
 from scipy.optimize import curve_fit
 from tqdm import tqdm, trange
@@ -131,17 +132,17 @@ class ExtrapolationCeiling:
                 # and endpoints
                 endpoint_x = self.add_neuroid_meta(extrapolated_ceiling.endpoint_x, neuroid_ceiling)
                 endpoint_xs.append(endpoint_x)
-            except KeyError:  # no extrapolation successful (happens for 1 neuroid in Pereira)
+            except AxisError:  # no extrapolation successful (happens for 1 neuroid in Pereira)
                 continue
         # merge and add meta
         self._logger.debug("Merging neuroid ceilings")
-        neuroid_ceilings = merge(*neuroid_ceilings)
+        neuroid_ceilings = manual_merge(*neuroid_ceilings)
         neuroid_ceilings.attrs['raw'] = ceilings
         self._logger.debug("Merging bootstrap params")
-        bootstrap_params = merge(*bootstrap_params)
+        bootstrap_params = manual_merge(*bootstrap_params)
         neuroid_ceilings.attrs['bootstrapped_params'] = bootstrap_params
         self._logger.debug("Merging endpoints")
-        endpoint_xs = merge(*endpoint_xs)
+        endpoint_xs = manual_merge(*endpoint_xs)
         neuroid_ceilings.attrs['endpoint_x'] = endpoint_xs
         # aggregate
         ceiling = self.aggregate_neuroid_ceilings(neuroid_ceilings)
@@ -180,16 +181,17 @@ class ExtrapolationCeiling:
 
             try:
                 params = self.fit(subject_subsamples, bootstrapped_scores)
-                params = DataAssembly([params], coords={'bootstrap': [bootstrap], 'param': ['v0', 'tau0']},
-                                      dims=['bootstrap', 'param'])
-                bootstrap_params.append(params)
             except RuntimeError:  # optimal parameters not found
-                continue
+                params = [np.nan, np.nan]
+            params = DataAssembly([params], coords={'bootstrap': [bootstrap], 'param': ['v0', 'tau0']},
+                                  dims=['bootstrap', 'param'])
+            bootstrap_params.append(params)
         bootstrap_params = merge_data_arrays(bootstrap_params)
         # find endpoint and error
         asymptote_threshold = .0005
         interpolation_xs = np.arange(1000)
-        ys = np.array([v(interpolation_xs, *params) for params in bootstrap_params.values])
+        ys = np.array([v(interpolation_xs, *params) for params in bootstrap_params.values
+                       if not np.isnan(params).any()])
         median_ys = np.median(ys, axis=0)
         diffs = np.diff(median_ys)
         end_x = np.where(diffs < asymptote_threshold)[0].min()  # first x where increase smaller than threshold
@@ -222,15 +224,17 @@ def ci_error(samples, center, confidence=.95):
     return confidence_below, confidence_above
 
 
-def merge(*elements, on='neuroid'):
+def manual_merge(*elements, on='neuroid'):
     dims = elements[0].dims
     assert all(element.dims == dims for element in elements[1:])
     merge_index = dims.index(on)
     # the coordinates in the merge index should have the same keys
-    assert _coords_match(elements, dim=on, match_values=False)
+    assert _coords_match(elements, dim=on,
+                         match_values=False), f"coords in {[element[on] for element in elements]} do not match"
     # all other dimensions, their coordinates and values should already align
     for dim in set(dims) - {on}:
-        assert _coords_match(elements, dim=dim, match_values=True)
+        assert _coords_match(elements, dim=dim,
+                             match_values=True), f"coords in {[element[dim] for element in elements]} do not match"
     # merge values without meta
     merged_values = np.concatenate([element.values for element in elements], axis=merge_index)
     # piece together with meta
@@ -245,10 +249,10 @@ def merge(*elements, on='neuroid'):
 
 
 def _coords_match(elements, dim, match_values=False):
-    merge_coords = [(key, tuple(value)) if match_values else key for _, key, value in walk_coords(elements[0][dim])]
-    return all(tuple(merge_coords) == tuple(
-        [(key, tuple(value)) if match_values else key for _, key, value in walk_coords(element[dim])])
-               for element in elements[1:])
+    first_coords = [(key, tuple(value)) if match_values else key for _, key, value in walk_coords(elements[0][dim])]
+    other_coords = [[(key, tuple(value)) if match_values else key for _, key, value in walk_coords(element[dim])]
+                    for element in elements[1:]]
+    return all(tuple(first_coords) == tuple(coords) for coords in other_coords)
 
 
 class NoOverlapException(Exception):
