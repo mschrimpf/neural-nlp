@@ -109,11 +109,12 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consis
             ax.text(x=xpos + .8 * width / 2, y=.005, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
     for (model, annotate_x, width) in [
-        ('BERT', 0.21, 1.8),
-        ('XLM', 0.403, 2.65),
-        ('T5', 0.61, 1.3),
-        ('AlBERT', 0.738, 2.9),
-        ('GPT', 0.89, 2),
+        ('Emb.', 0.078, 1.05),
+        ('BERT', 0.225, 1.8),
+        ('XLM', 0.415, 2.612),
+        ('T5', 0.618, 1.3),
+        ('AlBERT', 0.744, 2.85),
+        ('GPT', 0.892, 2),
     ]:
         ax.annotate(model, xy=(annotate_x, -.0), xytext=(annotate_x, -.05), xycoords='axes fraction',
                     fontsize=8, ha='center', va='bottom',
