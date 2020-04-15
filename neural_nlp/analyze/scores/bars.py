@@ -13,7 +13,7 @@ from scipy.stats import pearsonr
 
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar
+    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar, score_formatter
 from result_caching import is_iterable
 
 _logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ _logger = logging.getLogger(__name__)
 def retrieve_scores(benchmark):
     scores = collect_scores(benchmark, all_models)
     scores = average_adjacent(scores)  # average each model+layer's score per experiment and atlas
+    scores = scores.fillna(0)  # nan scores are 0
     scores = choose_best_scores(scores)
     nan = scores[scores.isna().any(1)]
     if len(nan) > 0:
@@ -78,16 +79,6 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, normalize_er
         ax.set_ylim([-.05, 1.05 + ceiling_err[-1]])
     ax.set_xticks([])
     ax.set_xticklabels([])
-
-    @matplotlib.ticker.FuncFormatter
-    def score_formatter(score, pos):
-        if 0 <= score < 1:
-            return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
-        elif np.abs(score - 1) < .001:
-            return "1."
-        else:
-            return f"{score:.1f}"
-
     ax.yaxis.set_major_formatter(score_formatter)
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)

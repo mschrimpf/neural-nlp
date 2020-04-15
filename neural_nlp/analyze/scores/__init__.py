@@ -1,10 +1,9 @@
-import os
-
 import fire
 import itertools
 import logging
 import matplotlib
 import numpy as np
+import os
 import pandas as pd
 import seaborn
 import sys
@@ -14,7 +13,7 @@ from matplotlib.colors import to_rgba
 from matplotlib.text import Text
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr
 from tqdm import tqdm
 
 from neural_nlp import score, model_layers, benchmark_pool
@@ -91,9 +90,36 @@ overall_neural_benchmarks = ('Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI')
 performance_benchmarks = ['wikitext', 'glue']
 
 
+class LabelReplace(dict):
+    def __init__(self):
+        super(LabelReplace, self).__init__(**{
+            'overall_neural': 'Brain-Score.Language (neural)',
+        })
+
+    def __getitem__(self, item):
+        if item.endswith('-encoding'):
+            return super(LabelReplace, self).__getitem__(item[:-len('-encoding')])
+
+    def __missing__(self, key):
+        return key
+
+
+label_replace = LabelReplace()
+
+
+@matplotlib.ticker.FuncFormatter
+def score_formatter(score, pos):
+    if 0 <= score < 1:
+        return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
+    elif np.abs(score - 1) < .001:
+        return "1."
+    else:
+        return f"{score:.1f}"
+
+
 def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
             best_layer=True, normalize=True, reference_best=False, identity_line=False, annotate=False,
-            plot_ceiling=True, ax=None):
+            plot_correlation=False, plot_ceiling=True, ax=None):
     ax_given = ax is not None
     all_models = models
     scores1 = collect_scores(benchmark=benchmark1, models=all_models, normalize=normalize)
@@ -108,16 +134,15 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
     fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
                               score_annotations=scores1['model'].values if annotate and best_layer else None,
                               xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
-                              ax=ax)
+                              plot_correlation=plot_correlation, ax=ax)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     normalize_y = normalize and not any(benchmark2.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     if normalize_x:
-        xlim = [0, 1]
+        xlim = [0, 1.1]
     if normalize_y:
-        ylim = [0, 1]
+        ylim = [0, 1.1]
     if normalize_x and plot_ceiling:
-        ax.plot([0, 1], [0, 1], color='gray', linestyle='dashed')
         ceiling_err = get_ceiling(benchmark1)
         shaded_errorbar(y=ylim, x=np.array([1, 1]), error=ceiling_err, ax=ax, vertical=True,
                         alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
@@ -155,19 +180,21 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
             return f"{loss}\n{np.exp(loss):.0f}"
 
         ax.xaxis.set_major_formatter(loss_formatter)
+    else:
+        ax.xaxis.set_major_formatter(score_formatter)
+    ax.yaxis.set_major_formatter(score_formatter)
 
-    for i, (name, correlate) in enumerate([('pearson', pearsonr), ('spearman', spearmanr)]):
-        r, p = correlate(x, y)
-        if i == 0 and plot_correlation:
-            b, m = polyfit(x, y, 1)
-            correlation_x = [min(x), max(x)]
-            ax.plot(correlation_x, b + m * np.array(correlation_x))
-        ax.text(0.9, 0.2 - i * 0.1, ha='center', va='center', transform=ax.transAxes,
-                s=f"{name} " + ((f"r={(r * (-1 if loss_xaxis else 1)):.2f}" + significance_stars(p))
-                                if p < 0.05 else f"n.s., p={p:.2f}"))
+    r, p = pearsonr(x, y)
+    if plot_correlation:
+        b, m = polyfit(x, y, 1)
+        correlation_x = [min(x), max(x)]
+        ax.plot(correlation_x, b + m * np.array(correlation_x), color='black', linestyle='solid')
+    ax.text(0.15, 0.8, ha='center', va='center', transform=ax.transAxes,
+            s=(f"$r={(r * (-1 if loss_xaxis else 1)):.2f}$" + significance_stars(p))
+            if p < 0.05 else f"$n.s., p={p:.2f}$")
 
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_xlabel(label_replace[xlabel])
+    ax.set_ylabel(label_replace[ylabel])
     return fig, ax
 
 
