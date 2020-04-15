@@ -26,12 +26,10 @@ from result_caching import NotCachedError
 logger = logging.getLogger(__name__)
 
 model_colors = {
-    # controls / embeddings
-    'sentence-length': 'lightgray',
-    'word2vec': 'silver',
+    # embeddings
     'glove': 'gray',
-    # semantic?
     'topicETM': 'bisque',
+    'word2vec': 'silver',
     # RNNs
     'lm_1b': 'slategrey',
     'skip-thoughts': 'darkgray',
@@ -64,9 +62,9 @@ model_colors = {
     # CTRL
     'ctrl': '#009EDB',
     # T5
-    't5-small': 'mediumpurple',
-    't5-base': 'blueviolet',
-    't5-large': 'mediumorchid',
+    't5-small': 'mediumorchid',
+    't5-base': 'mediumpurple',
+    't5-large': 'blueviolet',
     't5-3b': 'darkviolet',
     't5-11b': 'rebeccapurple',
     # AlBERT
@@ -80,9 +78,9 @@ model_colors = {
     'albert-xxlarge-v2': 'darkgreen',
     # GPT
     'openaigpt': 'lightblue',
-    'distilgpt2': 'cadetblue',
-    'gpt2': 'steelblue',
-    'gpt2-medium': 'c',
+    'distilgpt2': 'c',
+    'gpt2': 'cadetblue',
+    'gpt2-medium': 'steelblue',
     'gpt2-large': 'teal',
     'gpt2-xl': 'darkslategray',
 }
