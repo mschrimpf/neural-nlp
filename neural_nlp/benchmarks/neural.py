@@ -239,7 +239,7 @@ class _PereiraBenchmark(Benchmark):
         self._data_version = data_version
         self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
-        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject', num_bootstraps=10)
+        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject', num_bootstraps=100)
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     @property
@@ -270,8 +270,16 @@ class _PereiraBenchmark(Benchmark):
         raw_scores = cross_scores.raw
         raw_neuroids = apply_aggregate(lambda values: values.mean('split').mean('experiment'), raw_scores)
 
-        score = ceil_neuroids(raw_neuroids, self.ceiling)
-        score = score.sel(atlas='language', _apply_raw=False)
+        # normally we would ceil every single neuroid here. To estimate the strongest ceiling possible (i.e. make it as
+        # hard as possible on the models), we used experiment-overlapping neuroids from as many subjects as possible
+        # which means some neuroids got excluded. Since median(r/c) is the same as median(r)/median(c), we just
+        # normalize the neuroid aggregate by the overall ceiling aggregate.
+        # Additionally, the Pereira data also has voxels from DMN, visual etc. but we care about language here.
+        language_neuroids = raw_neuroids.sel(atlas='language', _apply_raw=False)
+        aggregate_raw = aggregate_neuroid_scores(language_neuroids, subject_column='subject')
+        score = consistency(aggregate_raw, self.ceiling)
+        score.attrs['raw'] = aggregate_raw
+        score.attrs['ceiling'] = self.ceiling
         return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
@@ -291,7 +299,7 @@ class _PereiraBenchmark(Benchmark):
         def __init__(self, subject_column, *args, **kwargs):
             super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).__init__(
                 subject_column, *args, **kwargs)
-            self._num_subsamples = 3
+            self._num_subsamples = 10
             self.holdout_ceiling = _PereiraBenchmark.PereiraHoldoutSubjectCeiling(subject_column=subject_column)
             self._rng = RandomState(0)
 
@@ -739,11 +747,16 @@ def ceil_neuroids(raw_neuroids, ceiling, subject_column='subject'):
     ceiled_neuroids = consistency_neuroids(raw_neuroids, ceiling.raw)
     ceiled_neuroids.attrs['raw'] = raw_neuroids
     ceiled_neuroids.attrs['ceiling'] = ceiling.raw
-    subject_scores = ceiled_neuroids.groupby(subject_column).median()
+    score = aggregate_neuroid_scores(ceiled_neuroids, subject_column)
+    score.attrs['ceiling'] = ceiling
+    return score
+
+
+def aggregate_neuroid_scores(neuroid_scores, subject_column):
+    subject_scores = neuroid_scores.groupby(subject_column).median()
     center, error = subject_scores.median(subject_column), standard_error_of_the_mean(subject_scores, subject_column)
     score = Score([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
-    score.attrs['raw'] = ceiled_neuroids
-    score.attrs['ceiling'] = ceiling
+    score.attrs['raw'] = neuroid_scores
     return score
 
 
