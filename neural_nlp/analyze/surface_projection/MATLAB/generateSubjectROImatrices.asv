@@ -134,38 +134,16 @@ length(intersect(dmn_u, aud_u)), length(intersect(dmn_u, vis_u)), length(interse
 
 %% iterate over the ROI sizes and compare with the extracted ROI sizes for xarray
 
-subject_IDs = {'018', '199', '215', '288', '289', '296', '343', '366', '407','426'};
-
-diff_store = [];
-diff_persub = zeros(10,54)
+subject
 
 for subj = 1:length(subjects_ROIs.ROI_size_90)
 
     roi_sizes = subjects_ROIs.ROI_size_90{1, subj};
-    fname = strcat('noAnnot_', subject_IDs(subj), '_ROI_sizes_2020-04-02_gpt2-xl.csv')
-    roi_sizes_xarray = load(char(fname));
+    roi_sizes_xarray = load('noAnnot_018_ROI_sizes_2020-04-02_gpt2-xl.csv');
     
     test = isequal(roi_sizes, roi_sizes_xarray)
     
-    diff = roi_sizes - roi_sizes_xarray;
-    diff_store = [diff_store; diff];
-    
-    diff_persub(subj, :) = diff;
 end
-
-figure;
-title('Discrepancy between xarray ROI sizes and MATLAB ROI sizes')
-hold on
-scatter([1:540], diff_store, 3, 'filled')
-hold on
-for val = [54:54:540]
-    xline(val)
-end
-
-%% Manually sum over the network values for 215
-length(cell2mat(sub215.meta.roiColumns{4,:})) + length(cell2mat(sub215.meta.roiColumns{12,:})) + length(cell2mat(sub215.meta.roiColumns{20,:})) + length(cell2mat(sub215.meta.roiColumns{24,:})) + length(cell2mat(sub215.meta.roiColumns{28,:}))
-
-
 
 %% network statistics
 lang = [];
