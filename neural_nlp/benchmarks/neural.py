@@ -145,8 +145,9 @@ class Blank2014VoxelEncoding(Benchmark):
         return assembly
 
     def post_process_ceilings(self, scores):
-        scores['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
-            scores[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        if not hasattr(scores, 'neuroid_id'):
+            scores['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+                scores[coord].values for coord in ['subject_UID', 'fROI_area']])]
         return scores
 
     @property
@@ -209,7 +210,40 @@ class Blank2014fROIEncoding(Blank2014VoxelEncoding):
                 continue
             averaged_assembly[copy_coord] = dims, copy_value[order]
         averaged_assembly.attrs = attrs
+        averaged_assembly['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+            averaged_assembly[coord].values for coord in ['subject_UID', 'fROI_area']])]
         return averaged_assembly
+
+
+class Blank2014SentencesfROIEncoding(Blank2014fROIEncoding):
+    def __init__(self, *args, num_sentences, **kwargs):
+        super(Blank2014SentencesfROIEncoding, self).__init__(*args, **kwargs)
+        self.num_sentences = num_sentences
+
+    def _load_assembly(self, bold_shift):
+        assembly = super(Blank2014fROIEncoding, self)._load_assembly(bold_shift)
+        # choose only up to nth sentence
+        # stimulus_id is ['story', 'sentence_num', 'sentence_part']
+        assembly = assembly[{'presentation': [
+            int(stimulus_id.split('.')[1]) < self.num_sentences
+            for stimulus_id in assembly['stimulus_id'].values]}]
+        return assembly
+
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+        stimulus_ids = set(self._target_assembly['stimulus_id'].values)
+        model_activations = model_activations[{'presentation': [
+            stimulus_id in stimulus_ids for stimulus_id in model_activations['stimulus_id'].values]}]
+        _logger.info('Scoring model')
+        score = self._metric(model_activations, self._target_assembly)
+
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        if not hasattr(raw_neuroids, 'neuroid_id'):
+            raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+                raw_neuroids[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
+        return score
 
 
 class Blank2014fROIRDM(Blank2014fROIEncoding):
@@ -796,5 +830,8 @@ benchmark_pool = [
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
     ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
 ]
+for num_sentences in range(1, 9):
+    benchmark_pool.append((f'Blank2014sentences{num_sentences}fROI-encoding',
+                           lambda *args, **kwargs: Blank2014SentencesfROIEncoding(*args, num_sentences=1, **kwargs)))
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}
