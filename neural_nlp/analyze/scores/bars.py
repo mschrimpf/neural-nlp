@@ -100,14 +100,14 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consis
             ax.text(x=xpos + .8 * width / 2, y=.005, s=model,
                     rotation=90, rotation_mode='anchor', **text_kwargs)
     for (model, annotate_x, width) in [
-        ('Emb.', 0.078, 1.05),
-        ('BERT', 0.225, 1.8),
-        ('XLM', 0.415, 2.612),
-        ('T5', 0.618, 1.3),
-        ('AlBERT', 0.744, 2.85),
-        ('GPT', 0.892, 2),
+        ('Emb.', 0.076, 1.0),
+        ('BERT', 0.221, 1.71),
+        ('XLM', 0.407, 2.41),
+        ('T5', 0.6137, 1.7),
+        ('AlBERT', 0.7487, 2.749),
+        ('GPT', 0.894, 2.05),
     ]:
-        ax.annotate(model, xy=(annotate_x, -.0), xytext=(annotate_x, -.05), xycoords='axes fraction',
+        ax.annotate(model, xy=(annotate_x, +.02), xytext=(annotate_x, -.03), xycoords='axes fraction',
                     fontsize=8, ha='center', va='bottom',
                     arrowprops=dict(arrowstyle=f'-[, widthB={width}, lengthB=.3', lw=1.0, color='black'))
 
