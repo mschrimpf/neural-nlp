@@ -225,11 +225,12 @@ def significance_stars(p, max_stars=5):
 
 def collect_scores(benchmark, models, normalize=True):
     store_file = Path(__file__).parent / f"scores-{benchmark}-{'normalized' if normalize else 'raw'}.csv"
+    stored = False
     if store_file.is_file():
         data = pd.read_csv(store_file)
         data = data[data['model'].isin(models)]
-        return data
-    if benchmark.startswith('overall_neural'):
+        stored = True
+    if not stored and benchmark.startswith('overall_neural'):
         metric = benchmark[len('overall_neural-'):]
         data = [collect_scores(benchmark=f"{part}-{metric}", models=models, normalize=normalize)
                 for part in overall_neural_benchmarks]
@@ -239,7 +240,7 @@ def collect_scores(benchmark, models, normalize=True):
         data = data.groupby(['model']).mean().reset_index()  # mean across benchmarks per model-layer
         data['layer'] = 'combined'
         data['benchmark'] = benchmark
-    else:
+    elif not stored:
         data, missing_models = [], []
         previous_resultcaching_cachedonly = os.getenv('RESULTCACHING_CACHEDONLY', '0')
         os.environ['RESULTCACHING_CACHEDONLY'] = '1'
@@ -269,7 +270,11 @@ def collect_scores(benchmark, models, normalize=True):
         if benchmark == 'glue-mnli':  # only consider mnli (not mnli-mm)
             data = data[data['eval_task'] == 'mnli']
         os.environ['RESULTCACHING_CACHEDONLY'] = previous_resultcaching_cachedonly
-    data.to_csv(store_file, index=False)
+    non_overlap = list(set(data['model']).symmetric_difference(set(models)))
+    if len(non_overlap) > 0:
+        logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")
+    if not stored:
+        data.to_csv(store_file, index=False)
     return data
 
 
