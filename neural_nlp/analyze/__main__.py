@@ -43,7 +43,7 @@ def paper_figures():
     _logger.info("Figures 3")
     for neural_benchmark in neural_benchmarks:
         scores.compare(benchmark1='wikitext-2', benchmark2=neural_benchmark, best_layer=True, annotate=annotated_models,
-                       plot_ceiling=False)
+                       plot_ceiling=False, plot_significance_stars=False)
     # 4: neural/LM predicts behavior
     scores.compare(benchmark1='overall_neural-encoding', benchmark2='Futrell2018-encoding',
                    best_layer=True, annotate=False)

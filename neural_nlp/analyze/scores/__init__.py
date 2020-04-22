@@ -127,7 +127,7 @@ def score_formatter(score, pos):
 
 def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
             best_layer=True, normalize=True, reference_best=False, identity_line=False, annotate=False,
-            plot_correlation=False, plot_ceiling=True, ax=None):
+            plot_ceiling=True, ax=None, **kwargs):
     ax_given = ax is not None
     all_models = models
     scores1 = collect_scores(benchmark=benchmark1, models=all_models, normalize=normalize)
@@ -148,7 +148,7 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
     fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
                               score_annotations=score_annotations,
                               xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
-                              plot_correlation=plot_correlation, ax=ax)
+                              ax=ax, **kwargs)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     normalize_y = normalize and not any(benchmark2.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
@@ -174,7 +174,7 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
         savefig(fig, savename=f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers'))
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=True,
+def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
                     xlabel=None, ylabel=None, loss_xaxis=False, color=None, ax=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
@@ -206,8 +206,9 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
         b, m = polyfit(x, y, 1)
         correlation_x = [min(x), max(x)]
         ax.plot(correlation_x, b + m * np.array(correlation_x), color='black', linestyle='solid')
-    ax.text(0.15, 0.8, ha='center', va='center', transform=ax.transAxes,
-            s=(f"$r={(r * (-1 if loss_xaxis else 1)):.2f}$" + significance_stars(p))
+    ax.text(0.05, 0.8, ha='left', va='center', transform=ax.transAxes,
+            s=("$r=" + f"{(r * (-1 if loss_xaxis else 1)):.2f}$"[1:]
+               + (significance_stars(p) if plot_significance_stars else ''))
             if p < 0.05 else f"$n.s., p={p:.2f}$")
 
     ax.set_xlabel(benchmark_label_replace[xlabel])
