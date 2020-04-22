@@ -115,11 +115,14 @@ model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.'})
 @matplotlib.ticker.FuncFormatter
 def score_formatter(score, pos):
     if 0 <= score < 1:
+        assert (score % .1) < .001  # ensure we don't display rounding errors
         return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
     elif np.abs(score - 1) < .001:
         return "1."
+    elif score > 1:
+        return ""
     else:
-        return f"{score:.1f}"
+        return f"{score}"
 
 
 def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',

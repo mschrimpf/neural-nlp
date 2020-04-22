@@ -9,6 +9,7 @@ import pandas as pd
 import seaborn
 import sys
 from matplotlib import pyplot
+from matplotlib.ticker import MultipleLocator
 from scipy.stats import pearsonr
 
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
@@ -80,6 +81,8 @@ def whole_best(benchmark=None, data=None, title_kwargs=None, normalize_error=Fal
         ax.set_ylim([-.05, 1.05 + ceiling_err[-1]])
     ax.set_xticks([])
     ax.set_xticklabels([])
+    axis_locator = MultipleLocator(base=0.2)
+    ax.yaxis.set_major_locator(axis_locator)
     ax.yaxis.set_major_formatter(score_formatter)
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)
