@@ -278,14 +278,14 @@ def compare_glue(benchmark2='Pereira2018-encoding'):
     savefig(fig, f"glue-{benchmark2}")
 
 
-def fmri_experiment_correlations(best_layer=False):
+def Pereira2018_experiment_correlations(best_layer=False, **kwargs):
     experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(best_layer)
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
     fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if best_layer else .2,
-                              score_annotations=experiment2_scores['model'].values if best_layer else None,
-                              xlabel='Exp. 2 (384sentences)', ylabel='Exp. 3 (243sentences)')
+                              score_annotations=None, xlabel='Pereira2018 (Exp. 2)', ylabel='Pereira2018 (Exp. 3)',
+                              **kwargs)
     scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
     ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='black')
     savefig(fig, savename='fmri-correlations' + ('-best' if best_layer else '-layers'))
