@@ -194,7 +194,7 @@ class ETM_featurespace(TopicETM):
                                                vocab_file=vocab_file, emb_size=emb_size)
 
 
-class SkipThoughts:
+class SkipThoughts(BrainModel):
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
@@ -203,6 +203,7 @@ class SkipThoughts:
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
         super().__init__()
+        self._logger = logging.getLogger(fullname(self))
         import skipthoughts
         weights = weights + '/'
         model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
@@ -210,23 +211,57 @@ class SkipThoughts:
         self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)  # not sure if this resets states on its own
         self._extractor.insert_attrs(self)
+        # setup prioritized vocabulary entries to map to indices and back.
+        # unfortunately it does not seem straight-forward to retrieve preferred words/tokens for the model, such as
+        # their frequency in the training dataset. The pretrained version we're using was trained on the BookCorpus
+        # dataset which is no longer online and any word frequencies did not seem to be saved in the files available
+        # here. The `encoder._model['utable']` is an OrderedDict, but the ordering does not intuitively seem to
+        # correspond to frequencies. Since there seems to be no other way, we will treat the utable as a
+        # frequency-ordered dict regardless and hope for the best.
+        self.vocab_index = {word: index for index, word in enumerate(self._encoder._model['utable'])}
+        self.index_vocab = {index: word for index, word in enumerate(self._encoder._model['utable'])}
+
+    @property
+    def vocab_size(self):
+        return len(self._encoder._model['utable'])
+
+    @property
+    def features_size(self):
+        return 4800
+
+    def tokenize(self, text, vocab_size=None):
+        if (bool(vocab_size)) and vocab_size < self.vocab_size:  # smaller vocab size requested, drop tokens
+            self._logger.debug(f"Shortening {self.vocab_size} to {vocab_size}")
+            _vocab_size = vocab_size
+        else:
+            _vocab_size = self.vocab_size
+        words = text.split()
+        tokens = [self.vocab_index[word] for word in tqdm(words, desc='tokenize') if word in self.vocab_index
+                  and self.vocab_index[word] < _vocab_size]  # only top-k vocab words
+        return np.array(tokens)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
         return _call_conditional_average(*args, extractor=self._extractor,
                                          average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
 
     def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, ['encoder'])
-        encoding = []
-        for sentence_iter, sentence in enumerate(sentences):
-            sentence_words = []
-            encoding.append([])
-            for word in sentence.split(' '):
-                sentence_words.append(word)
-                word_embeddings = self._encoder.encode([' '.join(sentence_words)])
-                encoding[sentence_iter].append(word_embeddings)
-            encoding[sentence_iter] = np.array(encoding[sentence_iter]).transpose([1, 0, 2])
+        np.testing.assert_array_equal(layers, self.available_layers)
+        encoding = [self._encode_sentence(sentence) for sentence in sentences]
         return {'encoder': encoding}
+
+    def _encode_sentence(self, sentence):
+        if isinstance(sentence, str):
+            words = sentence.split(' ')
+        else:
+            words = [self.index_vocab[index] for index in sentence]
+        sentence_words = []
+        sentence_encoding = []
+        for word in words:
+            sentence_words.append(word)
+            word_embeddings = self._encoder.encode([' '.join(sentence_words)])
+            sentence_encoding.append(word_embeddings)
+        sentence_encoding = np.array(sentence_encoding).transpose([1, 0, 2])
+        return sentence_encoding
 
     available_layers = ['encoder']
     default_layers = available_layers
