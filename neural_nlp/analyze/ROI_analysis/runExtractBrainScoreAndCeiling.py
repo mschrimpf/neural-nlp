@@ -1,6 +1,6 @@
 from extractBrainScoreAndCeiling import extractBrainScoreAndCeiling
 
-extractBrainScoreAndCeiling(score_name = 'benchmark=Pereira2018-encoding,model=gpt2-xl,subsample=None.pkl',
+extractBrainScoreAndCeiling(score_name = 'benchmark=Pereira2018-encoding,model=glove,subsample=None.pkl',
                                 ceil_name = False)
     
     

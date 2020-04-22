@@ -6,8 +6,8 @@ from matplotlib.lines import Line2D
 import datetime 
 import seaborn
 from stats import is_significant, _permutation_test
-
-
+import xlsxwriter 
+  
 # Plot specifications
 seaborn.set(context='talk')
 seaborn.set_style("whitegrid", {'axes.grid': False})
@@ -30,9 +30,10 @@ def getMeanBrainScore_perSubject(subjectID = '018',
     pngfile_name = pngfile_name.replace(',', '_')
     pngfile_name = pngfile_name.replace('-', '_')
     
-    csvfile_name = subjectID + '_ROI_sizes_' + timestamp + '_' + fname[2][:-10] + '.csv'
+#    csvfile_name = subjectID + '_ROI_sizes_' + timestamp + '_' + fname[2][:-10] + '.csv'
     statsfile_name = subjectID + '_stats_' + timestamp + '_' + fname[2][:-10] + '.csv'
-    
+    workbook = xlsxwriter.Workbook(subjectID + '_stats_' + timestamp + '_' + fname[2][:-10] + '.xlsx') 
+
     if plotNetworks:
         pngfile_name2 = subjectID + '_Network_BrainScore_' + timestamp + '_' + fname[1][:-5] + fname[2][:-10] + '.png'
         pngfile_name2 = pngfile_name2.replace(',', '_')
@@ -96,17 +97,20 @@ def getMeanBrainScore_perSubject(subjectID = '018',
             # Split into language voxels
             roi_mean_lang = model6_roi_lang.mean().values
             roi_std_lang = model6_roi_lang.std().values
-            d[roiID_lang + '_mean_std'] = [roi_mean_lang, roi_std_lang, len(model6_roi_lang.values), model6_roi_lang.values]
+            roi_sem_lang = roi_std_lang/np.sqrt(len(model6_roi_lang.values))
+            d[roiID_lang + '_mean_std'] = [roi_mean_lang, roi_std_lang, roi_sem_lang, len(model6_roi_lang.values), model6_roi_lang.values]
 
             # Split into DMN voxels
             roi_mean_dmn = model6_roi_dmn.mean().values
             roi_std_dmn = model6_roi_dmn.std().values
-            d[roiID_dmn + '_mean_std'] = [roi_mean_dmn, roi_std_dmn, len(model6_roi_dmn.values), model6_roi_dmn.values]
+            roi_sem_dmn = roi_std_dmn/np.sqrt(len(model6_roi_dmn.values))
+            d[roiID_dmn + '_mean_std'] = [roi_mean_dmn, roi_std_dmn, roi_sem_dmn, len(model6_roi_dmn.values), model6_roi_dmn.values]        
         
         if len(unique_atlas) == 1:
             roi_mean = model6_roi.mean().values
             roi_std = model6_roi.std().values
-            d[roiID + '_mean_std'] = [roi_mean, roi_std, len(model6_roi.values), model6_roi.values]
+            roi_sem = roi_std/np.sqrt(len(model6_roi.values))
+            d[roiID + '_mean_std'] = [roi_mean, roi_std, roi_sem, len(model6_roi.values), model6_roi.values]
     
 
     # Extract ROI names and corresponding values (ROI mean, ROI std, ROI size, ROI values)      
@@ -142,23 +146,45 @@ def getMeanBrainScore_perSubject(subjectID = '018',
         names = [item[0] for item in name_score_sorted] 
         scores = [item[1][0] for item in name_score_sorted] 
         stds = [item[1][1] for item in name_score_sorted] 
-        sizes = [item[1][2] for item in name_score_sorted] 
-        brain_scores = [item[1][3] for item in name_score_sorted] 
+        sems = [item[1][2] for item in name_score_sorted] 
+        sizes = [item[1][3] for item in name_score_sorted] 
+        brain_scores = [item[1][4] for item in name_score_sorted] 
+        
+        # Save stats
+        row = 1
+        col = 0
+        
+        worksheet = workbook.add_worksheet("ROI") 
+        worksheet.write(0, col, 'ROI_name')
+        worksheet.write(0, 1, 'Mean')
+        worksheet.write(0, 2, 'Std')
+        worksheet.write(0, 3, 'Sem')
+        worksheet.write(0, 4, 'Size')
+        
+        for idx, name in enumerate(names): 
+            worksheet.write(row, col, name) 
+            worksheet.write(row, col + 1, scores[idx]) 
+            worksheet.write(row, col + 2, stds[idx]) 
+            worksheet.write(row, col + 3, sems[idx]) 
+            worksheet.write(row, col + 4, sizes[idx]) 
+
+            row += 1
+        
         
         # Save ROI sizes to csv files
-        name_size = list(zip(names, sizes))
-        
-        # With ROI annotations
-        f = open(csvfile_name,'w')
-        for ROI_element in name_size:
-            f.write(str(ROI_element) + '\n')
-        f.close()
+#        name_size = list(zip(names, sizes))
+#        
+#        # With ROI annotations
+#        f = open(csvfile_name,'w')
+#        for ROI_element in name_size:
+#            f.write(str(ROI_element) + '\n')
+#        f.close()
         
         # Without ROI annotations
-        f2 = open('noAnnot_' + csvfile_name,'w')
-        for ROI_size in sizes:
-            f2.write(str(ROI_size) + '\n')
-        f2.close()
+#        f2 = open('noAnnot_' + csvfile_name,'w')
+#        for ROI_size in sizes:
+#            f2.write(str(ROI_size) + '\n')
+#        f2.close()
         
         # Remove suffix from names for plotting
         names[1] = 'LH_AntTemp'
@@ -184,14 +210,16 @@ def getMeanBrainScore_perSubject(subjectID = '018',
         plt.bar(range(len(names)), scores, yerr = stds, error_kw = dict(lw=2, capsize=0, capthick=1), \
                 ecolor='black', align='edge', width=0.7, color = color_lst)
         plt.xticks(xtick_lst, names_new, size='small', rotation=90)
-        plt.title('GPT2-xl - Brain-Scores Across ROIs, Subject ' + subjectID)
+        plt.title('GloVe - Brain-Scores Across ROIs, Subject ' + subjectID)
         plt.ylabel('Brain-Score (r)', size='small') 
-        plt.ylim(0, 0.55) # Same limits across subjects
+        plt.ylim(0, 0.2) # Same limits across subjects 0, 0.55
         plt.tight_layout()
         plt.savefig(pngfile_name, dpi=240)
     
     # For plotting networks and computing permutation stats
     if plotNetworks:
+        
+        network_names = ['Language', 'Multiple Demand', 'Default Mode', 'Auditory', 'Visual']
         
         # Define all neuroIDs within each network
         lang_values = [i for subl in brain_scores[0:12] for i in subl]
@@ -202,44 +230,100 @@ def getMeanBrainScore_perSubject(subjectID = '018',
         
         lang_score = np.mean(lang_values)
         lang_std = np.std(lang_values)
-        
+        lang_sem = lang_std/np.sqrt(len(lang_values))
+
         md_score = np.mean(md_values)
         md_std = np.std(md_values)
+        md_sem = md_std/np.sqrt(len(md_values))
         
         dmn_score = np.mean(dmn_values)
         dmn_std = np.std(dmn_values)
+        dmn_sem = dmn_std/np.sqrt(len(dmn_values))
         
         aud_score = np.mean(aud_values)
         aud_std = np.std(aud_values)
+        aud_sem = aud_std/np.sqrt(len(aud_values))
         
         vis_score = np.mean(vis_values)
         vis_std = np.std(vis_values)
+        vis_sem = vis_std/np.sqrt(len(vis_values))
+        
+        netw_scores = [lang_score, md_score, dmn_score, aud_score, vis_score]
+        netw_stds = [lang_std, md_std, dmn_std, aud_std, vis_std]
+        netw_sems = [lang_sem, md_sem, dmn_sem, aud_sem, vis_sem]
+        netw_sizes = [len(lang_values), len(md_values), len(dmn_values), len(aud_values), len(vis_values)]
+
+
+        # Save stats
+        row = 1
+        col = 0
+        
+        worksheet = workbook.add_worksheet("Network") 
+        worksheet.write(0, col, 'Network_name')
+        worksheet.write(0, 1, 'Mean')
+        worksheet.write(0, 2, 'Std')
+        worksheet.write(0, 3, 'Sem')
+        worksheet.write(0, 4, 'Size')
+        
+        for idx, name in enumerate(network_names): 
+            worksheet.write(row, col, name) 
+            worksheet.write(row, col + 1, netw_scores[idx]) 
+            worksheet.write(row, col + 2, netw_stds[idx]) 
+            worksheet.write(row, col + 3, netw_sems[idx]) 
+            worksheet.write(row, col + 4, netw_sizes[idx]) 
+
+            row += 1
         
         # Plot
         plt.figure(figsize=(7, 14)) 
-        plt.bar([0, .2, .4, .6, .8], [lang_score, md_score, dmn_score, aud_score, vis_score], \
-        yerr = [lang_std, md_std, dmn_std, aud_std, vis_std], \
+        plt.bar([0, .2, .4, .6, .8], netw_scores, \
+        yerr = netw_stds, \
         error_kw = dict(lw=2, capsize=0, capthick=1), ecolor='black', align='edge', \
         width = .1, color = [(241/255, 150/255, 135/255), (240/255, 211/255, 128/255), \
                              (136/255, 192/255, 133/255), 'lightsteelblue', 'thistle'])
         plt.xticks([0.05, .25, .45, .65, .85], \
-           ['Language', 'Multiple Demand', 'Default Mode', 'Auditory', 'Visual'], \
+           network_names, \
            rotation=90, size='medium')
-        plt.title('GPT2-xl - Brain-Scores Across Networks, Subject ' + subjectID)
+        plt.title('GloVe - Brain-Scores Across Networks, Subject ' + subjectID)
         plt.ylabel('Brain-Score (r)', size='medium') # 'Layer Number'
-        plt.ylim(0, 0.47)
+        plt.ylim(0, 0.15) #0, 0.47
         plt.tight_layout()
         plt.savefig(pngfile_name2, dpi=240)
         
         # Permutation testing
-        f3 = open(statsfile_name, 'w')
-        f3.write('Lang vs MD: ' + str(is_significant(lang_values, md_values)) + '\n')
-        f3.write('Lang vs DMN: ' + str(is_significant(lang_values, dmn_values)) + '\n')
-        f3.write('Lang vs aud: ' + str(is_significant(lang_values, aud_values)) + '\n')
-        f3.write('Lang vs vis: ' + str(is_significant(lang_values, vis_values)) + '\n')
+        row = 1
+        col = 0
         
-        f3.close()
+        worksheet = workbook.add_worksheet("Permutation") 
+        worksheet.write(0, col, 'Comparison')
+        worksheet.write(0, 1, 'Delta')
+        worksheet.write(0, 2, 'Estimate_mean')
+        worksheet.write(0, 3, 'p')
         
+        worksheet.write(1, col, 'Lang vs MD')
+        worksheet.write(2, col, 'Lang vs DMN')
+        worksheet.write(3, col, 'Lang vs aud')
+        worksheet.write(4, col, 'Lang vs vis')
+
+        tests = [md_values, dmn_values, aud_values, vis_values]
+        
+        for idx, test in enumerate(tests):
+            delta, est, p = is_significant(lang_values, test)
+            worksheet.write(row, col + 1, delta) 
+            worksheet.write(row, col + 2, est) 
+            worksheet.write(row, col + 3, p) 
+
+            row += 1
+        
+#        
+#        f3 = open(statsfile_name, 'w')
+#        f3.write('Lang vs MD: ' + str(is_significant(lang_values, md_values)) + '\n')
+#        f3.write('Lang vs DMN: ' + str(is_significant(lang_values, dmn_values)) + '\n')
+#        f3.write('Lang vs aud: ' + str(is_significant(lang_values, aud_values)) + '\n')
+#        f3.write('Lang vs vis: ' + str(is_significant(lang_values, vis_values)) + '\n')
+#        
+#        f3.close()
+#        
     
 
 
