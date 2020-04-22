@@ -15,6 +15,8 @@ from brainscore.metrics import Score
 from brainscore.metrics.regression import pearsonr_correlation
 from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import benchmark_pool
+from neural_nlp.analyze.data import subject_columns
+from neural_nlp.analyze import savefig
 from neural_nlp.benchmarks.ceiling import ci_error, v
 from neural_nlp.neural_data.fmri import load_voxels
 from result_caching import store
@@ -111,9 +113,7 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
     ax.set_ylim([0.9 * np.min(y), .29 if benchmark.startswith('Fedorenko') else (1.2 * np.max(y))])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     fig.tight_layout()
-    savepath = Path(__file__).parent / f'extrapolation-{benchmark}.png'
-    _logger.debug(f"Saving to {savepath}")
-    fig.savefig(savepath)
+    savefig(fig, Path(__file__).parent / f'extrapolation-{benchmark}')
 
 
 def confidence_interval(data, centers, confidence=0.95):
@@ -135,7 +135,7 @@ def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):
         ax.hist(num_splits.sel(num_subjects=ns).values.flatten())
         ax.set_xlabel(f"{ns}")
     fig.tight_layout()
-    fig.savefig(Path(__file__).parent / f'hist-{benchmark}.png')
+    savefig(Path(__file__).parent / f'hist-{benchmark}.png')
 
 
 if __name__ == '__main__':

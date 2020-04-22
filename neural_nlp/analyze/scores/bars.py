@@ -1,20 +1,20 @@
-from decimal import Decimal
-
 import fire
 import itertools
 import logging
-import matplotlib
 import numpy as np
 import pandas as pd
 import seaborn
 import sys
+from decimal import Decimal
 from matplotlib import pyplot
 from matplotlib.ticker import MultipleLocator
+from pathlib import Path
 from scipy.stats import pearsonr
 
+from neural_nlp.analyze import savefig
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar, score_formatter, model_label_replace, \
+    align_scores, significance_stars, get_ceiling, shaded_errorbar, score_formatter, model_label_replace, \
     benchmark_label_replace
 from result_caching import is_iterable
 
@@ -58,7 +58,7 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
             ax.set_xticklabels([])
 
     fig.subplots_adjust(wspace=0, hspace=.2)
-    savefig(fig, f'bars-network-{benchmark}')
+    savefig(fig, Path(__file__).parent / f'bars-network-{benchmark}')
 
 
 def wikitext_best(benchmark='wikitext-2'):
@@ -83,12 +83,11 @@ def whole_best(benchmark=None, data=None, title_kwargs=None, normalize_error=Fal
         ax.set_ylim([-.05, max(1.05 + ceiling_err[-1], max(data['score']) + .05)])
     ax.set_xticks([])
     ax.set_xticklabels([])
-    axis_locator = MultipleLocator(base=0.2)
-    ax.yaxis.set_major_locator(axis_locator)
+    ax.yaxis.set_major_locator(MultipleLocator(base=0.2))
     ax.yaxis.set_major_formatter(score_formatter)
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)
-    savefig(fig, f'bars-{benchmark}')
+    savefig(fig, Path(__file__).parent / f'bars-{benchmark}')
 
 
 def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", annotate=True,
@@ -165,7 +164,7 @@ def benchmark_correlations(best_layer=True):
     for _x, r, p in zip(x, data['r'].values, data['p'].values):
         ax.text(_x, r + .05, significance_stars(p) if p < .05 else 'n.s.', fontsize=12,
                 horizontalalignment='center', verticalalignment='center')
-    savefig(fig, 'benchmark-correlations' + ('-best' if best_layer else '-layers'))
+    savefig(fig, Path(__file__).parent / 'benchmark-correlations' + ('-best' if best_layer else '-layers'))
 
 
 if __name__ == '__main__':

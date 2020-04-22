@@ -19,6 +19,7 @@ from scipy.stats import pearsonr
 from tqdm import tqdm
 
 from neural_nlp import score, model_layers, benchmark_pool
+from neural_nlp.analyze import savefig
 from neural_nlp.benchmarks.neural import aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
@@ -173,7 +174,8 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     if not ax_given:
-        savefig(fig, savename=f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers'))
+        savefig(fig,
+                savename=Path(__file__).parent / f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers'))
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
@@ -293,7 +295,7 @@ def compare_glue(benchmark2='Pereira2018-encoding'):
                 continue
             size = 4 if not any(element._text.startswith(corr) for corr in ['pearson', 'spearman']) else 6
             element._fontproperties._size = 5  # size
-    savefig(fig, f"glue-{benchmark2}")
+    savefig(fig, Path(__file__).parent / f"glue-{benchmark2}")
 
 
 def Pereira2018_experiment_correlations(best_layer=False, **kwargs):
@@ -305,8 +307,8 @@ def Pereira2018_experiment_correlations(best_layer=False, **kwargs):
                               score_annotations=None, xlabel='Pereira2018 (Exp. 2)', ylabel='Pereira2018 (Exp. 3)',
                               **kwargs)
     scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
-    ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='black')
-    savefig(fig, savename='fmri-correlations' + ('-best' if best_layer else '-layers'))
+    ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='gray')
+    savefig(fig, savename=Path(__file__).parent / 'fmri-correlations' + ('-best' if best_layer else '-layers'))
 
 
 def collect_Pereira_experiment_scores(best_layer=False):
@@ -372,7 +374,7 @@ def fmri_brain_network_correlations():
                    length=0)  # hide tick marks, but not text https://stackoverflow.com/a/29988431/2225200
     # save
     fig.tight_layout()
-    savefig(fig, 'brain_network_correlations')
+    savefig(fig, Path(__file__).parent / 'brain_network_correlations')
 
 
 def align_both(data1, data2, on):
@@ -421,7 +423,7 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
     ax.set_title(benchmark)
-    savefig(fig, savename=f"untrained_trained-{benchmark}")
+    savefig(fig, savename=Path(__file__).parent / f"untrained_trained-{benchmark}")
 
 
 def reference_best_scores(scores, reference_benchmark='Pereira2018-encoding'):
@@ -473,7 +475,7 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in scores['model'].values]
     fig, ax = _plot_scores1_2(num_features, scores, color=colors, xlabel="number of features", ylabel=benchmark)
-    savefig(fig, savename=f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
+    savefig(fig, savename=Path(__file__).parent / f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
 def Pereira_language_vs_other(best_layer=True):
@@ -489,7 +491,7 @@ def Pereira_language_vs_other(best_layer=True):
     fig, ax = _plot_scores1_2(scores_lang, scores_other, color=colors,
                               xlabel='language scores', ylabel='auditory scores')
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
-    savefig(fig, savename=f"Pereira2018-language_other{'' if best_layer else '-layerwise'}")
+    savefig(fig, savename=Path(__file__).parent / f"Pereira2018-language_other{'' if best_layer else '-layerwise'}")
 
 
 def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=False):
@@ -554,14 +556,6 @@ def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, vertical=False, **
     else:
         ax.fill_betweenx(y, x - error_low, x + error_high, **shaded_kwargs)
     return line
-
-
-def savefig(fig, savename):
-    fig.tight_layout()
-    for extension, kwargs in [('png', dict(dpi=600)), ('svg', {})]:
-        savepath = Path(__file__).parent / f"{savename}.{extension}"
-        logger.info(f"Saving to {savepath}")
-        fig.savefig(savepath, **kwargs, bbox_inches='tight')
 
 
 if __name__ == '__main__':
