@@ -48,7 +48,7 @@ def load_Fedorenko2016(electrodes, version):
             subject4 = np.repeat(4, 15)
             subject5 = np.repeat(5, 18)
             
-            filepath_neural = glob(os.path.join(neural_data_dir, '*lang_v3.mat'))
+            filepath_neural = glob(os.path.join(neural_data_dir, '*g_lang_v3.mat'))
             
         if version == 4:
             subject1 = np.repeat(1, 49)
@@ -58,7 +58,7 @@ def load_Fedorenko2016(electrodes, version):
             subject5 = np.repeat(5, 19)            
             subject6 = np.repeat(6, 3)
             
-            filepath_neural = glob(os.path.join(neural_data_dir, '*lang_v4.mat'))
+            filepath_neural = glob(os.path.join(neural_data_dir, '*g_lang_v4.mat'))
 
         _logger.debug('Running Fedorenko2016 benchmark with language responsive electrodes, data version: ', version)
 
