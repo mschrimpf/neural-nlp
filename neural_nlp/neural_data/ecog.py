@@ -50,7 +50,7 @@ def load_Fedorenko2016(electrodes, version):
             
             filepath_neural = glob(os.path.join(neural_data_dir, '*lang_v3.mat'))
             
-         if version == 4:
+        if version == 4:
             subject1 = np.repeat(1, 49)
             subject2 = np.repeat(2, 8)
             subject3 = np.repeat(3, 10)
@@ -184,7 +184,8 @@ def load_Fedorenko2016(electrodes, version):
     sentence_lst = list(range(0, 52))
     sentenceID = np.repeat(sentence_lst, 8)
     
-    subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5], axis=0)
+    if version == 1 or version == 2 or version == 3:
+        subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5], axis=0)
     
     if version == 4:
         subjectID = np.concatenate([subject1, subject2, subject3, subject4, subject5, subject6], axis=0)
