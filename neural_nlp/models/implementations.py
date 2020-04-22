@@ -87,7 +87,7 @@ class SentenceLength(BrainModel):
 class TopicETM(BrainModel):
     """https://arxiv.org/abs/1907.04907"""
 
-    identifier = 'topicETM'
+    identifier = 'ETM'
 
     available_layers = ['projection']
     default_layers = available_layers
@@ -166,7 +166,6 @@ class ETM_topicspace(TopicETM):
     """Uses the distributed representation of topics from the ETM as embedding features"""
 
     identifier = TopicETM.identifier
-    print(identifier)
 
     def __init__(self, weights_file='normalized_betas_50K.npy',
                  vocab_file='vocab_50K.pkl',
@@ -183,7 +182,6 @@ class ETM_featurespace(TopicETM):
     """Uses the jointly learned embedding space for words and topics from the ETM as embedding features"""
 
     identifier = TopicETM.identifier + '-featurespace'
-    print(identifier)
 
     def __init__(self, weights_file='rho-50-wikitext_df1.npy',
                  vocab_file='vocab_wikitext_df_1.pkl',
