@@ -7,10 +7,12 @@ import os
 import pandas as pd
 import seaborn
 import sys
+from decimal import Decimal
 from functools import reduce
 from matplotlib import pyplot
 from matplotlib.colors import to_rgba
 from matplotlib.text import Text
+from matplotlib.ticker import MultipleLocator
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
 from scipy.stats import pearsonr
@@ -115,7 +117,7 @@ model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.'})
 @matplotlib.ticker.FuncFormatter
 def score_formatter(score, pos):
     if 0 <= score < 1:
-        assert (score % .1) < .001  # ensure we don't display rounding errors
+        assert Decimal(f"{score}") % Decimal(f"{.1}") < .001  # ensure we don't display rounding errors
         return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
     elif np.abs(score - 1) < .001:
         return "1."
@@ -199,6 +201,7 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=F
         ax.xaxis.set_major_formatter(loss_formatter)
     else:
         ax.xaxis.set_major_formatter(score_formatter)
+    ax.yaxis.set_major_locator(MultipleLocator(base=tick_locator_base))
     ax.yaxis.set_major_formatter(score_formatter)
 
     r, p = pearsonr(x, y)
