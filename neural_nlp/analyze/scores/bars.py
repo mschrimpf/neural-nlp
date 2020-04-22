@@ -13,7 +13,8 @@ from scipy.stats import pearsonr
 
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar, score_formatter
+    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar, score_formatter, model_label_replace, \
+    benchmark_label_replace
 from result_caching import is_iterable
 
 _logger = logging.getLogger(__name__)
@@ -60,14 +61,14 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
 
 
 def wikitext_best(benchmark='wikitext-2'):
-    whole_best(benchmark=benchmark, title='wikitext-2', ylabel='NLL / Perplexity', ylim=50)
+    whole_best(benchmark=benchmark, ylabel='NLL / Perplexity', ylim=50)
 
 
-def whole_best(title, benchmark=None, data=None, title_kwargs=None, normalize_error=False, **kwargs):
+def whole_best(benchmark=None, data=None, title_kwargs=None, normalize_error=False, **kwargs):
     data = data if data is not None else retrieve_scores(benchmark)
     models = [model for model in all_models if model in data['model'].values]
     fig, ax = pyplot.subplots(figsize=(5, 4))
-    ax.set_title(title, **(title_kwargs or {}))
+    ax.set_title(benchmark_label_replace[benchmark], **(title_kwargs or {}))
     ceiling, ceiling_err = get_ceiling(benchmark, which='both', normalize_scale=normalize_error)
     _plot_bars(ax, models=models, data=data, text_kwargs=dict(fontdict=dict(fontsize=6)), **kwargs)
     if is_iterable(ceiling_err) or not np.isnan(ceiling_err):  # no performance benchmarks
@@ -85,7 +86,8 @@ def whole_best(title, benchmark=None, data=None, title_kwargs=None, normalize_er
     savefig(fig, f'bars-{benchmark}')
 
 
-def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", text_kwargs=None):
+def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", annotate=True,
+               text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
     offset = len(models) / 2
@@ -96,10 +98,11 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consis
         model_x = x - offset * width + model_iter * width
         ax.bar(model_x, height=y, yerr=yerr, width=width,
                edgecolor='none', color=model_colors[model], ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
-        for xpos in model_x:
-            ax.text(x=xpos + .8 * width / 2, y=.005, s=model,
-                    rotation=90, rotation_mode='anchor', **text_kwargs)
-    for (model, annotate_x, width) in [
+        if annotate:
+            for xpos in model_x:
+                ax.text(x=xpos + .6 * width / 2, y=.005, s=model_label_replace[model],
+                        rotation=90, rotation_mode='anchor', **text_kwargs)
+    for (model_group, annotate_x, width) in [
         ('Emb.', 0.076, 1.0),
         ('BERT', 0.221, 1.71),
         ('XLM', 0.407, 2.41),
@@ -107,7 +110,7 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consis
         ('AlBERT', 0.7487, 2.749),
         ('GPT', 0.894, 2.05),
     ]:
-        ax.annotate(model, xy=(annotate_x, +.02), xytext=(annotate_x, -.03), xycoords='axes fraction',
+        ax.annotate(model_group, xy=(annotate_x, +.0), xytext=(annotate_x, -.05), xycoords='axes fraction',
                     fontsize=8, ha='center', va='bottom',
                     arrowprops=dict(arrowstyle=f'-[, widthB={width}, lengthB=.3', lw=1.0, color='black'))
 

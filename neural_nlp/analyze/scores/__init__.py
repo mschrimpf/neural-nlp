@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 model_colors = {
     # embeddings
     'glove': 'gray',
-    'topicETM': 'bisque',
+    'ETM': 'bisque',
     'word2vec': 'silver',
     # RNNs
     'lm_1b': 'slategrey',
@@ -91,20 +91,25 @@ performance_benchmarks = ['wikitext', 'glue']
 
 
 class LabelReplace(dict):
-    def __init__(self):
-        super(LabelReplace, self).__init__(**{
-            'overall_neural': 'Brain-Score.Language (neural)',
-        })
-
-    def __getitem__(self, item):
-        if item.endswith('-encoding'):
-            return super(LabelReplace, self).__getitem__(item[:-len('-encoding')])
-
     def __missing__(self, key):
         return key
 
 
-label_replace = LabelReplace()
+class BenchmarkLabelReplace(LabelReplace):
+    def __init__(self):
+        super(BenchmarkLabelReplace, self).__init__(**{
+            'overall_neural': 'Brain-Score.Language (neural)',
+            'Blank2014fROI': 'Blank2014',
+        })
+
+    def __getitem__(self, item):
+        if item.endswith('-encoding'):
+            return super(BenchmarkLabelReplace, self).__getitem__(item[:-len('-encoding')])
+        return super(BenchmarkLabelReplace, self).__getitem__(item)
+
+
+benchmark_label_replace = BenchmarkLabelReplace()
+model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.'})
 
 
 @matplotlib.ticker.FuncFormatter
@@ -193,8 +198,8 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
             s=(f"$r={(r * (-1 if loss_xaxis else 1)):.2f}$" + significance_stars(p))
             if p < 0.05 else f"$n.s., p={p:.2f}$")
 
-    ax.set_xlabel(label_replace[xlabel])
-    ax.set_ylabel(label_replace[ylabel])
+    ax.set_xlabel(benchmark_label_replace[xlabel])
+    ax.set_ylabel(benchmark_label_replace[ylabel])
     return fig, ax
 
 
