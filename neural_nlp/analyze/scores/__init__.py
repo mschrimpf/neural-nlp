@@ -540,9 +540,10 @@ def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, vertical=False, **
 
 def savefig(fig, savename):
     fig.tight_layout()
-    savepath = Path(__file__).parent / f"{savename}.png"
-    logger.info(f"Saving to {savepath}")
-    fig.savefig(savepath, dpi=600)
+    for extension, kwargs in [('png', dict(dpi=600)), ('svg', {})]:
+        savepath = Path(__file__).parent / f"{savename}.{extension}"
+        logger.info(f"Saving to {savepath}")
+        fig.savefig(savepath, **kwargs, bbox_inches='tight')
 
 
 if __name__ == '__main__':
