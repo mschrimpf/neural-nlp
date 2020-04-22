@@ -413,7 +413,8 @@ class Transformer(PytorchWrapper, BrainModel):
         self._model_container = self.TransformerContainer(translator, opt)
         self.vocab_index = {word: index for index, word in
                             enumerate(self._model_container.translator.fields["src"].vocab.freqs)}
-        self.index_vocab = {index: word for word, index in self.vocab_index.items()}
+        index_vocab = {index: word for word, index in self.vocab_index.items()}
+        self._model_container.index_vocab = index_vocab
         super(Transformer, self).__init__(model=self._model_container, identifier=self.identifier,
                                           reset=lambda: None)  # transformer is feed-forward
 
@@ -428,6 +429,7 @@ class Transformer(PytorchWrapper, BrainModel):
         def __init__(self, translator, opt):
             self.translator = translator
             self.opt = opt
+            self.index_vocab = None
 
         def __getattr__(self, name):
             return getattr(self.translator.model, name)
@@ -436,6 +438,8 @@ class Transformer(PytorchWrapper, BrainModel):
             with tempfile.NamedTemporaryFile(mode='w+') as file:
                 # separating sentences with newline, combined with a batch size of 1
                 # will lead to one set of activations per sentence (albeit multiple words).
+                if isinstance(sentences, np.ndarray):
+                    sentences = [" ".join([self.index_vocab[index] for index in sentences])]
                 file.write('\n'.join(sentences) + '\n')
                 file.flush()
                 encodings = self.translator.get_encodings(src_path=file.name, tgt_path=self.opt.tgt,
