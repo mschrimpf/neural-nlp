@@ -139,8 +139,14 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
     scores1, scores2 = align_scores(scores1, scores2, identifier_set=['model'] if best_layer else ['model', 'layer'])
     colors = [model_colors[model.replace('-untrained', '')] for model in scores1['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
+    if not best_layer or not annotate:
+        score_annotations = None
+    elif annotate is True:
+        score_annotations = scores1['model'].values
+    else:
+        score_annotations = [model if model in annotate else None for model in scores1['model'].values]
     fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
-                              score_annotations=scores1['model'].values if annotate and best_layer else None,
+                              score_annotations=score_annotations,
                               xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
                               plot_correlation=plot_correlation, ax=ax)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
@@ -178,7 +184,10 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
     ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
     if score_annotations is not None:
         for annotation, _x, _y in zip(score_annotations, x, y):
-            ax.text(_x, _y, annotation, fontdict=dict(fontsize=10), zorder=100)
+            if not annotation:
+                continue
+            ax.annotate(annotation, xy=(_x, _y), xytext=(_x + .05, _y + .05), size=10, zorder=100,
+                        arrowprops=dict(lw=1, arrowstyle="-", color='black'))
 
     if loss_xaxis:
         ax.set_xlim(list(reversed(ax.get_xlim())))  # flip x
