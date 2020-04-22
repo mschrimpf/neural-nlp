@@ -1,37 +1,36 @@
-import os
-
 import fire
 import itertools
 import logging
 import matplotlib
 import numpy as np
+import os
 import pandas as pd
 import seaborn
 import sys
+from decimal import Decimal
 from functools import reduce
 from matplotlib import pyplot
 from matplotlib.colors import to_rgba
 from matplotlib.text import Text
+from matplotlib.ticker import MultipleLocator
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr
 from tqdm import tqdm
 
 from neural_nlp import score, model_layers, benchmark_pool
 from neural_nlp.benchmarks.neural import aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
-from result_caching import NotCachedError
+from result_caching import NotCachedError, is_iterable
 
 logger = logging.getLogger(__name__)
 
 model_colors = {
-    # controls / embeddings
-    'sentence-length': 'lightgray',
-    'word2vec': 'silver',
+    # embeddings
     'glove': 'gray',
-    # semantic?
-    'topicETM': 'bisque',
+    'ETM': 'bisque',
+    'word2vec': 'silver',
     # RNNs
     'lm_1b': 'slategrey',
     'skip-thoughts': 'darkgray',
@@ -64,9 +63,9 @@ model_colors = {
     # CTRL
     'ctrl': '#009EDB',
     # T5
-    't5-small': 'mediumpurple',
-    't5-base': 'blueviolet',
-    't5-large': 'mediumorchid',
+    't5-small': 'mediumorchid',
+    't5-base': 'mediumpurple',
+    't5-large': 'blueviolet',
     't5-3b': 'darkviolet',
     't5-11b': 'rebeccapurple',
     # AlBERT
@@ -80,61 +79,104 @@ model_colors = {
     'albert-xxlarge-v2': 'darkgreen',
     # GPT
     'openaigpt': 'lightblue',
-    'distilgpt2': 'cadetblue',
-    'gpt2': 'steelblue',
-    'gpt2-medium': 'c',
+    'distilgpt2': 'c',
+    'gpt2': 'cadetblue',
+    'gpt2-medium': 'steelblue',
     'gpt2-large': 'teal',
     'gpt2-xl': 'darkslategray',
 }
 models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
-overall_benchmarks = ('Pereira2018', 'Fedorenko2016', 'Blank2014fROI', 'Futrell2018')
+overall_neural_benchmarks = ('Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI')
 performance_benchmarks = ['wikitext', 'glue']
 
 
-def compare(benchmark1='Pereira2018-encoding', benchmark2='Pereira2018-rdm',
-            best_layer=True, normalize=True, reference_best=False, ax=None):
+class LabelReplace(dict):
+    def __missing__(self, key):
+        return key
+
+
+class BenchmarkLabelReplace(LabelReplace):
+    def __init__(self):
+        super(BenchmarkLabelReplace, self).__init__(**{
+            'overall_neural': 'Brain-Score.Language (neural)',
+            'Blank2014fROI': 'Blank2014',
+        })
+
+    def __getitem__(self, item):
+        if item.endswith('-encoding'):
+            return super(BenchmarkLabelReplace, self).__getitem__(item[:-len('-encoding')])
+        return super(BenchmarkLabelReplace, self).__getitem__(item)
+
+
+benchmark_label_replace = BenchmarkLabelReplace()
+model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.'})
+
+
+@matplotlib.ticker.FuncFormatter
+def score_formatter(score, pos):
+    if 0 <= score < 1:
+        assert Decimal(f"{score}") % Decimal(f"{.1}") < .001  # ensure we don't display rounding errors
+        return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
+    elif np.abs(score - 1) < .001:
+        return "1."
+    elif score > 1:
+        return ""
+    else:
+        return f"{score}"
+
+
+def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
+            best_layer=True, normalize=True, reference_best=False, identity_line=False, annotate=False,
+            plot_ceiling=True, ax=None, **kwargs):
     ax_given = ax is not None
     all_models = models
-    scores1 = collect_scores(benchmark=benchmark1, models=all_models)
-    scores2 = collect_scores(benchmark=benchmark2, models=all_models)
+    scores1 = collect_scores(benchmark=benchmark1, models=all_models, normalize=normalize)
+    scores2 = collect_scores(benchmark=benchmark2, models=all_models, normalize=normalize)
     scores1, scores2 = average_adjacent(scores1).dropna(), average_adjacent(scores2).dropna()
     if best_layer:
         choose_best = choose_best_scores if not reference_best else reference_best_scores
         scores1, scores2 = choose_best(scores1), choose_best(scores2)
-    if normalize:
-        scores1, scores2 = ceiling_normalize(scores1), ceiling_normalize(scores2)
     scores1, scores2 = align_scores(scores1, scores2, identifier_set=['model'] if best_layer else ['model', 'layer'])
     colors = [model_colors[model.replace('-untrained', '')] for model in scores1['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
+    if not best_layer or not annotate:
+        score_annotations = None
+    elif annotate is True:
+        score_annotations = scores1['model'].values
+    else:
+        score_annotations = [model if model in annotate else None for model in scores1['model'].values]
     fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
-                              score_annotations=scores1['model'].values if best_layer else None,
+                              score_annotations=score_annotations,
                               xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
-                              ax=ax)
+                              ax=ax, **kwargs)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
     normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     normalize_y = normalize and not any(benchmark2.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     if normalize_x:
-        xlim = [0, 1]
+        xlim = [0, 1.1]
     if normalize_y:
-        ylim = [0, 1]
-    if normalize_x:
-        ax.plot([0, 1], [0, 1], color='gray', linestyle='dashed')
-        ceiling_err = get_ceiling_error(benchmark1)
-        shaded_errorbar(y=ylim, x=[1, 1], error=ceiling_err, ax=ax, vertical=True,
+        ylim = [0, 1.1]
+    if normalize_x and plot_ceiling:
+        ceiling_err = get_ceiling(benchmark1)
+        shaded_errorbar(y=ylim, x=np.array([1, 1]), error=ceiling_err, ax=ax, vertical=True,
                         alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
-    if normalize_y:
-        ceiling_err = get_ceiling_error(benchmark2)
-        shaded_errorbar(x=xlim, y=[1, 1], error=ceiling_err, ax=ax,
+    if normalize_y and plot_ceiling:
+        ceiling_err = get_ceiling(benchmark2)
+        shaded_errorbar(x=xlim, y=np.array([1, 1]), error=ceiling_err, ax=ax,
                         alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
+    if identity_line:
+        lim = [min(xlim[0], ylim[0]), max(xlim[1], ylim[1])]
+        xlim = ylim = lim
+        ax.plot(lim, lim, linestyle='dashed', color='gray')
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     if not ax_given:
         savefig(fig, savename=f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers'))
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=True,
+def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
                     xlabel=None, ylabel=None, loss_xaxis=False, color=None, ax=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
@@ -144,7 +186,10 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
     ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
     if score_annotations is not None:
         for annotation, _x, _y in zip(score_annotations, x, y):
-            ax.text(_x, _y, annotation, fontdict=dict(fontsize=10), zorder=100)
+            if not annotation:
+                continue
+            ax.annotate(annotation, xy=(_x, _y), xytext=(_x + .05, _y + .05), size=10, zorder=100,
+                        arrowprops=dict(lw=1, arrowstyle="-", color='black'))
 
     if loss_xaxis:
         ax.set_xlim(list(reversed(ax.get_xlim())))  # flip x
@@ -154,19 +199,23 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=T
             return f"{loss}\n{np.exp(loss):.0f}"
 
         ax.xaxis.set_major_formatter(loss_formatter)
+    else:
+        ax.xaxis.set_major_formatter(score_formatter)
+    ax.yaxis.set_major_locator(MultipleLocator(base=tick_locator_base))
+    ax.yaxis.set_major_formatter(score_formatter)
 
-    for i, (name, correlate) in enumerate([('pearson', pearsonr), ('spearman', spearmanr)]):
-        r, p = correlate(x, y)
-        if i == 0 and plot_correlation:
-            b, m = polyfit(x, y, 1)
-            correlation_x = [min(x), max(x)]
-            ax.plot(correlation_x, b + m * np.array(correlation_x))
-        ax.text(0.9, 0.2 - i * 0.1, ha='center', va='center', transform=ax.transAxes,
-                s=f"{name} " + ((f"r={(r * (-1 if loss_xaxis else 1)):.2f}" + significance_stars(p))
-                                if p < 0.05 else f"n.s., p={p:.2f}"))
+    r, p = pearsonr(x, y)
+    if plot_correlation:
+        b, m = polyfit(x, y, 1)
+        correlation_x = [min(x), max(x)]
+        ax.plot(correlation_x, b + m * np.array(correlation_x), color='black', linestyle='solid')
+    ax.text(0.05, 0.8, ha='left', va='center', transform=ax.transAxes,
+            s=("$r=" + f"{(r * (-1 if loss_xaxis else 1)):.2f}$"[1:]
+               + (significance_stars(p) if plot_significance_stars else ''))
+            if p < 0.05 else f"$n.s., p={p:.2f}$")
 
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_xlabel(benchmark_label_replace[xlabel])
+    ax.set_ylabel(benchmark_label_replace[ylabel])
     return fig, ax
 
 
@@ -174,20 +223,24 @@ def significance_stars(p, max_stars=5):
     return '*' * max([i for i in range(max_stars + 1) if p <= 0.5 / (10 ** i)])
 
 
-def collect_scores(benchmark, models):
-    store_file = Path(__file__).parent / f'scores-{benchmark}.csv'
+def collect_scores(benchmark, models, normalize=True):
+    store_file = Path(__file__).parent / f"scores-{benchmark}-{'normalized' if normalize else 'raw'}.csv"
+    stored = False
     if store_file.is_file():
         data = pd.read_csv(store_file)
         data = data[data['model'].isin(models)]
-        return data
-    if benchmark.startswith('overall'):
-        metric = benchmark[len('overall-'):]
-        data = [collect_scores(benchmark=f"{b}-{metric}", models=models) for b in overall_benchmarks]
+        stored = True
+    if not stored and benchmark.startswith('overall_neural'):
+        metric = benchmark[len('overall_neural-'):]
+        data = [collect_scores(benchmark=f"{part}-{metric}", models=models, normalize=normalize)
+                for part in overall_neural_benchmarks]
         data = reduce(lambda left, right: pd.concat([left, right]), data)
         data = average_adjacent(data)
-        data = data.groupby(['model', 'layer']).mean().reset_index()  # mean across benchmarks per model-layer
+        data = choose_best_scores(data).dropna()  # need to choose best layer per benchmark here before averaging
+        data = data.groupby(['model']).mean().reset_index()  # mean across benchmarks per model-layer
+        data['layer'] = 'combined'
         data['benchmark'] = benchmark
-    else:
+    elif not stored:
         data, missing_models = [], []
         previous_resultcaching_cachedonly = os.getenv('RESULTCACHING_CACHEDONLY', '0')
         os.environ['RESULTCACHING_CACHEDONLY'] = '1'
@@ -197,6 +250,8 @@ def collect_scores(benchmark, models):
             except NotCachedError:
                 missing_models.append(model)
                 continue
+            if not normalize:
+                model_scores = model_scores.raw
             adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
             for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
                 adjunct_values = dict(zip(adjunct_columns, adjunct_values))
@@ -215,7 +270,11 @@ def collect_scores(benchmark, models):
         if benchmark == 'glue-mnli':  # only consider mnli (not mnli-mm)
             data = data[data['eval_task'] == 'mnli']
         os.environ['RESULTCACHING_CACHEDONLY'] = previous_resultcaching_cachedonly
-    data.to_csv(store_file, index=False)
+    non_overlap = list(set(data['model']).symmetric_difference(set(models)))
+    if len(non_overlap) > 0:
+        logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")
+    if not stored:
+        data.to_csv(store_file, index=False)
     return data
 
 
@@ -237,14 +296,14 @@ def compare_glue(benchmark2='Pereira2018-encoding'):
     savefig(fig, f"glue-{benchmark2}")
 
 
-def fmri_experiment_correlations(best_layer=False):
+def Pereira2018_experiment_correlations(best_layer=False, **kwargs):
     experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(best_layer)
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
     fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if best_layer else .2,
-                              score_annotations=experiment2_scores['model'].values if best_layer else None,
-                              xlabel='Exp. 2 (384sentences)', ylabel='Exp. 3 (243sentences)')
+                              score_annotations=None, xlabel='Pereira2018 (Exp. 2)', ylabel='Pereira2018 (Exp. 3)',
+                              **kwargs)
     scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
     ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='black')
     savefig(fig, savename='fmri-correlations' + ('-best' if best_layer else '-layers'))
@@ -339,7 +398,6 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     elif layer_mode == 'pos':
         scores['layer_position'] = [model_layers[model].index(layer) / len(model_layers[model])
                                     for model, layer in zip(scores['model'].values, scores['layer'].values)]
-    scores = ceiling_normalize(scores)
     # separate into trained / untrained
     untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
     scores_trained, scores_untrained = scores[~untrained_rows], scores[untrained_rows]
@@ -362,6 +420,7 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
+    ax.set_title(benchmark)
     savefig(fig, savename=f"untrained_trained-{benchmark}")
 
 
@@ -457,56 +516,52 @@ def get_score_center_err(s, combine_layers=True):
     raise ValueError(f"Unknown score structure: {s}")
 
 
-def ceiling_normalize(scores):
-    scores['score_unceiled'] = scores['score']
-    benchmark_ceilings = {}
-    for benchmark in set(scores['benchmark'].values):
-        if benchmark.startswith('overall'):
-            metric = benchmark[len('overall-'):]
-            ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling.sel(aggregation='center')
-                        for part in overall_benchmarks]
-            benchmark_ceilings[benchmark] = np.mean(ceilings)
-        elif any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
-            benchmark_ceilings[benchmark] = 1
-        else:
-            benchmark_ceilings[benchmark] = benchmark_pool[benchmark].ceiling.sel(aggregation='center') \
-                .values.tolist()
-    scores['ceiling'] = [benchmark_ceilings[benchmark] for benchmark in scores['benchmark'].values]
-    if not benchmark.startswith('wikitext'):
-        scores['score'] = scores['score'] / scores['ceiling']
-        scores['error'] = scores['error'] / scores['ceiling']
-    return scores
-
-
-def get_ceiling_error(benchmark):
-    if benchmark.startswith('overall'):
-        metric = benchmark[len('overall-'):]
-        ceilings = [benchmark_pool[f"{part}-{metric}"].ceiling for part in overall_benchmarks]
-        return np.mean([ceiling.sel(aggregation='error').values for ceiling in ceilings])
+def get_ceiling(benchmark, which='error', normalize_scale=True):
+    """
+    :param which: one of (ceiling|error|both)
+    """
+    if benchmark.startswith('overall_neural'):
+        metric = benchmark[len('overall_neural-'):]
+        ceilings = [get_ceiling(f"{part}-{metric}", which=which, normalize_scale=normalize_scale)
+                    for part in overall_neural_benchmarks]
+        return np.mean(ceilings, axis=0)
     elif any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
         return np.nan
     else:
         ceiling = benchmark_pool[benchmark].ceiling
-        return ceiling.sel(aggregation='error').values
+        ceiling_value = ceiling.sel(aggregation='center').values
+        error = ceiling.sel(aggregation=['error_low', 'error_high']).values
+        if normalize_scale:  # normalize error by ceiling scale factor
+            error /= ceiling_value
+        output = ceiling_value if which == 'ceiling' else error if which == 'error' else (ceiling_value, error)
+        return output
 
 
 def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, vertical=False, **kwargs):
+    if (len(np.array(y).shape) == 1 and not is_iterable(error)) \
+            or len(np.array(error).shape) == 1:  # symmetric error (only single vector)
+        error_low, error_high = error, error
+    else:  # asymmetric error
+        assert len(error) == 2
+        error = np.vectorize(lambda e: max(e, 0))(error)  # guard against negative values
+        error_low, error_high = error
     shaded_kwargs = shaded_kwargs or {}
     shaded_kwargs = {**dict(linewidth=0.0), **shaded_kwargs}
     ax = ax or pyplot.gca()
     line = ax.plot(x, y, **kwargs)
     if not vertical:
-        ax.fill_between(x, y - error, y + error, **shaded_kwargs)
+        ax.fill_between(x, y - error_low, y + error_high, **shaded_kwargs)
     else:
-        ax.fill_betweenx(y, x - error, x + error, **shaded_kwargs)
+        ax.fill_betweenx(y, x - error_low, x + error_high, **shaded_kwargs)
     return line
 
 
 def savefig(fig, savename):
     fig.tight_layout()
-    savepath = Path(__file__).parent / f"{savename}.png"
-    logger.info(f"Saving to {savepath}")
-    fig.savefig(savepath, dpi=600)
+    for extension, kwargs in [('png', dict(dpi=600)), ('svg', {})]:
+        savepath = Path(__file__).parent / f"{savename}.{extension}"
+        logger.info(f"Saving to {savepath}")
+        fig.savefig(savepath, **kwargs, bbox_inches='tight')
 
 
 if __name__ == '__main__':

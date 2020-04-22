@@ -3,6 +3,7 @@ import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, merge_data_arrays, walk_coords, array_is_element
 from brainio_collection.fetch import fullname
+from numpy import AxisError
 from numpy.random.mtrand import RandomState
 from scipy.optimize import curve_fit
 from tqdm import tqdm, trange
@@ -62,9 +63,10 @@ class HoldoutSubjectCeiling:
 
 
 class ExtrapolationCeiling:
-    def __init__(self, subject_column='subject', post_process=None):
+    def __init__(self, subject_column='subject', num_bootstraps=100, post_process=None):
         self.subject_column = subject_column
         self.holdout_ceiling = HoldoutSubjectCeiling(subject_column=subject_column)
+        self.num_bootstraps = num_bootstraps
         self._logger = logging.getLogger(fullname(self))
         self._post_process = post_process
 
@@ -117,25 +119,30 @@ class ExtrapolationCeiling:
     def extrapolate(self, ceilings):
         neuroid_ceilings, bootstrap_params, endpoint_xs = [], [], []
         for i in trange(len(ceilings['neuroid']), desc='neuroid extrapolations'):
-            # extrapolate per-neuroid ceiling
-            neuroid_ceiling = ceilings.isel(neuroid=[i])
-            extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling.squeeze())
-            extrapolated_ceiling = self.add_neuroid_meta(extrapolated_ceiling, neuroid_ceiling)
-            neuroid_ceilings.append(extrapolated_ceiling)
-            # also keep track of bootstrapped parameters
-            neuroid_bootstrap_params = extrapolated_ceiling.bootstrapped_params
-            neuroid_bootstrap_params = self.add_neuroid_meta(neuroid_bootstrap_params, neuroid_ceiling)
-            bootstrap_params.append(neuroid_bootstrap_params)
-            # and endpoints
-            endpoint_x = DataAssembly(extrapolated_ceiling.endpoint_x)
-            endpoint_x = self.add_neuroid_meta(endpoint_x, neuroid_ceiling)
-            endpoint_xs.append(endpoint_x)
+            try:
+                # extrapolate per-neuroid ceiling
+                neuroid_ceiling = ceilings.isel(neuroid=[i])
+                extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling.squeeze())
+                extrapolated_ceiling = self.add_neuroid_meta(extrapolated_ceiling, neuroid_ceiling)
+                neuroid_ceilings.append(extrapolated_ceiling)
+                # also keep track of bootstrapped parameters
+                neuroid_bootstrap_params = extrapolated_ceiling.bootstrapped_params
+                neuroid_bootstrap_params = self.add_neuroid_meta(neuroid_bootstrap_params, neuroid_ceiling)
+                bootstrap_params.append(neuroid_bootstrap_params)
+                # and endpoints
+                endpoint_x = self.add_neuroid_meta(extrapolated_ceiling.endpoint_x, neuroid_ceiling)
+                endpoint_xs.append(endpoint_x)
+            except AxisError:  # no extrapolation successful (happens for 1 neuroid in Pereira)
+                continue
         # merge and add meta
-        neuroid_ceilings = Score.merge(*neuroid_ceilings)
+        self._logger.debug("Merging neuroid ceilings")
+        neuroid_ceilings = manual_merge(*neuroid_ceilings)
         neuroid_ceilings.attrs['raw'] = ceilings
-        bootstrap_params = merge_data_arrays(bootstrap_params)
+        self._logger.debug("Merging bootstrap params")
+        bootstrap_params = manual_merge(*bootstrap_params)
         neuroid_ceilings.attrs['bootstrapped_params'] = bootstrap_params
-        endpoint_xs = merge_data_arrays(endpoint_xs)
+        self._logger.debug("Merging endpoints")
+        endpoint_xs = manual_merge(*endpoint_xs)
         neuroid_ceilings.attrs['endpoint_x'] = endpoint_xs
         # aggregate
         ceiling = self.aggregate_neuroid_ceilings(neuroid_ceilings)
@@ -158,10 +165,9 @@ class ExtrapolationCeiling:
     def extrapolate_neuroid(self, ceilings):
         # figure out how many extrapolation x points we have. E.g. for Pereira, not all combinations are possible
         subject_subsamples = list(sorted(set(ceilings['num_subjects'].values)))
-        num_bootstraps = 100
         rng = RandomState(0)
         bootstrap_params = []
-        for bootstrap in range(num_bootstraps):
+        for bootstrap in range(self.num_bootstraps):
             bootstrapped_scores = []
             for num_subjects in subject_subsamples:
                 num_scores = ceilings.sel(num_subjects=num_subjects)
@@ -175,16 +181,17 @@ class ExtrapolationCeiling:
 
             try:
                 params = self.fit(subject_subsamples, bootstrapped_scores)
-                params = DataAssembly([params], coords={'bootstrap': [bootstrap], 'param': ['v0', 'tau0']},
-                                      dims=['bootstrap', 'param'])
-                bootstrap_params.append(params)
             except RuntimeError:  # optimal parameters not found
-                continue
+                params = [np.nan, np.nan]
+            params = DataAssembly([params], coords={'bootstrap': [bootstrap], 'param': ['v0', 'tau0']},
+                                  dims=['bootstrap', 'param'])
+            bootstrap_params.append(params)
         bootstrap_params = merge_data_arrays(bootstrap_params)
         # find endpoint and error
         asymptote_threshold = .0005
         interpolation_xs = np.arange(1000)
-        ys = np.array([v(interpolation_xs, *params) for params in bootstrap_params.values])
+        ys = np.array([v(interpolation_xs, *params) for params in bootstrap_params.values
+                       if not np.isnan(params).any()])
         median_ys = np.median(ys, axis=0)
         diffs = np.diff(median_ys)
         end_x = np.where(diffs < asymptote_threshold)[0].min()  # first x where increase smaller than threshold
@@ -195,7 +202,7 @@ class ExtrapolationCeiling:
                       coords={'aggregation': ['center', 'error_low', 'error_high']}, dims=['aggregation'])
         score.attrs['raw'] = ceilings
         score.attrs['bootstrapped_params'] = bootstrap_params
-        score.attrs['endpoint_x'] = end_x
+        score.attrs['endpoint_x'] = DataAssembly(end_x)
         return score
 
     def fit(self, subject_subsamples, bootstrapped_scores):
@@ -215,6 +222,37 @@ def ci_error(samples, center, confidence=.95):
     confidence_below, confidence_above = np.nanpercentile(samples, low), np.nanpercentile(samples, high)
     confidence_below, confidence_above = center - confidence_below, confidence_above - center
     return confidence_below, confidence_above
+
+
+def manual_merge(*elements, on='neuroid'):
+    dims = elements[0].dims
+    assert all(element.dims == dims for element in elements[1:])
+    merge_index = dims.index(on)
+    # the coordinates in the merge index should have the same keys
+    assert _coords_match(elements, dim=on,
+                         match_values=False), f"coords in {[element[on] for element in elements]} do not match"
+    # all other dimensions, their coordinates and values should already align
+    for dim in set(dims) - {on}:
+        assert _coords_match(elements, dim=dim,
+                             match_values=True), f"coords in {[element[dim] for element in elements]} do not match"
+    # merge values without meta
+    merged_values = np.concatenate([element.values for element in elements], axis=merge_index)
+    # piece together with meta
+    result = type(elements[0])(merged_values, coords={
+        **{coord: (dims, values)
+           for coord, dims, values in walk_coords(elements[0])
+           if not array_is_element(dims, on)},
+        **{coord: (dims, np.concatenate([element[coord].values for element in elements]))
+           for coord, dims, _ in walk_coords(elements[0])
+           if array_is_element(dims, on)}}, dims=elements[0].dims)
+    return result
+
+
+def _coords_match(elements, dim, match_values=False):
+    first_coords = [(key, tuple(value)) if match_values else key for _, key, value in walk_coords(elements[0][dim])]
+    other_coords = [[(key, tuple(value)) if match_values else key for _, key, value in walk_coords(element[dim])]
+                    for element in elements[1:]]
+    return all(tuple(first_coords) == tuple(coords) for coords in other_coords)
 
 
 class NoOverlapException(Exception):

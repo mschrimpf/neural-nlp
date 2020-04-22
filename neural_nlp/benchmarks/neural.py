@@ -11,7 +11,8 @@ from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
+from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate, \
+    standard_error_of_the_mean
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
@@ -144,8 +145,9 @@ class Blank2014VoxelEncoding(Benchmark):
         return assembly
 
     def post_process_ceilings(self, scores):
-        scores['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
-            scores[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        if not hasattr(scores, 'neuroid_id'):
+            scores['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+                scores[coord].values for coord in ['subject_UID', 'fROI_area']])]
         return scores
 
     @property
@@ -158,10 +160,11 @@ class Blank2014VoxelEncoding(Benchmark):
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         _logger.info('Scoring model')
         score = self._metric(model_activations, self._target_assembly)
-        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
-        score.loc[{'aggregation': 'error'}] = subject_scores.std()
+
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
-        score.attrs['raw'] = raw_neuroids
+        raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+            raw_neuroids[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
 
@@ -207,7 +210,40 @@ class Blank2014fROIEncoding(Blank2014VoxelEncoding):
                 continue
             averaged_assembly[copy_coord] = dims, copy_value[order]
         averaged_assembly.attrs = attrs
+        averaged_assembly['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+            averaged_assembly[coord].values for coord in ['subject_UID', 'fROI_area']])]
         return averaged_assembly
+
+
+class Blank2014SentencesfROIEncoding(Blank2014fROIEncoding):
+    def __init__(self, *args, num_sentences, **kwargs):
+        super(Blank2014SentencesfROIEncoding, self).__init__(*args, **kwargs)
+        self.num_sentences = num_sentences
+
+    def _load_assembly(self, bold_shift):
+        assembly = super(Blank2014fROIEncoding, self)._load_assembly(bold_shift)
+        # choose only up to nth sentence
+        # stimulus_id is ['story', 'sentence_num', 'sentence_part']
+        assembly = assembly[{'presentation': [
+            int(stimulus_id.split('.')[1]) < self.num_sentences
+            for stimulus_id in assembly['stimulus_id'].values]}]
+        return assembly
+
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+        stimulus_ids = set(self._target_assembly['stimulus_id'].values)
+        model_activations = model_activations[{'presentation': [
+            stimulus_id in stimulus_ids for stimulus_id in model_activations['stimulus_id'].values]}]
+        _logger.info('Scoring model')
+        score = self._metric(model_activations, self._target_assembly)
+
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        if not hasattr(raw_neuroids, 'neuroid_id'):
+            raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
+                raw_neuroids[coord].values for coord in ['subject_UID', 'fROI_area']])]
+        score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
+        return score
 
 
 class Blank2014fROIRDM(Blank2014fROIEncoding):
@@ -237,7 +273,7 @@ class _PereiraBenchmark(Benchmark):
         self._data_version = data_version
         self._target_assembly = LazyLoad(lambda: self._load_assembly(version=self._data_version))
         self._single_metric = metric
-        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject')
+        self._ceiler = self.PereiraExtrapolationCeiling(subject_column='subject', num_bootstraps=100)
         self._cross = CartesianProduct(dividers=['experiment', 'atlas'])
 
     @property
@@ -266,13 +302,18 @@ class _PereiraBenchmark(Benchmark):
         cross_scores = self._cross(self._target_assembly, apply=
         lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
         raw_scores = cross_scores.raw
-        score = cross_scores.sel(atlas='language', _apply_raw=False).mean('experiment')
-        subject_scores = raw_scores.sel(atlas='language').groupby('subject').median('neuroid')
-        subject_scores = subject_scores.mean('split').mean('experiment')
-        score.loc[{'aggregation': 'error'}] = subject_scores.std()
-        raw_neuroids = apply_aggregate(lambda values: values.sel(atlas='language').mean('split').mean('experiment'),
-                                       raw_scores)
-        score.attrs['raw'] = raw_neuroids
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split').mean('experiment'), raw_scores)
+
+        # normally we would ceil every single neuroid here. To estimate the strongest ceiling possible (i.e. make it as
+        # hard as possible on the models), we used experiment-overlapping neuroids from as many subjects as possible
+        # which means some neuroids got excluded. Since median(r/c) is the same as median(r)/median(c), we just
+        # normalize the neuroid aggregate by the overall ceiling aggregate.
+        # Additionally, the Pereira data also has voxels from DMN, visual etc. but we care about language here.
+        language_neuroids = raw_neuroids.sel(atlas='language', _apply_raw=False)
+        aggregate_raw = aggregate_neuroid_scores(language_neuroids, subject_column='subject')
+        score = consistency(aggregate_raw, self.ceiling)
+        score.attrs['raw'] = aggregate_raw
+        score.attrs['ceiling'] = self.ceiling
         return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
@@ -292,7 +333,7 @@ class _PereiraBenchmark(Benchmark):
         def __init__(self, subject_column, *args, **kwargs):
             super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).__init__(
                 subject_column, *args, **kwargs)
-            self._num_subsamples = 3
+            self._num_subsamples = 10
             self.holdout_ceiling = _PereiraBenchmark.PereiraHoldoutSubjectCeiling(subject_column=subject_column)
             self._rng = RandomState(0)
 
@@ -333,6 +374,8 @@ class _PereiraBenchmark(Benchmark):
 
         def fit(self, subject_subsamples, bootstrapped_scores):
             valid = ~np.isnan(bootstrapped_scores)
+            if sum(valid) < 1:
+                raise RuntimeError("No valid scores in sample")
             return super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).fit(
                 np.array(subject_subsamples)[valid], np.array(bootstrapped_scores)[valid])
 
@@ -516,10 +559,9 @@ class _Fedorenko2016:
                                        average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
         score = self._metric(model_activations, self._target_assembly)
-        subject_scores = score.raw.groupby('subject_UID').median('neuroid').mean('split')
-        score.loc[{'aggregation': 'error'}] = subject_scores.std()
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
-        score.attrs['raw'] = raw_neuroids
+
+        score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
     @property
@@ -777,6 +819,38 @@ def aggregate(score, combine_layers=True):
     return score
 
 
+def ceil_neuroids(raw_neuroids, ceiling, subject_column='subject'):
+    ceiled_neuroids = consistency_neuroids(raw_neuroids, ceiling.raw)
+    ceiled_neuroids.attrs['raw'] = raw_neuroids
+    ceiled_neuroids.attrs['ceiling'] = ceiling.raw
+    score = aggregate_neuroid_scores(ceiled_neuroids, subject_column)
+    score.attrs['ceiling'] = ceiling
+    return score
+
+
+def aggregate_neuroid_scores(neuroid_scores, subject_column):
+    subject_scores = neuroid_scores.groupby(subject_column).median()
+    center, error = subject_scores.median(subject_column), standard_error_of_the_mean(subject_scores, subject_column)
+    score = Score([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+    score.attrs['raw'] = neuroid_scores
+    return score
+
+
+def consistency_neuroids(neuroids, ceiling_neuroids):
+    assert set(neuroids['neuroid_id'].values) == set(ceiling_neuroids['neuroid_id'].values)
+    ceiling_neuroids = ceiling_neuroids[{'neuroid': [neuroids['neuroid_id'].values.tolist().index(neuroid_id)
+                                                     for neuroid_id in neuroids['neuroid_id'].values]}]  # align
+    ceiling_neuroids = ceiling_neuroids.sel(aggregation='center')
+    values = consistency(neuroids.values, ceiling_neuroids.values)
+    neuroids = type(neuroids)(values, coords={coord: (dims, values) for coord, dims, values in walk_coords(neuroids)},
+                              dims=neuroids.dims)
+    return neuroids
+
+
+def consistency(score, ceiling):
+    return score / ceiling
+
+
 benchmark_pool = [
     ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
     ('Blank2014fROI-encoding', Blank2014fROIEncoding),
@@ -801,5 +875,8 @@ benchmark_pool = [
     ('Fedorenko2016v4nonlang-encoding', Fedorenko2016V4NonLangEncoding),
     ('Fedorenko2016v4all-encoding', Fedorenko2016V4AllEncoding),
 ]
+for num_sentences in range(1, 9):
+    benchmark_pool.append((f'Blank2014sentences{num_sentences}fROI-encoding',
+                           lambda *args, **kwargs: Blank2014SentencesfROIEncoding(*args, num_sentences=1, **kwargs)))
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}

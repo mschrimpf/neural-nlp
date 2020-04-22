@@ -2,7 +2,7 @@ import copy
 import os
 import pickle
 import tempfile
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from enum import Enum
 from importlib import import_module
 
@@ -87,7 +87,7 @@ class SentenceLength(BrainModel):
 class TopicETM(BrainModel):
     """https://arxiv.org/abs/1907.04907"""
 
-    identifier = 'topicETM'
+    identifier = 'ETM'
 
     available_layers = ['projection']
     default_layers = available_layers
@@ -166,7 +166,6 @@ class ETM_topicspace(TopicETM):
     """Uses the distributed representation of topics from the ETM as embedding features"""
 
     identifier = TopicETM.identifier
-    print(identifier)
 
     def __init__(self, weights_file='normalized_betas_50K.npy',
                  vocab_file='vocab_50K.pkl',
@@ -183,7 +182,6 @@ class ETM_featurespace(TopicETM):
     """Uses the jointly learned embedding space for words and topics from the ETM as embedding features"""
 
     identifier = TopicETM.identifier + '-featurespace'
-    print(identifier)
 
     def __init__(self, weights_file='rho-50-wikitext_df1.npy',
                  vocab_file='vocab_wikitext_df_1.pkl',
@@ -196,7 +194,7 @@ class ETM_featurespace(TopicETM):
                                                vocab_file=vocab_file, emb_size=emb_size)
 
 
-class SkipThoughts:
+class SkipThoughts(BrainModel):
     """
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
@@ -205,6 +203,7 @@ class SkipThoughts:
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
         super().__init__()
+        self._logger = logging.getLogger(fullname(self))
         import skipthoughts
         weights = weights + '/'
         model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
@@ -212,29 +211,66 @@ class SkipThoughts:
         self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)  # not sure if this resets states on its own
         self._extractor.insert_attrs(self)
+        # setup prioritized vocabulary entries to map to indices and back.
+        # unfortunately it does not seem straight-forward to retrieve preferred words/tokens for the model, such as
+        # their frequency in the training dataset. The pretrained version we're using was trained on the BookCorpus
+        # dataset which is no longer online and any word frequencies did not seem to be saved in the files available
+        # here. The `encoder._model['utable']` is an OrderedDict, but the ordering does not intuitively seem to
+        # correspond to frequencies. Since there seems to be no other way, we will treat the utable as a
+        # frequency-ordered dict regardless and hope for the best.
+        self.vocab_index = {word: index for index, word in enumerate(self._encoder._model['utable'])}
+        self.index_vocab = {index: word for index, word in enumerate(self._encoder._model['utable'])}
+
+    @property
+    def vocab_size(self):
+        return len(self._encoder._model['utable'])
+
+    @property
+    def features_size(self):
+        return 4800
+
+    def tokenize(self, text, vocab_size=None):
+        if (bool(vocab_size)) and vocab_size < self.vocab_size:  # smaller vocab size requested, drop tokens
+            self._logger.debug(f"Shortening {self.vocab_size} to {vocab_size}")
+            _vocab_size = vocab_size
+        else:
+            _vocab_size = self.vocab_size
+        words = text.split()
+        tokens = [self.vocab_index[word] for word in tqdm(words, desc='tokenize') if word in self.vocab_index
+                  and self.vocab_index[word] < _vocab_size]  # only top-k vocab words
+        return np.array(tokens)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        return _call_conditional_average(*args, extractor=self._extractor,
-                                         average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
+        if self.mode == BrainModel.Modes.recording:
+            return _call_conditional_average(*args, extractor=self._extractor,
+                                             average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
+        elif self.mode == BrainModel.Modes.tokens_to_features:
+            return self._encode_sentence(*args, **kwargs)
 
     def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, ['encoder'])
-        encoding = []
-        for sentence_iter, sentence in enumerate(sentences):
-            sentence_words = []
-            encoding.append([])
-            for word in sentence.split(' '):
-                sentence_words.append(word)
-                word_embeddings = self._encoder.encode([' '.join(sentence_words)])
-                encoding[sentence_iter].append(word_embeddings)
-            encoding[sentence_iter] = np.array(encoding[sentence_iter]).transpose([1, 0, 2])
+        np.testing.assert_array_equal(layers, self.available_layers)
+        encoding = [self._encode_sentence(sentence) for sentence in sentences]
         return {'encoder': encoding}
+
+    def _encode_sentence(self, sentence):
+        if isinstance(sentence, str):
+            words = sentence.split(' ')
+        else:
+            words = [self.index_vocab[index] for index in sentence]
+        sentence_words = []
+        sentence_encoding = []
+        for word in words:
+            sentence_words.append(word)
+            word_embeddings = self._encoder.encode([' '.join(sentence_words)])
+            sentence_encoding.append(word_embeddings)
+        sentence_encoding = np.array(sentence_encoding).transpose([1, 0, 2])
+        return sentence_encoding
 
     available_layers = ['encoder']
     default_layers = available_layers
 
 
-class LM1B:
+class LM1B(BrainModel):
     """
     https://arxiv.org/pdf/1602.02410.pdf
     """
@@ -243,6 +279,7 @@ class LM1B:
 
     def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b')):
         super().__init__()
+        self._logger = logging.getLogger(self.__class__.__name__)
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
@@ -250,51 +287,89 @@ class LM1B:
         self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
         self._extractor.insert_attrs(self)
-        self._logger = logging.getLogger(self.__class__.__name__)
+        self._vocab_index = self._encoder.vocab._word_to_id
+        self._index_vocab = {index: word for word, index in self._vocab_index.items()}
+        self._is_initialized = False
+
+    @property
+    def vocab_size(self):
+        return len(self._vocab_index)
+
+    @property
+    def features_size(self):
+        return 1024
+
+    def tokenize(self, text, vocab_size=None):
+        if (bool(vocab_size)) and vocab_size < self.vocab_size:  # smaller vocab size requested, drop tokens
+            self._logger.debug(f"Shortening {self.vocab_size} to {vocab_size}")
+            _vocab_size = vocab_size
+        else:
+            _vocab_size = self.vocab_size
+        words = text.split()
+        tokens = [self._vocab_index[word] for word in tqdm(words, desc='tokenize')
+                  if word in self._vocab_index and self._vocab_index[word] < _vocab_size]  # only top-k vocab words
+        return np.array(tokens)
 
     def __call__(self, *args, average_sentence=True, **kwargs):
-        return _call_conditional_average(*args, extractor=self._extractor,
-                                         average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
+        if self.mode == BrainModel.Modes.recording:
+            return _call_conditional_average(*args, extractor=self._extractor,
+                                             average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
+        elif self.mode == BrainModel.Modes.tokens_to_features:
+            readout_layer = self.default_layers[-1]
+            return self._encode_sentence(*args, layers=[readout_layer], **kwargs)[readout_layer]
 
     def _get_activations(self, sentences, layers):
+        layer_activations = defaultdict(list)
+        for sentence in sentences:
+            embeddings = self._encode_sentence(sentence, layers)
+            for layer, layer_embeddings in embeddings.items():
+                layer_activations[layer].append(np.array([layer_embeddings]))
+        return layer_activations
+
+    def _encode_sentence(self, sentence, layers):
         from lm_1b import lm_1b_eval
         from six.moves import xrange
+        if not isinstance(sentence, str):
+            sentence = ' '.join([self._index_vocab[index] for index in sentence])
+        self._initialize()
         # the following is copied from lm_1b.lm_1b_eval.Encoder.__call__.
         # only the `sess.run` call needs to be changed but there's no way to access it outside the code
-        self._encoder.sess.run(self._encoder.t['states_init'])
+        if sentence.find('<S>') != 0:
+            sentence = '<S> ' + sentence
+        word_ids = [self._encoder.vocab.word_to_id(w) for w in sentence.split()]
+        char_ids = [self._encoder.vocab.word_to_char_ids(w) for w in sentence.split()]
+        inputs = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
+        char_ids_inputs = np.zeros(
+            [lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS, self._encoder.vocab.max_word_length], np.int32)
+        embeddings = []
         targets = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
         weights = np.ones([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.float32)
-        sentences_embeddings, sentences_word_ids = [], []
-        for sentence in sentences:
-            if sentence.find('<S>') != 0:
-                sentence = '<S> ' + sentence
-            word_ids = [self._encoder.vocab.word_to_id(w) for w in sentence.split()]
-            char_ids = [self._encoder.vocab.word_to_char_ids(w) for w in sentence.split()]
-            inputs = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
-            char_ids_inputs = np.zeros(
-                [lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS, self._encoder.vocab.max_word_length], np.int32)
-            embeddings = []
-            for i in xrange(len(word_ids)):
-                inputs[0, 0] = word_ids[i]
-                char_ids_inputs[0, 0, :] = char_ids[i]
-                # TODO: ensure this preserves hidden state
-                lstm_emb = self._encoder.sess.run([self._encoder.t[name] for name in layers],
-                                                  feed_dict={self._encoder.t['char_inputs_in']: char_ids_inputs,
-                                                             self._encoder.t['inputs_in']: inputs,
-                                                             self._encoder.t['targets_in']: targets,
-                                                             self._encoder.t['target_weights_in']: weights})
-                if i > 0:  # 0 is <S>
-                    embeddings.append(lstm_emb)
-            sentences_embeddings.append(embeddings)
-            sentences_word_ids.append(word_ids)
-        # `sentences_embeddings` shape is now: sentences x words x layers x *layer_shapes
+        for i in xrange(len(word_ids)):
+            inputs[0, 0] = word_ids[i]
+            char_ids_inputs[0, 0, :] = char_ids[i]
+            # calling this repeatedly with the same input leads to different embeddings,
+            # so we infer this preserves hidden state
+            lstm_emb = self._encoder.sess.run([self._encoder.t[name] for name in layers],
+                                              feed_dict={self._encoder.t['char_inputs_in']: char_ids_inputs,
+                                                         self._encoder.t['inputs_in']: inputs,
+                                                         self._encoder.t['targets_in']: targets,
+                                                         self._encoder.t['target_weights_in']: weights})
+            if i > 0:  # 0 is <S>
+                embeddings.append(lstm_emb)
+        # `embeddings` shape is now: words x layers x *layer_shapes
         layer_activations = {}
         for i, layer in enumerate(layers):
-            # sentences_embeddings is `sentences x words x layers x (1 x 1024)`
-            layer_activations[layer] = [np.array(embedding)[:, i] for embedding in sentences_embeddings]
-            # words x 1 x 1024 --> 1 x words x 1024
-            layer_activations[layer] = [embedding.transpose(1, 0, 2) for embedding in layer_activations[layer]]
+            # embeddings is `words x layers x (1 x 1024)`
+            layer_activations[layer] = [embedding[i] for embedding in embeddings]
+            # words x 1 x 1024 --> words x 1024
+            layer_activations[layer] = np.array(layer_activations[layer]).transpose(1, 0, 2).squeeze()
         return layer_activations
+
+    def _initialize(self):
+        if self._is_initialized:
+            return
+        self._encoder.sess.run(self._encoder.t['states_init'])
+        self._is_initialized = True
 
     def available_layers(self, filter_inputs=True):
         return [tensor_name for tensor_name in self._encoder.t if not filter_inputs or not tensor_name.endswith('_in')]
@@ -338,7 +413,8 @@ class Transformer(PytorchWrapper, BrainModel):
         self._model_container = self.TransformerContainer(translator, opt)
         self.vocab_index = {word: index for index, word in
                             enumerate(self._model_container.translator.fields["src"].vocab.freqs)}
-        self.index_vocab = {index: word for word, index in self.vocab_index.items()}
+        index_vocab = {index: word for word, index in self.vocab_index.items()}
+        self._model_container.index_vocab = index_vocab
         super(Transformer, self).__init__(model=self._model_container, identifier=self.identifier,
                                           reset=lambda: None)  # transformer is feed-forward
 
@@ -353,6 +429,7 @@ class Transformer(PytorchWrapper, BrainModel):
         def __init__(self, translator, opt):
             self.translator = translator
             self.opt = opt
+            self.index_vocab = None
 
         def __getattr__(self, name):
             return getattr(self.translator.model, name)
@@ -361,6 +438,8 @@ class Transformer(PytorchWrapper, BrainModel):
             with tempfile.NamedTemporaryFile(mode='w+') as file:
                 # separating sentences with newline, combined with a batch size of 1
                 # will lead to one set of activations per sentence (albeit multiple words).
+                if isinstance(sentences, np.ndarray):
+                    sentences = [" ".join([self.index_vocab[index] for index in sentences])]
                 file.write('\n'.join(sentences) + '\n')
                 file.flush()
                 encodings = self.translator.get_encodings(src_path=file.name, tgt_path=self.opt.tgt,
