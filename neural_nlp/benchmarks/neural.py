@@ -684,6 +684,48 @@ def Fedorenko2016V3AllEncoding(identifier):
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
     return benchmark
 
+# Version 4 - based on data April 20th
+def Fedorenko2016V4Encoding(identifier):
+    """
+    Fedorenko benchmark, language electrodes
+    Data 04/20/2020: sentence_language_elec_max_window_no_demean_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
+    benchmark = Fedorenko2016Encoding(identifier)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=4))
+    return benchmark
+
+
+def Fedorenko2016V4NonLangEncoding(identifier):
+    """
+    Fedorenko benchmark, non-language electrodes (only sorted based on signal)
+    Data 04/20/2020: sentence_pre_sent_sent_change_elec_max_window_no_demean_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
+    benchmark = Fedorenko2016Encoding(identifier)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=4))
+    return benchmark
+
+
+def Fedorenko2016V4AllEncoding(identifier):
+    """
+    Fedorenko benchmark, all electrodes (only sorted based on signal)
+    Data 04/20/2020: sentence_pre_sent_sent_change_elec_max_window_no_demean_dat (not demeaned across sentences)
+
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
+    benchmark = Fedorenko2016Encoding(identifier)
+    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=4))
+    return benchmark
+
 
 def Fedorenko2016RDM(identifier):
     """
@@ -755,6 +797,9 @@ benchmark_pool = [
     ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
     ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
+    ('Fedorenko2016v4-encoding', Fedorenko2016V4Encoding),
+    ('Fedorenko2016v4nonlang-encoding', Fedorenko2016V4NonLangEncoding),
+    ('Fedorenko2016v4all-encoding', Fedorenko2016V4AllEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}
