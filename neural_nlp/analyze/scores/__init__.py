@@ -520,12 +520,13 @@ def get_ceiling(benchmark, which='error', normalize_scale=True):
 
 
 def shaded_errorbar(x, y, error, ax=None, shaded_kwargs=None, vertical=False, **kwargs):
-    if not is_iterable(error):  # symmetric error
+    if (len(np.array(y).shape) == 1 and not is_iterable(error)) \
+            or len(np.array(error).shape) == 1:  # symmetric error (only single vector)
         error_low, error_high = error, error
     else:  # asymmetric error
         assert len(error) == 2
+        error = np.vectorize(lambda e: max(e, 0))(error)  # guard against negative values
         error_low, error_high = error
-        error_low, error_high = max(0, error_low), max(0, error_high)  # guard against negative values
     shaded_kwargs = shaded_kwargs or {}
     shaded_kwargs = {**dict(linewidth=0.0), **shaded_kwargs}
     ax = ax or pyplot.gca()

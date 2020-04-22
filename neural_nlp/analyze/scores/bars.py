@@ -75,10 +75,12 @@ def whole_best(benchmark=None, data=None, title_kwargs=None, normalize_error=Fal
     if is_iterable(ceiling_err) or not np.isnan(ceiling_err):  # no performance benchmarks
         ceiling_y = 1  # we already normalized so ceiling == 1
         xlim = ax.get_xlim()
-        shaded_errorbar(x=[-50, +50], y=np.array([ceiling_y, ceiling_y]), error=ceiling_err, ax=ax,
-                        alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
+        ax.plot([-50, +50], [ceiling_y, ceiling_y], color='gray')
+        shaded_errorbar(x=[-50, +50], y=np.array([ceiling_y, ceiling_y]),
+                        error=([ceiling_err[0], ceiling_err[0]], [ceiling_err[1], ceiling_err[1]]),
+                        ax=ax, alpha=0, shaded_kwargs=dict(color='darkgray', alpha=.5))
         ax.set_xlim(xlim)
-        ax.set_ylim([-.05, 1.05 + ceiling_err[-1]])
+        ax.set_ylim([-.05, max(1.05 + ceiling_err[-1], max(data['score']) + .05)])
     ax.set_xticks([])
     ax.set_xticklabels([])
     axis_locator = MultipleLocator(base=0.2)
