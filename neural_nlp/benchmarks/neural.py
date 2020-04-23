@@ -784,28 +784,6 @@ def Fedorenko2016RDM(identifier):
     return _Fedorenko2016(identifier=identifier, metric=metric)
 
 
-def Fedorenko2016AllLastEncoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
-    correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-    metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
-                                       crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
-                                                                   # nothing to stratify over only 1 sample per sentence
-                                                                   stratification_coord=None, ))
-    benchmark = _Fedorenko2016(identifier=identifier, metric=metric)
-    assembly = load_Fedorenko2016(electrodes='all')
-    assert len(set(assembly['word_num'].values)) == 8  # every sentence has exactly 8 words in this dataset
-    assembly = assembly[{'presentation': [word in [6, 7, 8] for word in assembly['word'].values]}]
-    benchmark._target_assembly = assembly
-    benchmark._average_sentence = True
-    benchmark._target_assembly.attrs['stimulus_set'].name += '-last'
-    return benchmark
-
-
 def aggregate(score, combine_layers=True):
     if hasattr(score, 'experiment') and score['experiment'].ndim > 0:
         score = score.mean('experiment')
