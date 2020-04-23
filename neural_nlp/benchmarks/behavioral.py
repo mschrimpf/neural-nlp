@@ -12,7 +12,7 @@ from brainscore.metrics.regression import linear_regression, pearsonr_correlatio
 from brainscore.metrics.transformations import CartesianProduct, apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling, NoOverlapException
-from neural_nlp.benchmarks.neural import read_words, explained_variance
+from neural_nlp.benchmarks.neural import read_words, consistency
 from neural_nlp.neural_data.naturalStories import load_naturalStories
 
 
@@ -82,8 +82,8 @@ class Futrell2018Encoding(Benchmark):
         # normalize by ceiling
         # Note that we normalize by an overall ceiling, so the scores per subject are not normalized wrt. that subject
         # and should thus not be used by themselves. Only the aggregate makes sense to report
-        normalized_subject_scores = explained_variance(cross_scores.sel(aggregation='center'),
-                                                       self.ceiling.sel(aggregation='center'))
+        normalized_subject_scores = consistency(cross_scores.sel(aggregation='center'),
+                                                self.ceiling.sel(aggregation='center'))
         score = normalized_subject_scores.mean('subject_id')
         std = normalized_subject_scores.std('subject_id')
         std['aggregation'] = 'error'
