@@ -425,7 +425,9 @@ class Transformer(PytorchWrapper, BrainModel):
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
         elif self.mode == BrainModel.Modes.tokens_to_features:
-            return self._model_container(*args, **kwargs)
+            encodings = self._model_container(*args, **kwargs)
+            # the onmt implementation concats things together, undo this
+            return encodings[0].reshape(-1, self.features_size)
 
     class TransformerContainer:
         def __init__(self, translator, opt):
@@ -457,8 +459,6 @@ class Transformer(PytorchWrapper, BrainModel):
         hook = layer.register_forward_hook(hook_function)
         return hook
 
-    default_layers = [f'encoder.transformer.{i}.{layer}'
-                      for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
     """
     For each of the 6 encoder blocks, we're using two layers,
     one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
@@ -481,6 +481,8 @@ class Transformer(PytorchWrapper, BrainModel):
     Note however that the attended input has not yet been added back to the feed forward output with
     `feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
     """
+    default_layers = [f'encoder.transformer.{i}.{layer}'
+                      for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
 
     def tokenize(self, text, vocab_size=None):
         assert not vocab_size or vocab_size == self.vocab_size
@@ -490,7 +492,7 @@ class Transformer(PytorchWrapper, BrainModel):
 
     @property
     def features_size(self):
-        return 16384  # encoding output of onmt transformer
+        return 512  # encoding output of onmt transformer
 
     @property
     def vocab_size(self):
