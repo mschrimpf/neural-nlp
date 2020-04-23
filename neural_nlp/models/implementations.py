@@ -339,7 +339,7 @@ class LM1B(BrainModel):
         word_ids = [self._encoder.vocab.word_to_id(w) for w in sentence.split()]
         char_ids = [self._encoder.vocab.word_to_char_ids(w) for w in sentence.split()]
         # some unknown characters end up as '�' (ord 65533). Replace those with empty (4)
-        char_ids = [np.array([c if c != 65533 else 4 for c in chars]) for chars in char_ids]
+        char_ids = [np.array([c if c >= 256 else 4 for c in chars]) for chars in char_ids]
         inputs = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
         char_ids_inputs = np.zeros(
             [lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS, self._encoder.vocab.max_word_length], np.int32)
@@ -789,6 +789,25 @@ class KeyedVectorModel(BrainModel):
         tokens = [self._vocab[word].index for word in text.split() if word in self._vocab
                   and self._vocab[word].index < vocab_size]  # only top-k vocab words
         return np.array(tokens)
+
+    def glue_dataset(self, task, examples, label_list, output_mode, max_seq_length):
+        import torch
+        from torch.utils.data import TensorDataset
+        tokens = [np.concatenate((self.tokenize(example.text_a),) +
+                                 ((self.tokenize(example.text_b),) if example.text_b is not None else ()))
+                  for example in examples]
+        label_map = {label: i for i, label in enumerate(label_list)}
+        labels = [label_map[label] for label in label_list]
+
+        # Convert to Tensors and build dataset   - 3688 * 128
+        # TODO: pad -- but how?
+        token_tensors = torch.tensor(tokens, dtype=torch.long)
+        if output_mode == "classification":
+            all_labels = torch.tensor(labels, dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor(labels, dtype=torch.float)
+        dataset = TensorDataset(token_tensors, all_labels)
+        return dataset
 
     @property
     def vocab_size(self):
