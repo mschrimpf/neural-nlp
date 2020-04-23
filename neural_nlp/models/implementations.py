@@ -338,6 +338,8 @@ class LM1B(BrainModel):
             sentence = '<S> ' + sentence
         word_ids = [self._encoder.vocab.word_to_id(w) for w in sentence.split()]
         char_ids = [self._encoder.vocab.word_to_char_ids(w) for w in sentence.split()]
+        # some unknown characters end up as '�' (ord 65533). Replace those with empty (4)
+        char_ids = [np.array([c if c != 65533 else 4 for c in chars]) for chars in char_ids]
         inputs = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
         char_ids_inputs = np.zeros(
             [lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS, self._encoder.vocab.max_word_length], np.int32)
