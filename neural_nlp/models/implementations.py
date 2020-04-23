@@ -490,7 +490,7 @@ class Transformer(PytorchWrapper, BrainModel):
 
     @property
     def features_size(self):
-        return 4608
+        return 16384  # encoding output of onmt transformer
 
     @property
     def vocab_size(self):
