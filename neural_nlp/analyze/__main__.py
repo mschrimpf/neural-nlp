@@ -63,8 +63,9 @@ def paper_figures():
     scores.Pereira_language_vs_other()
     # S3: ceiling extrapolation
     _logger.info("Figures S3")
+    tick_formatting = {benchmark: formatting for benchmark, formatting in zip(brain_benchmarks, [1, 2, 2, 1])}
     for benchmark in brain_benchmarks:
-        ceiling.plot_extrapolation_ceiling(benchmark=benchmark)
+        ceiling.plot_extrapolation_ceiling(benchmark=benchmark, ytick_formatting_frequency=tick_formatting[benchmark])
     # S4: story context
     _logger.info("Figures S4")
     story_context.plot_num_sentences(model='gpt2-xl')
