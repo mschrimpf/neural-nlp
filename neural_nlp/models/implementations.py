@@ -1136,8 +1136,9 @@ for untrained in False, True:
             tokenizer = tokenizer_ctr.from_pretrained(configuration['weight_identifier'])
             state_dict = None
             if not configuration.get('trained', True):  # if untrained
+                # load standard model constructor: this will only create modules and initialize them for training
                 model = model_ctr(config=config)
-                state_dict = model.state_dict()  # force loading of initial
+                state_dict = model.state_dict()  # capture initial random weights and force load them later
             model = model_ctr.from_pretrained(configuration['weight_identifier'],
                                               output_hidden_states=True, state_dict=state_dict)
             model_wrapper = configuration.get('model_wrapper', None)

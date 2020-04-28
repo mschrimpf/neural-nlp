@@ -100,3 +100,14 @@ def _test_model(model_name, sentence='The quick brown fox jumps over the lazy do
     print(encoding.shape)
     assert len(encoding.shape) == 2
     assert encoding.shape[0] == 1
+
+
+def test_untrained_weights_different(model_name='gpt2-xl'):
+    trained = load_model(model_name)
+    untrained = load_model(f"{model_name}-untrained")
+    trained = trained._model.state_dict()
+    untrained = untrained._model.state_dict()
+    assert len(trained) == len(untrained)
+    assert set(trained.keys()) == set(untrained.keys())
+    weights_different = {key: trained[key] != untrained[key] for key in trained.keys()}
+    assert all(weights_different)
