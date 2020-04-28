@@ -825,13 +825,14 @@ class Word2Vec(KeyedVectorModel):
 
     identifier = 'word2vec'
 
-    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin', **kwargs):
+    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin', random_embeddings=False, **kwargs):
         weights_file = os.path.join(_ressources_dir, 'word2vec', weights_file)
         super(Word2Vec, self).__init__(
-            identifier=self.identifier, weights_file=weights_file, binary=True,
+            identifier=self.identifier + ('-untrained' if random_embeddings else ''),
+            weights_file=weights_file, binary=True,
             # standard embedding std
             # https://github.com/pytorch/pytorch/blob/ecbf6f99e6a4e373105133b31534c9fb50f2acca/torch/nn/modules/sparse.py#L106
-            random_std=1, **kwargs)
+            random_std=1, random_embeddings=random_embeddings, **kwargs)
 
 
 class Glove(KeyedVectorModel):
@@ -841,16 +842,16 @@ class Glove(KeyedVectorModel):
 
     identifier = 'glove'
 
-    def __init__(self, weights='glove.840B.300d.txt', **kwargs):
+    def __init__(self, weights='glove.840B.300d.txt', random_embeddings=False, **kwargs):
         from gensim.scripts.glove2word2vec import glove2word2vec
         weights_file = os.path.join(_ressources_dir, 'glove', weights)
         word2vec_weightsfile = weights_file + '.word2vec'
         if not os.path.isfile(word2vec_weightsfile):
             glove2word2vec(weights_file, word2vec_weightsfile)
         super(Glove, self).__init__(
-            identifier=self.identifier, weights_file=word2vec_weightsfile,
+            identifier=self.identifier + ('-untrained' if random_embeddings else ''), weights_file=word2vec_weightsfile,
             # std from https://gist.github.com/MatthieuBizien/de26a7a2663f00ca16d8d2558815e9a6#file-fast_glove-py-L16
-            random_std=.01, **kwargs)
+            random_std=.01, random_embeddings=random_embeddings, **kwargs)
 
 
 class RecursiveNeuralTensorNetwork(BrainModel):
