@@ -26,7 +26,7 @@ requirements = [
     "lm_1b @ git+https://github.com/mschrimpf/lm_1b.git@1ff7382",
     "nbsvm",
     # the following require pytorch>=0.4 which is incompatible with `architecture_sampling` which requires =0.2.0
-    "OpenNMT-py @ git+https://github.com/williamrainer/OpenNMT-py.git@cdc8f37",
+    "OpenNMT-py @ git+https://github.com/mschrimpf/OpenNMT-py.git@f339063",
     "text @ git+https://github.com/pytorch/text.git",
 
     "transformers",

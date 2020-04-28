@@ -399,7 +399,7 @@ class Transformer(PytorchWrapper, BrainModel):
 
     identifier = 'transformer'
 
-    def __init__(self):
+    def __init__(self, untrained=False):
         weights = os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')
         from onmt.opts import add_md_help_argument, translate_opts
         from onmt.translate.translator import build_translator
@@ -408,15 +408,16 @@ class Transformer(PytorchWrapper, BrainModel):
         add_md_help_argument(parser)
         translate_opts(parser, weights)
         opt = parser.parse_args(['-batch_size', '1'])
-        translator = build_translator(opt, report_score=True)
+        translator = build_translator(opt, report_score=True, untrained=untrained)
 
         self._model_container = self.TransformerContainer(translator, opt)
         self.vocab_index = {word: index for index, word in
                             enumerate(self._model_container.translator.fields["src"].vocab.freqs)}
         index_vocab = {index: word for word, index in self.vocab_index.items()}
         self._model_container.index_vocab = index_vocab
-        super(Transformer, self).__init__(model=self._model_container, identifier=self.identifier,
-                                          reset=lambda: None)  # transformer is feed-forward
+        super(Transformer, self).__init__(
+            identifier=self.identifier + ('-untrained' if untrained else ''),
+            model=self._model_container, reset=lambda: None)  # transformer is feed-forward
 
     def __call__(self, *args, average_sentence=True, **kwargs):
         if self.mode == BrainModel.Modes.recording:
@@ -440,7 +441,7 @@ class Transformer(PytorchWrapper, BrainModel):
             with tempfile.NamedTemporaryFile(mode='w+') as file:
                 # separating sentences with newline, combined with a batch size of 1
                 # will lead to one set of activations per sentence (albeit multiple words).
-                if isinstance(sentences, np.ndarray):
+                if isinstance(sentences, np.ndarray) and not isinstance(sentences[0], str):
                     sentences = [" ".join([self.index_vocab[index] for index in sentences])]
                 file.write('\n'.join(sentences) + '\n')
                 file.flush()
@@ -929,6 +930,7 @@ model_pool = {
     Glove.identifier: LazyLoad(Glove),
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     Transformer.identifier: LazyLoad(Transformer),
+    Transformer.identifier + '-untrained': LazyLoad(lambda: Transformer(untrained=True)),
     ETM_topicspace.identifier: LazyLoad(ETM_topicspace),
     ETM_featurespace.identifier: LazyLoad(ETM_featurespace),
     Pereira2018NonLanguage.identifier: LazyLoad(Pereira2018NonLanguage),
