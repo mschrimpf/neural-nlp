@@ -277,19 +277,19 @@ class LM1B(BrainModel):
 
     identifier = 'lm_1b'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b')):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b'), reset_weights=False):
         super().__init__()
         self._logger = logging.getLogger(self.__class__.__name__)
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
-                                ckpt=os.path.join(weights, 'ckpt-*'))
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)
+                                ckpt=os.path.join(weights, 'ckpt-*'),
+                                reset_weights=reset_weights)
+        self._extractor = ActivationsExtractorHelper(identifier=identifier + ('-untrained' if reset_weights else ''),
+                                                     get_activations=self._get_activations, reset=self._initialize)
         self._extractor.insert_attrs(self)
         self._vocab_index = self._encoder.vocab._word_to_id
         self._index_vocab = {index: word for word, index in self._vocab_index.items()}
-        self._is_initialized = False
 
     @property
     def vocab_size(self):
@@ -315,6 +315,7 @@ class LM1B(BrainModel):
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
         elif self.mode == BrainModel.Modes.tokens_to_features:
+            self._initialize()  # reset
             readout_layer = self.default_layers[-1]
             return self._encode_sentence(*args, layers=[readout_layer], **kwargs)[readout_layer]
 
@@ -368,10 +369,7 @@ class LM1B(BrainModel):
         return layer_activations
 
     def _initialize(self):
-        if self._is_initialized:
-            return
         self._encoder.sess.run(self._encoder.t['states_init'])
-        self._is_initialized = True
 
     def available_layers(self, filter_inputs=True):
         return [tensor_name for tensor_name in self._encoder.t if not filter_inputs or not tensor_name.endswith('_in')]
@@ -924,6 +922,7 @@ model_pool = {
     SentenceLength.identifier: LazyLoad(SentenceLength),
     SkipThoughts.identifier: LazyLoad(SkipThoughts),
     LM1B.identifier: LazyLoad(LM1B),
+    LM1B.identifier + '-untrained': LazyLoad(lambda: LM1B(reset_weights=True)),
     Word2Vec.identifier: LazyLoad(Word2Vec),
     Word2Vec.identifier + '-untrained': LazyLoad(lambda: Word2Vec(random_embeddings=True)),
     Glove.identifier: LazyLoad(Glove),
