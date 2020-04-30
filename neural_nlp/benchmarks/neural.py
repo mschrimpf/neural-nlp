@@ -162,8 +162,6 @@ class Blank2014VoxelEncoding(Benchmark):
         score = self._metric(model_activations, self._target_assembly)
 
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
-        raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
-            raw_neuroids[coord].values for coord in ['subject_UID', 'fROI_area']])]
         score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
