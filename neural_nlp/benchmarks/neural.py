@@ -311,9 +311,10 @@ class _PereiraBenchmark(Benchmark):
         # Additionally, the Pereira data also has voxels from DMN, visual etc. but we care about language here.
         language_neuroids = raw_neuroids.sel(atlas='language', _apply_raw=False)
         aggregate_raw = aggregate_neuroid_scores(language_neuroids, subject_column='subject')
-        score = consistency(aggregate_raw, self.ceiling)
+        score = consistency(aggregate_raw, self.ceiling.sel(aggregation='center'))
         score.attrs['raw'] = aggregate_raw
         score.attrs['ceiling'] = self.ceiling
+        score.attrs['description'] = "ceiling-normalized score"
         return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
@@ -803,6 +804,7 @@ def ceil_neuroids(raw_neuroids, ceiling, subject_column='subject'):
     ceiled_neuroids.attrs['ceiling'] = ceiling.raw
     score = aggregate_neuroid_scores(ceiled_neuroids, subject_column)
     score.attrs['ceiling'] = ceiling
+    score.attrs['description'] = "per-neuroid ceiling-normalized score"
     return score
 
 
@@ -811,6 +813,8 @@ def aggregate_neuroid_scores(neuroid_scores, subject_column):
     center, error = subject_scores.median(subject_column), standard_error_of_the_mean(subject_scores, subject_column)
     score = Score([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
     score.attrs['raw'] = neuroid_scores
+    score.attrs['description'] = "score aggregated by taking median of neuroids per subject, " \
+                                 "then median of subject scores"
     return score
 
 
