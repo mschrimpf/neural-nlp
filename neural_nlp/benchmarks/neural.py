@@ -455,51 +455,6 @@ class PereiraEncoding(_PereiraBenchmark):
         super(PereiraEncoding, self).__init__(metric=metric, **kwargs)
 
 
-class PereiraLanguageResidualsEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraLanguageResidualsEncoding, self).__init__()
-        self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
-
-
-class PereiraICAEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraICAEncoding, self).__init__(data_version='ICA')
-
-
-class PereiraDemeanEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraDemeanEncoding, self).__init__(data_version='Demean')
-
-
-class PereiraNovisaudEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraNovisaudEncoding, self).__init__(data_version='NoVisAud')
-
-
 class PereiraDecoding(_PereiraBenchmark):
     """
     data source:
@@ -636,53 +591,6 @@ def Fedorenko2016Encoding(identifier):
     return _Fedorenko2016(identifier=identifier, metric=metric)
 
 
-def Fedorenko2016V2Encoding(identifier):
-    """
-    Fedorenko benchmark WITH z-scored recordings
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=2))
-    return benchmark
-
-
-def Fedorenko2016AllEncoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=1))
-    return benchmark
-
-
-def Fedorenko2016AllV2Encoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=2))
-    return benchmark
-
-
-def Fedorenko2016NonLangEncoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language',
-                                                                     version=2))  # Version 2 - do not z-score in ecog.py
-    return benchmark
-
-
 # Version 3 - based on data March 24th
 def Fedorenko2016V3Encoding(identifier):
     """
@@ -723,48 +631,6 @@ def Fedorenko2016V3AllEncoding(identifier):
     """
     benchmark = Fedorenko2016Encoding(identifier)
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
-    return benchmark
-
-# Version 4 - based on data April 20th
-def Fedorenko2016V4Encoding(identifier):
-    """
-    Fedorenko benchmark, language electrodes
-    Data 04/20/2020: sentence_language_elec_max_window_no_demean_dat (not demeaned across sentences)
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=4))
-    return benchmark
-
-
-def Fedorenko2016V4NonLangEncoding(identifier):
-    """
-    Fedorenko benchmark, non-language electrodes (only sorted based on signal)
-    Data 04/20/2020: sentence_pre_sent_sent_change_elec_max_window_no_demean_dat (not demeaned across sentences)
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=4))
-    return benchmark
-
-
-def Fedorenko2016V4AllEncoding(identifier):
-    """
-    Fedorenko benchmark, all electrodes (only sorted based on signal)
-    Data 04/20/2020: sentence_pre_sent_sent_change_elec_max_window_no_demean_dat (not demeaned across sentences)
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=4))
     return benchmark
 
 
@@ -836,24 +702,12 @@ benchmark_pool = [
     ('Blank2014fROI-encoding', Blank2014fROIEncoding),
     ('Blank2014-rdm', Blank2014fROIRDM),
     ('Pereira2018-encoding', PereiraEncoding),
-    ('Pereira2018ICA-encoding', PereiraICAEncoding),
-    ('Pereira2018Demean-encoding', PereiraDemeanEncoding),
-    ('Pereira2018Novisaud-encoding', PereiraNovisaudEncoding),
-    ('Pereira2018_languageresiduals-encoding', PereiraLanguageResidualsEncoding),
     ('Pereira2018-decoding', PereiraDecoding),
     ('Pereira2018-rdm', PereiraRDM),
     ('Fedorenko2016-rdm', Fedorenko2016RDM),
-    ('Fedorenko2016-encoding', Fedorenko2016Encoding),
-    ('Fedorenko2016v2-encoding', Fedorenko2016V2Encoding),
-    ('Fedorenko2016all-encoding', Fedorenko2016AllEncoding),
-    ('Fedorenko2016allv2-encoding', Fedorenko2016AllV2Encoding),
-    ('Fedorenko2016nonlangv2-encoding', Fedorenko2016NonLangEncoding),
     ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
     ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
-    ('Fedorenko2016v4-encoding', Fedorenko2016V4Encoding),
-    ('Fedorenko2016v4nonlang-encoding', Fedorenko2016V4NonLangEncoding),
-    ('Fedorenko2016v4all-encoding', Fedorenko2016V4AllEncoding),
 ]
 for num_sentences in range(1, 9):
     benchmark_pool.append((f'Blank2014sentences{num_sentences}fROI-encoding',
