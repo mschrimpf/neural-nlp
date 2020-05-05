@@ -201,15 +201,16 @@ class SkipThoughts(BrainModel):
 
     identifier = 'skip-thoughts'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts'), load_weights=True):
         super().__init__()
         self._logger = logging.getLogger(fullname(self))
         import skipthoughts
         weights = weights + '/'
         model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
         self._encoder = LazyLoad(lambda: skipthoughts.Encoder(model))
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)  # not sure if this resets states on its own
+        self._extractor = ActivationsExtractorHelper(
+            identifier=self.identifier + ("-untrained" if not load_weights else ''),
+            get_activations=self._get_activations, reset=lambda: None)  # resets states on its own
         self._extractor.insert_attrs(self)
         # setup prioritized vocabulary entries to map to indices and back.
         # unfortunately it does not seem straight-forward to retrieve preferred words/tokens for the model, such as
@@ -923,6 +924,7 @@ def load_model(model_name):
 model_pool = {
     SentenceLength.identifier: LazyLoad(SentenceLength),
     SkipThoughts.identifier: LazyLoad(SkipThoughts),
+    SkipThoughts.identifier + '-untrained': LazyLoad(lambda: SkipThoughts(load_weights=False)),
     LM1B.identifier: LazyLoad(LM1B),
     LM1B.identifier + '-untrained': LazyLoad(lambda: LM1B(reset_weights=True)),
     Word2Vec.identifier: LazyLoad(Word2Vec),
