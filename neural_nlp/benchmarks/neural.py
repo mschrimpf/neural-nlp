@@ -1,3 +1,7 @@
+"""
+Neural benchmarks to probe match of model internals against human internals.
+"""
+
 import warnings
 
 import itertools
@@ -159,8 +163,14 @@ class Blank2014VoxelEncoding(Benchmark):
         model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         _logger.info('Scoring model')
-        score = self._metric(model_activations, self._target_assembly)
+        score = self.apply_metric(model_activations, self._target_assembly)
+        score = self.ceiling_normalize(score)
+        return score
 
+    def apply_metric(self, model_activations, target_assembly):
+        return self._metric(model_activations, target_assembly)
+
+    def ceiling_normalize(self, score):
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
         score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
@@ -227,15 +237,13 @@ class Blank2014SentencesfROIEncoding(Blank2014fROIEncoding):
             for stimulus_id in assembly['stimulus_id'].values]}]
         return assembly
 
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+    def apply_metric(self, model_activations, target_assembly):
         stimulus_ids = set(self._target_assembly['stimulus_id'].values)
         model_activations = model_activations[{'presentation': [
             stimulus_id in stimulus_ids for stimulus_id in model_activations['stimulus_id'].values]}]
-        _logger.info('Scoring model')
-        score = self._metric(model_activations, self._target_assembly)
+        return super(Blank2014SentencesfROIEncoding, self).apply_metric(model_activations, target_assembly)
 
+    def ceiling_normalize(self, score):
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
         if not hasattr(raw_neuroids, 'neuroid_id'):
             raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
@@ -257,6 +265,26 @@ class Blank2014fROIRDM(Blank2014fROIEncoding):
             comparison_coord='stimulus_id',
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
                                         kfold=True, test_size=None))
+        self._ceiler.extrapolation_dimension = 'subject_UID'
+        self._cross = CartesianProduct(dividers=['subject_UID'])
+
+    def apply_metric(self, source_assembly, target_assembly):
+        # transformation sub-selection would be left with only one coordinate for the neuroid dimension
+        # to work around this, we add another coord that will prevent the MultiIndex from collapsing
+        target_assembly['neuroid_id'] = 'neuroid', target_assembly['subject_UID'].values
+        target_assembly = target_assembly.__class__(target_assembly)  # reconstruct to ensure proper indexing
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: super(Blank2014fROIRDM, self).apply_metric(source_assembly, cross_assembly))
+        score = cross_scores.median(['subject_UID'])
+        score.attrs['raw'] = cross_scores
+        return score
+
+    def ceiling_normalize(self, score):
+        score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
+        return score
+
+    def post_process_ceilings(self, scores):
+        return scores
 
 
 class _PereiraBenchmark(Benchmark):
@@ -308,11 +336,7 @@ class _PereiraBenchmark(Benchmark):
         # normalize the neuroid aggregate by the overall ceiling aggregate.
         # Additionally, the Pereira data also has voxels from DMN, visual etc. but we care about language here.
         language_neuroids = raw_neuroids.sel(atlas='language', _apply_raw=False)
-        aggregate_raw = aggregate_neuroid_scores(language_neuroids, subject_column='subject')
-        score = consistency(aggregate_raw, self.ceiling.sel(aggregation='center'))
-        score.attrs['raw'] = aggregate_raw
-        score.attrs['ceiling'] = self.ceiling
-        score.attrs['description'] = "ceiling-normalized score"
+        score = aggregate_ceiling(language_neuroids, ceiling=self.ceiling, subject_column='subject')
         return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
@@ -512,9 +536,15 @@ class _Fedorenko2016:
         model_activations = read_words(candidate, stimulus_set,
                                        average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        score = self._metric(model_activations, self._target_assembly)
-        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score = self.apply_metric(model_activations, self._target_assembly)
+        score = self.ceiling_normalize(score)
+        return score
 
+    def apply_metric(self, model_activations, target_assembly):
+        return self._metric(model_activations, target_assembly)
+
+    def ceiling_normalize(self, score):
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
         score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
@@ -634,19 +664,35 @@ def Fedorenko2016V3AllEncoding(identifier):
     return benchmark
 
 
-def Fedorenko2016RDM(identifier):
+class Fedorenko2016V3RDM(_Fedorenko2016):
     """
     data source:
         Fedorenko et al., PNAS 2016
         https://www.pnas.org/content/113/41/E6256
     """
-    metric = RDMCrossValidated(
-        comparison_coord='stimulus_id',
-        crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
-                                    # doesn't work because train_size is deemed too small.
-                                    # even though `train` is not needed, CrossValidation still splits it that way
-                                    splits=5, kfold=True, test_size=None))
-    return _Fedorenko2016(identifier=identifier, metric=metric)
+
+    def __init__(self, identifier):
+        metric = RDMCrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
+                                        # doesn't work because train_size is deemed too small.
+                                        # even though `train` is not needed, CrossValidation still splits it that way
+                                        splits=5, kfold=True, test_size=None))
+        super(Fedorenko2016V3RDM, self).__init__(identifier=identifier, metric=metric)
+        self._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+        self._ceiler.extrapolation_dimension = 'subject_UID'
+        self._cross = CartesianProduct(dividers=['subject_UID'])
+
+    def apply_metric(self, source_assembly, target_assembly):
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: super(Fedorenko2016V3RDM, self).apply_metric(source_assembly, cross_assembly))
+        score = cross_scores.median(['subject_UID'])
+        score.attrs['raw'] = cross_scores
+        return score
+
+    def ceiling_normalize(self, score):
+        score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
+        return score
 
 
 def aggregate(score, combine_layers=True):
@@ -691,6 +737,15 @@ def consistency_neuroids(neuroids, ceiling_neuroids):
     neuroids = type(neuroids)(values, coords={coord: (dims, values) for coord, dims, values in walk_coords(neuroids)},
                               dims=neuroids.dims)
     return neuroids
+
+
+def aggregate_ceiling(neuroid_scores, ceiling, subject_column='subject'):
+    aggregate_raw = aggregate_neuroid_scores(neuroid_scores, subject_column=subject_column)
+    score = consistency(aggregate_raw, ceiling.sel(aggregation='center'))
+    score.attrs['raw'] = aggregate_raw
+    score.attrs['ceiling'] = ceiling
+    score.attrs['description'] = "ceiling-normalized score"
+    return score
 
 
 def consistency(score, ceiling):
