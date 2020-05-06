@@ -94,14 +94,13 @@ class ETM(BrainModel):
 
     def __init__(self, weights_file='rho_100_20ng_min_df_2.npy', vocab_file='vocab_100_20ng_min_df_2.pkl',
                  emb_size=300, random_embeddings=False, random_std=1):
+        super().__init__()
+        self._logger = logging.getLogger(fullname(self))
+
         weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
         vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
-
-        super().__init__()
-        self.emb_size = emb_size
-
         self.weights = np.load(weights_file)
-
+        self.emb_size = emb_size
         with open(vocab_file, 'rb') as f:
             self.vocab = pickle.load(f)
         self.vocab_index = {word: index for index, word in enumerate(self.vocab)}
@@ -138,6 +137,7 @@ class ETM(BrainModel):
             words = [self.index_vocab[index] for index in sentence]
         feature_vectors = []
         for word in words:
+            word = word.lower()
             if word in self.vocab:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
