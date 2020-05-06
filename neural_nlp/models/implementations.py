@@ -92,16 +92,11 @@ class TopicETM(BrainModel):
     available_layers = ['projection']
     default_layers = available_layers
 
-    def __init__(self, identifier,
-                 weights_file,
-                 vocab_file,
-                 emb_size,
-                 binary=False):
+    def __init__(self, identifier, weights_file, vocab_file, emb_size, random_embeddings=False, random_std=1, binary=False):
 
         super().__init__()
         self.emb_size = emb_size
 
-        self.weights = weights_file
         self.weights = np.load(weights_file)
 
         with open(vocab_file, 'rb') as f:
@@ -109,13 +104,21 @@ class TopicETM(BrainModel):
         self.vocab_index = {word: index for index, word in enumerate(self.vocab)}
         self.index_vocab = {index: word for index, word in enumerate(self.vocab)}
 
-        wordEmb_TopicSpace = {}
-        for elm in tqdm(self.vocab, desc='vocab'):
-            i = self.vocab.index(elm)  # get index of word
-            wordEmb_TopicSpace[elm] = self.weights[:, i]
-        self.wordEmb_TopicSpace = wordEmb_TopicSpace
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
+        if random_embeddings:
+            self._logger.debug(f"Replacing embeddings with random N(0, {random_std})")
+            random_embedding = RandomState(0).randn(len(self.vocab), self.emb_size) * random_std
+            self.wordEmb_TopicSpace = {word: random_embedding[i] for i, word in enumerate(sorted(self.vocab))}
+            self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
+        else:
+            wordEmb_TopicSpace = {}
+            for elm in tqdm(self.vocab, desc='vocab'):
+                i = self.vocab.index(elm)  # get index of word
+                wordEmb_TopicSpace[elm] = self.weights[i]
+            self.wordEmb_TopicSpace = wordEmb_TopicSpace
+            self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
+                                                     reset=lambda: None)
+
         self._extractor.insert_attrs(self)
         self._logger = logging.getLogger(self.__class__.__name__)
 
@@ -162,29 +165,13 @@ class TopicETM(BrainModel):
         return len(self.vocab)
 
 
-class ETM_topicspace(TopicETM):
-    """Uses the distributed representation of topics from the ETM as embedding features"""
-
-    identifier = TopicETM.identifier
-
-    def __init__(self, weights_file='normalized_betas_50K.npy',
-                 vocab_file='vocab_50K.pkl',
-                 emb_size=100):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
-        emb_size = emb_size
-
-        super(ETM_topicspace, self).__init__(identifier=self.identifier, weights_file=weights_file,
-                                             vocab_file=vocab_file, emb_size=emb_size)
-
-
 class ETM_featurespace(TopicETM):
     """Uses the jointly learned embedding space for words and topics from the ETM as embedding features"""
 
     identifier = TopicETM.identifier + '-featurespace'
 
-    def __init__(self, weights_file='rho-50-wikitext_df1.npy',
-                 vocab_file='vocab_wikitext_df_1.pkl',
+    def __init__(self, weights_file='rho_100_20ng_min_df_2.npy',
+                 vocab_file='vocab_100_20ng_min_df_2.pkl',
                  emb_size=300):
         weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
         vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
@@ -933,7 +920,6 @@ model_pool = {
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     Transformer.identifier: LazyLoad(Transformer),
     Transformer.identifier + '-untrained': LazyLoad(lambda: Transformer(untrained=True)),
-    ETM_topicspace.identifier: LazyLoad(ETM_topicspace),
     ETM_featurespace.identifier: LazyLoad(ETM_featurespace),
     Pereira2018NonLanguage.identifier: LazyLoad(Pereira2018NonLanguage),
 }
@@ -944,7 +930,6 @@ model_layers = {
     Word2Vec.identifier: Word2Vec.default_layers,
     Glove.identifier: Glove.default_layers,
     Transformer.identifier: Transformer.default_layers,
-    ETM_topicspace.identifier: ETM_topicspace.default_layers,
     ETM_featurespace.identifier: ETM_featurespace.default_layers,
     Pereira2018NonLanguage.identifier: Pereira2018NonLanguage.default_layers,
 }
