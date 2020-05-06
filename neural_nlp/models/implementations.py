@@ -106,7 +106,7 @@ class TopicETM(BrainModel):
 
         if random_embeddings:
             self._logger.debug(f"Replacing embeddings with random N(0, {random_std})")
-            random_embedding = RandomState(0).randn(len(self.vocab), emb_size) * random_std
+            random_embedding = RandomState(0).randn(len(self.vocab), self.emb_size) * random_std
             self.wordEmb_TopicSpace = {word: random_embedding[i] for i, word in enumerate(sorted(self.vocab))}
             self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._get_activations,
                                                      reset=lambda: None)
