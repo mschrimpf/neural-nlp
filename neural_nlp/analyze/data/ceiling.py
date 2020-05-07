@@ -83,7 +83,7 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding', ytick_formattin
     elif benchmark.startswith('Pereira'):
         raw_ceilings = ceiling.raw.raw.sel(atlas='language')
         bootstrapped_params = ceiling.raw.bootstrapped_params.sel(atlas='language')
-        bootstrapped_params = bootstrapped_params.median('neuroid')
+        bootstrapped_params = bootstrapped_params.median(benchmark_impl._ceiler.extrapolation_dimension)
     else:
         raw_ceilings = ceiling.raw.raw
     subject_column = "sub_" + subject_columns[benchmark]
@@ -92,7 +92,8 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding', ytick_formattin
     jitter = .25 * step_size
     rng = RandomState(0)
     x = num_splits['num_subjects'].values + (-jitter / 2 + jitter * rng.rand(len(num_splits['num_subjects'])))
-    y = num_splits.median('neuroid').values if not benchmark.startswith('Futrell') else num_splits.values
+    y = num_splits.median(benchmark_impl._ceiler.extrapolation_dimension).values \
+        if not benchmark.startswith('Futrell') else num_splits.values
     ax.scatter(x, y, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
