@@ -259,8 +259,9 @@ class LM1B(BrainModel):
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
                                 ckpt=os.path.join(weights, 'ckpt-*'),
                                 reset_weights=reset_weights)
-        self._extractor = ActivationsExtractorHelper(identifier=identifier + ('-untrained' if reset_weights else ''),
-                                                     get_activations=self._get_activations, reset=self._initialize)
+        self._extractor = ActivationsExtractorHelper(
+            identifier=self.identifier + ('-untrained' if reset_weights else ''),
+            get_activations=self._get_activations, reset=self._initialize)
         self._extractor.insert_attrs(self)
         self._vocab_index = self._encoder.vocab._word_to_id
         self._index_vocab = {index: word for word, index in self._vocab_index.items()}
