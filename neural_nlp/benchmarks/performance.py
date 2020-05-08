@@ -1,10 +1,10 @@
 # coding=utf-8
-import os
-import pickle
 import random
 
 import logging
 import numpy as np
+import os
+import pickle
 import torch
 from numpy.random.mtrand import RandomState
 from pathlib import Path
@@ -15,7 +15,7 @@ from tqdm import tqdm, trange
 
 from brainscore.metrics import Score
 from brainscore.utils import LazyLoad
-from neural_nlp.models.implementations import BrainModel
+from neural_nlp.models.implementations import TaskModel
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +250,8 @@ class _PerformanceBenchmark:
         self.seed = seed
         self.kwargs = kwargs
 
-    def __call__(self, model: BrainModel):
-        model.mode = BrainModel.Modes.tokens_to_features
+    def __call__(self, model: TaskModel):
+        model.mode = TaskModel.Modes.tokens_to_features
         set_seed(self.seed)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logger.debug(f"Using block size {self.block_size} for {model.identifier}")

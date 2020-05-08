@@ -23,11 +23,23 @@ _ressources_dir = (Path(__file__).parent / '..' / '..' / 'ressources' / 'models'
 
 
 class BrainModel:
-    Modes = Enum('Mode', 'recording tokens_to_features sentence_features')
+    Modes = Enum('Mode', 'recording')
+
+    def __call__(self, sentences):
+        """
+        Record representations in response to sentences. Ideally this would be localized to a
+        :param sentences:
+        :return:
+        """
+        raise NotImplementedError()
+
+
+class TaskModel:
+    Modes = Enum('Mode', 'tokens_to_features sentence_features')
 
     def __init__(self):
-        super(BrainModel, self).__init__()
-        self._mode = self.Modes.recording
+        super(TaskModel, self).__init__()
+        self._mode = BrainModel.Modes.recording  # run as BrainModel by default
 
     @property
     def mode(self):
@@ -35,11 +47,8 @@ class BrainModel:
 
     @mode.setter
     def mode(self, value):
-        assert value in self.Modes
+        assert value in TaskModel.Modes or value in BrainModel.Modes
         self._mode = value
-
-    def __call__(self, sentences):
-        raise NotImplementedError()
 
     def tokenize(self, text):
         raise NotImplementedError()
@@ -62,7 +71,10 @@ class BrainModel:
         raise NotImplementedError()
 
 
-class SentenceLength(BrainModel):
+class SentenceLength(BrainModel, TaskModel):
+    """
+    control model
+    """
     available_layers = ['sentence-length']
     default_layers = available_layers
 
@@ -84,8 +96,11 @@ class SentenceLength(BrainModel):
         return {self.available_layers[0]: np.array(sentence_lengths)}
 
 
-class ETM(BrainModel):
-    """https://arxiv.org/abs/1907.04907"""
+class ETM(BrainModel, TaskModel):
+    """
+    Dieng et al., 2019
+    https://arxiv.org/abs/1907.04907
+    """
 
     identifier = 'ETM'
 
@@ -127,7 +142,7 @@ class ETM(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             return self._encode_sentence(*args, **kwargs)
 
     def _encode_sentence(self, sentence):
@@ -167,8 +182,9 @@ class ETM(BrainModel):
         return len(self.vocab)
 
 
-class SkipThoughts(BrainModel):
+class SkipThoughts(BrainModel, TaskModel):
     """
+    Kiros et al., 2015
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
 
@@ -218,7 +234,7 @@ class SkipThoughts(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             return self._encode_sentence(*args, **kwargs)
 
     def _get_activations(self, sentences, layers):
@@ -244,8 +260,9 @@ class SkipThoughts(BrainModel):
     default_layers = available_layers
 
 
-class LM1B(BrainModel):
+class LM1B(BrainModel, TaskModel):
     """
+    Jozefowicz et al., 2016
     https://arxiv.org/pdf/1602.02410.pdf
     """
 
@@ -289,7 +306,7 @@ class LM1B(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             self._initialize()  # reset
             readout_layer = self.default_layers[-1]
             return self._encode_sentence(*args, layers=[readout_layer], **kwargs)[readout_layer]
@@ -367,8 +384,9 @@ def word_mean(layer_activations):
     return layer_activations
 
 
-class Transformer(PytorchWrapper, BrainModel):
+class Transformer(PytorchWrapper, BrainModel, TaskModel):
     """
+    Vaswani & Shazeer & Parmar & Uszkoreit & Jones & Gomez & Kaiser & Polosukhin, 2017
     https://arxiv.org/pdf/1706.03762.pdf
     """
 
@@ -398,7 +416,7 @@ class Transformer(PytorchWrapper, BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             encodings = self._model_container(*args, **kwargs)
             # the onmt implementation concats things together, undo this
             return encodings[0].reshape(-1, self.features_size)
@@ -473,7 +491,7 @@ class Transformer(PytorchWrapper, BrainModel):
         return len(self._model_container.translator.fields["src"].vocab)
 
 
-class _PytorchTransformerWrapper(BrainModel):
+class _PytorchTransformerWrapper(BrainModel, TaskModel):
     def __init__(self, identifier, tokenizer, model, layers, sentence_average, tokenizer_special_tokens=()):
         super(_PytorchTransformerWrapper, self).__init__()
         self._logger = logging.getLogger(fullname(self))
@@ -491,9 +509,9 @@ class _PytorchTransformerWrapper(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor, average_sentence=average_sentence,
                                              sentence_averaging=self._sentence_average, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             return self._tokens_to_features(*args, **kwargs)
-        elif self.mode == BrainModel.Modes.sentence_features:
+        elif self.mode == TaskModel.Modes.sentence_features:
             return self._sentence_features(*args, **kwargs)
         else:
             raise ValueError(f"Unknown mode {self.mode}")
@@ -710,7 +728,7 @@ class _PytorchTransformerWrapper(BrainModel):
                 yield context_ids
 
 
-class KeyedVectorModel(BrainModel):
+class KeyedVectorModel(BrainModel, TaskModel):
     """
     Lookup-table-like models where each word has an embedding.
     To retrieve the sentence activation, we take the mean of the word embeddings.
@@ -738,7 +756,7 @@ class KeyedVectorModel(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(stimuli, *args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             stimuli = " ".join(self._model.index2word[index] for index in stimuli)
             return self._encode_sentence(stimuli, *args, **kwargs)
 
@@ -796,6 +814,7 @@ class KeyedVectorModel(BrainModel):
 
 class Word2Vec(KeyedVectorModel):
     """
+    Mikolov et al., 2013
     https://arxiv.org/pdf/1310.4546.pdf
     """
 
@@ -813,6 +832,7 @@ class Word2Vec(KeyedVectorModel):
 
 class Glove(KeyedVectorModel):
     """
+    Pennington et al., 2014
     http://www.aclweb.org/anthology/D14-1162
     """
 
@@ -830,7 +850,7 @@ class Glove(KeyedVectorModel):
             random_std=.01, random_embeddings=random_embeddings, **kwargs)
 
 
-class RecursiveNeuralTensorNetwork(BrainModel):
+class RecursiveNeuralTensorNetwork(BrainModel, TaskModel):
     """
     http://www.aclweb.org/anthology/D13-1170
     """
