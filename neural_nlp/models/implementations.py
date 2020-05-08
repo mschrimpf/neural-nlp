@@ -871,37 +871,6 @@ class RecursiveNeuralTensorNetwork(BrainModel, TaskModel):
         return result.values
 
 
-class Pereira2018NonLanguage(BrainModel):
-    identifier = 'Pereira2018-non_language'
-    default_layers = available_layers = ['precomputed']
-
-    def __init__(self):
-        super(Pereira2018NonLanguage, self).__init__()
-        from neural_nlp.benchmarks.neural import PereiraEncoding
-        assembly = PereiraEncoding()._target_assembly
-        self._assembly = assembly[{'neuroid': [atlas in ['visual', 'auditory'] for atlas in assembly['atlas'].values]}]
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)
-        self._extractor.insert_attrs(self)
-
-    def __call__(self, *args, average_sentence=True, **kwargs):
-        if not average_sentence:
-            raise NotImplementedError("we only have the sentence signal from the Pereira2018 data")
-        return self._extractor(*args, **kwargs)
-
-    def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, self.available_layers)
-        stimuli = self._assembly.stimulus_set[self._assembly.stimulus_set['sentence'].isin(sentences)]
-        if len(stimuli) == 0:
-            raise NotImplementedError("this pseudo-model only works for the Pereira2018 stimuli")
-        assembly = self._assembly[{'presentation': [stimulus_id in stimuli['stimulus_id'].values
-                                                    for stimulus_id in self._assembly['stimulus_id'].values]}]
-        assert len(assembly['presentation']) == len(sentences)
-        assembly = assembly.transpose('presentation', 'neuroid')
-        # there are nans in the assembly, but the regression is going to take care of that for us
-        return {self.available_layers[0]: assembly.values}
-
-
 def _call_conditional_average(*args, extractor, average_sentence, sentence_averaging, **kwargs):
     if average_sentence:
         handle = extractor.register_activations_hook(sentence_averaging)
@@ -929,7 +898,6 @@ model_pool = {
     Transformer.identifier + '-untrained': LazyLoad(lambda: Transformer(untrained=True)),
     ETM.identifier: LazyLoad(ETM),
     ETM.identifier + '-untrained': LazyLoad(lambda: ETM(random_embeddings=True)),
-    Pereira2018NonLanguage.identifier: LazyLoad(Pereira2018NonLanguage),
 }
 model_layers = {
     SentenceLength.identifier: SentenceLength.default_layers,
@@ -939,7 +907,6 @@ model_layers = {
     Glove.identifier: Glove.default_layers,
     Transformer.identifier: Transformer.default_layers,
     ETM.identifier: ETM.default_layers,
-    Pereira2018NonLanguage.identifier: Pereira2018NonLanguage.default_layers,
 }
 # untrained layers are the same as trained ones
 model_layers = {**model_layers, **{f"{identifier}-untrained": layers for identifier, layers in model_layers.items()}}
