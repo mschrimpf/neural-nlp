@@ -1,3 +1,7 @@
+"""
+Neural benchmarks to probe match of model internals against human internals.
+"""
+
 import warnings
 
 import itertools
@@ -159,8 +163,14 @@ class Blank2014VoxelEncoding(Benchmark):
         model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         _logger.info('Scoring model')
-        score = self._metric(model_activations, self._target_assembly)
+        score = self.apply_metric(model_activations, self._target_assembly)
+        score = self.ceiling_normalize(score)
+        return score
 
+    def apply_metric(self, model_activations, target_assembly):
+        return self._metric(model_activations, target_assembly)
+
+    def ceiling_normalize(self, score):
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
         score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
@@ -227,15 +237,13 @@ class Blank2014SentencesfROIEncoding(Blank2014fROIEncoding):
             for stimulus_id in assembly['stimulus_id'].values]}]
         return assembly
 
-    def __call__(self, candidate):
-        _logger.info('Computing activations')
-        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+    def apply_metric(self, model_activations, target_assembly):
         stimulus_ids = set(self._target_assembly['stimulus_id'].values)
         model_activations = model_activations[{'presentation': [
             stimulus_id in stimulus_ids for stimulus_id in model_activations['stimulus_id'].values]}]
-        _logger.info('Scoring model')
-        score = self._metric(model_activations, self._target_assembly)
+        return super(Blank2014SentencesfROIEncoding, self).apply_metric(model_activations, target_assembly)
 
+    def ceiling_normalize(self, score):
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
         if not hasattr(raw_neuroids, 'neuroid_id'):
             raw_neuroids['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
@@ -257,6 +265,26 @@ class Blank2014fROIRDM(Blank2014fROIEncoding):
             comparison_coord='stimulus_id',
             crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
                                         kfold=True, test_size=None))
+        self._ceiler.extrapolation_dimension = 'subject_UID'
+        self._cross = CartesianProduct(dividers=['subject_UID'])
+
+    def apply_metric(self, source_assembly, target_assembly):
+        # transformation sub-selection would be left with only one coordinate for the neuroid dimension
+        # to work around this, we add another coord that will prevent the MultiIndex from collapsing
+        target_assembly['neuroid_id'] = 'neuroid', target_assembly['subject_UID'].values
+        target_assembly = target_assembly.__class__(target_assembly)  # reconstruct to ensure proper indexing
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: super(Blank2014fROIRDM, self).apply_metric(source_assembly, cross_assembly))
+        score = cross_scores.median(['subject_UID'])
+        score.attrs['raw'] = cross_scores
+        return score
+
+    def ceiling_normalize(self, score):
+        score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
+        return score
+
+    def post_process_ceilings(self, scores):
+        return scores
 
 
 class _PereiraBenchmark(Benchmark):
@@ -308,11 +336,7 @@ class _PereiraBenchmark(Benchmark):
         # normalize the neuroid aggregate by the overall ceiling aggregate.
         # Additionally, the Pereira data also has voxels from DMN, visual etc. but we care about language here.
         language_neuroids = raw_neuroids.sel(atlas='language', _apply_raw=False)
-        aggregate_raw = aggregate_neuroid_scores(language_neuroids, subject_column='subject')
-        score = consistency(aggregate_raw, self.ceiling.sel(aggregation='center'))
-        score.attrs['raw'] = aggregate_raw
-        score.attrs['ceiling'] = self.ceiling
-        score.attrs['description'] = "ceiling-normalized score"
+        score = aggregate_ceiling(language_neuroids, ceiling=self.ceiling, subject_column='subject')
         return score
 
     def _apply_cross(self, source_assembly, cross_assembly):
@@ -455,51 +479,6 @@ class PereiraEncoding(_PereiraBenchmark):
         super(PereiraEncoding, self).__init__(metric=metric, **kwargs)
 
 
-class PereiraLanguageResidualsEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraLanguageResidualsEncoding, self).__init__()
-        self._target_assembly = LazyLoad(load_Pereira2018_Blank_languageresiduals)
-
-
-class PereiraICAEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraICAEncoding, self).__init__(data_version='ICA')
-
-
-class PereiraDemeanEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraDemeanEncoding, self).__init__(data_version='Demean')
-
-
-class PereiraNovisaudEncoding(PereiraEncoding):
-    """
-    data source:
-        Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
-    """
-
-    def __init__(self):
-        super(PereiraNovisaudEncoding, self).__init__(data_version='NoVisAud')
-
-
 class PereiraDecoding(_PereiraBenchmark):
     """
     data source:
@@ -557,9 +536,15 @@ class _Fedorenko2016:
         model_activations = read_words(candidate, stimulus_set,
                                        average_sentence=self._average_sentence, copy_columns=['stimulus_id'])
         assert (model_activations['stimulus_id'].values == self._target_assembly['stimulus_id'].values).all()
-        score = self._metric(model_activations, self._target_assembly)
-        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
+        score = self.apply_metric(model_activations, self._target_assembly)
+        score = self.ceiling_normalize(score)
+        return score
 
+    def apply_metric(self, model_activations, target_assembly):
+        return self._metric(model_activations, target_assembly)
+
+    def ceiling_normalize(self, score):
+        raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
         score = ceil_neuroids(raw_neuroids, self.ceiling, subject_column='subject_UID')
         return score
 
@@ -636,53 +621,6 @@ def Fedorenko2016Encoding(identifier):
     return _Fedorenko2016(identifier=identifier, metric=metric)
 
 
-def Fedorenko2016V2Encoding(identifier):
-    """
-    Fedorenko benchmark WITH z-scored recordings
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=2))
-    return benchmark
-
-
-def Fedorenko2016AllEncoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=1))
-    return benchmark
-
-
-def Fedorenko2016AllV2Encoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=2))
-    return benchmark
-
-
-def Fedorenko2016NonLangEncoding(identifier):
-    """
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language',
-                                                                     version=2))  # Version 2 - do not z-score in ecog.py
-    return benchmark
-
-
 # Version 3 - based on data March 24th
 def Fedorenko2016V3Encoding(identifier):
     """
@@ -725,62 +663,36 @@ def Fedorenko2016V3AllEncoding(identifier):
     benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
     return benchmark
 
-# Version 4 - based on data April 20th
-def Fedorenko2016V4Encoding(identifier):
-    """
-    Fedorenko benchmark, language electrodes
-    Data 04/20/2020: sentence_language_elec_max_window_no_demean_dat (not demeaned across sentences)
 
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=4))
-    return benchmark
-
-
-def Fedorenko2016V4NonLangEncoding(identifier):
-    """
-    Fedorenko benchmark, non-language electrodes (only sorted based on signal)
-    Data 04/20/2020: sentence_pre_sent_sent_change_elec_max_window_no_demean_dat (not demeaned across sentences)
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=4))
-    return benchmark
-
-
-def Fedorenko2016V4AllEncoding(identifier):
-    """
-    Fedorenko benchmark, all electrodes (only sorted based on signal)
-    Data 04/20/2020: sentence_pre_sent_sent_change_elec_max_window_no_demean_dat (not demeaned across sentences)
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=4))
-    return benchmark
-
-
-def Fedorenko2016RDM(identifier):
+class Fedorenko2016V3RDM(_Fedorenko2016):
     """
     data source:
         Fedorenko et al., PNAS 2016
         https://www.pnas.org/content/113/41/E6256
     """
-    metric = RDMCrossValidated(
-        comparison_coord='stimulus_id',
-        crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
-                                    # doesn't work because train_size is deemed too small.
-                                    # even though `train` is not needed, CrossValidation still splits it that way
-                                    splits=5, kfold=True, test_size=None))
-    return _Fedorenko2016(identifier=identifier, metric=metric)
+
+    def __init__(self, identifier):
+        metric = RDMCrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
+                                        # doesn't work because train_size is deemed too small.
+                                        # even though `train` is not needed, CrossValidation still splits it that way
+                                        splits=5, kfold=True, test_size=None))
+        super(Fedorenko2016V3RDM, self).__init__(identifier=identifier, metric=metric)
+        self._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+        self._ceiler.extrapolation_dimension = 'subject_UID'
+        self._cross = CartesianProduct(dividers=['subject_UID'])
+
+    def apply_metric(self, source_assembly, target_assembly):
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: super(Fedorenko2016V3RDM, self).apply_metric(source_assembly, cross_assembly))
+        score = cross_scores.median(['subject_UID'])
+        score.attrs['raw'] = cross_scores
+        return score
+
+    def ceiling_normalize(self, score):
+        score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
+        return score
 
 
 def aggregate(score, combine_layers=True):
@@ -827,6 +739,15 @@ def consistency_neuroids(neuroids, ceiling_neuroids):
     return neuroids
 
 
+def aggregate_ceiling(neuroid_scores, ceiling, subject_column='subject'):
+    aggregate_raw = aggregate_neuroid_scores(neuroid_scores, subject_column=subject_column)
+    score = consistency(aggregate_raw, ceiling.sel(aggregation='center'))
+    score.attrs['raw'] = aggregate_raw
+    score.attrs['ceiling'] = ceiling
+    score.attrs['description'] = "ceiling-normalized score"
+    return score
+
+
 def consistency(score, ceiling):
     return score / ceiling
 
@@ -836,24 +757,12 @@ benchmark_pool = [
     ('Blank2014fROI-encoding', Blank2014fROIEncoding),
     ('Blank2014-rdm', Blank2014fROIRDM),
     ('Pereira2018-encoding', PereiraEncoding),
-    ('Pereira2018ICA-encoding', PereiraICAEncoding),
-    ('Pereira2018Demean-encoding', PereiraDemeanEncoding),
-    ('Pereira2018Novisaud-encoding', PereiraNovisaudEncoding),
-    ('Pereira2018_languageresiduals-encoding', PereiraLanguageResidualsEncoding),
     ('Pereira2018-decoding', PereiraDecoding),
     ('Pereira2018-rdm', PereiraRDM),
     ('Fedorenko2016-rdm', Fedorenko2016RDM),
-    ('Fedorenko2016-encoding', Fedorenko2016Encoding),
-    ('Fedorenko2016v2-encoding', Fedorenko2016V2Encoding),
-    ('Fedorenko2016all-encoding', Fedorenko2016AllEncoding),
-    ('Fedorenko2016allv2-encoding', Fedorenko2016AllV2Encoding),
-    ('Fedorenko2016nonlangv2-encoding', Fedorenko2016NonLangEncoding),
     ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
     ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
-    ('Fedorenko2016v4-encoding', Fedorenko2016V4Encoding),
-    ('Fedorenko2016v4nonlang-encoding', Fedorenko2016V4NonLangEncoding),
-    ('Fedorenko2016v4all-encoding', Fedorenko2016V4AllEncoding),
 ]
 for num_sentences in range(1, 9):
     benchmark_pool.append((f'Blank2014sentences{num_sentences}fROI-encoding',

@@ -1,6 +1,11 @@
+"""
+Behavioral benchmarks to probe match of model outputs against human outputs.
+"""
+
 import logging
 import numpy as np
 import xarray
+import xarray as xr
 from brainio_base.assemblies import NeuroidAssembly
 from brainio_collection.fetch import fullname
 from numpy.random.mtrand import RandomState
@@ -84,10 +89,12 @@ class Futrell2018Encoding(Benchmark):
         # and should thus not be used by themselves. Only the aggregate makes sense to report
         normalized_subject_scores = consistency(cross_scores.sel(aggregation='center'),
                                                 self.ceiling.sel(aggregation='center'))
-        score = normalized_subject_scores.mean('subject_id')
+        score = normalized_subject_scores.median('subject_id')
         std = normalized_subject_scores.std('subject_id')
         std['aggregation'] = 'error'
-        score = Score.merge(score.expand_dims('aggregation'), std.expand_dims('aggregation'))
+        # the MultiIndex tends to mess things up, so we get rid of it here
+        score, std = xr.DataArray(score).expand_dims('aggregation'), xr.DataArray(std).expand_dims('aggregation')
+        score = Score(Score.merge(score, std))
         score.attrs['raw'] = cross_scores
         score.attrs['ceiling'] = self.ceiling
         return score
