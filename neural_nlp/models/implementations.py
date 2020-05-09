@@ -906,12 +906,8 @@ model_pool = {
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     Transformer.identifier: LazyLoad(Transformer),
     Transformer.identifier + '-untrained': LazyLoad(lambda: Transformer(untrained=True)),
-<<<<<<< HEAD
-    ETM_featurespace.identifier: LazyLoad(ETM_featurespace),
-=======
     ETM.identifier: LazyLoad(ETM),
     ETM.identifier + '-untrained': LazyLoad(lambda: ETM(random_embeddings=True)),
->>>>>>> master
     Pereira2018NonLanguage.identifier: LazyLoad(Pereira2018NonLanguage),
 }
 model_layers = {
