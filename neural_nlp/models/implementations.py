@@ -532,7 +532,7 @@ class _PytorchTransformerWrapper(BrainModel):
         # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
         sequence_output = features_outputs[0]
         if any(self.identifier.startswith(first_token_model) for first_token_model in
-               ['bert', 'roberta', 'xlm', 'albert']):
+               ['bert', 'roberta', 'xlm', 'albert', 'distilbert', 'distilroberta']):
             # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L454
             return sequence_output[:, 0]  # sentence features from first token (usually CLS)
         elif any(self.identifier.startswith(last_token_model) for last_token_model in
