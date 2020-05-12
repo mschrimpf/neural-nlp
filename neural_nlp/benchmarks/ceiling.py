@@ -36,8 +36,9 @@ class HoldoutSubjectCeiling:
                     {'neuroid': [subject in subject_pool for subject in assembly[self.subject_column].values]}]
                 score = self.score(pool_assembly, subject_assembly, metric=metric)
                 # store scores
-                score = score.expand_dims(self.subject_column, _apply_raw=False)
-                score.__setitem__(self.subject_column, [subject], _apply_raw=False)
+                apply_raw = not hasattr(score.raw, self.subject_column)  # only propagate if column not part of score
+                score = score.expand_dims(self.subject_column, _apply_raw=apply_raw)
+                score.__setitem__(self.subject_column, [subject], _apply_raw=apply_raw)
                 scores.append(score)
             except NoOverlapException as e:
                 self._logger.debug(f"Ignoring no overlap {e}")
