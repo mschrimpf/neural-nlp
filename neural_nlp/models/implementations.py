@@ -357,7 +357,7 @@ class LM1B(BrainModel, TaskModel):
             # embeddings is `words x layers x (1 x 1024)`
             layer_activations[layer] = [embedding[i] for embedding in embeddings]
             # words x 1 x 1024 --> words x 1024
-            layer_activations[layer] = np.array(layer_activations[layer]).transpose(1, 0, 2).squeeze()
+            layer_activations[layer] = np.array(layer_activations[layer]).transpose(1, 0, 2).squeeze(axis=0)
         return layer_activations
 
     def _initialize(self):
