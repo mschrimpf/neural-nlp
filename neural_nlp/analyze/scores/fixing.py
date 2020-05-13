@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 import pickle
 import sys
 from pathlib import Path
@@ -50,7 +51,8 @@ def change():
         # recompute
         raw = unceiled_score.raw
         subject_scores = raw.groupby('subject').median('neuroid')
-        unceiled_error = median_absolute_deviation(subject_scores.values, axis=subject_scores.dims.index('subject'))
+        subject_values = np.nan_to_num(subject_scores.values, nan=0)
+        unceiled_error = median_absolute_deviation(subject_values, axis=subject_scores.dims.index('subject'))
         ceiled_error = unceiled_error / ceiled_score.ceiling.sel(aggregation='center').values
         # set
         ceiled_score.loc[{'aggregation': 'error'}] = ceiled_error  # will apply to unceiled score due to apply_raw
