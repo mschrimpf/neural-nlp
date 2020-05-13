@@ -9,6 +9,7 @@ import logging
 import numpy as np
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, array_is_element
 from numpy.random.mtrand import RandomState
+from scipy.stats import median_absolute_deviation
 from tqdm import tqdm
 
 from brainscore.benchmarks import Benchmark
@@ -720,7 +721,10 @@ def ceil_neuroids(raw_neuroids, ceiling, subject_column='subject'):
 
 def aggregate_neuroid_scores(neuroid_scores, subject_column):
     subject_scores = neuroid_scores.groupby(subject_column).median()
-    center, error = subject_scores.median(subject_column), standard_error_of_the_mean(subject_scores, subject_column)
+    center = subject_scores.median(subject_column)
+    subject_values = np.nan_to_num(subject_scores.values, nan=0)  # mad cannot deal with all-nan in one axis, treat as 0
+    subject_axis = subject_scores.dims.index(subject_scores[subject_column].dims[0])
+    error = median_absolute_deviation(subject_values, axis=subject_axis)
     score = Score([center, error], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
     score.attrs['raw'] = neuroid_scores
     score.attrs['description'] = "score aggregated by taking median of neuroids per subject, " \
