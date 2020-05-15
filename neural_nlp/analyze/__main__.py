@@ -16,8 +16,9 @@ def paper_figures():
     matplotlib.rc('axes', edgecolor='black')
     matplotlib.rcParams['axes.spines.right'] = False
     matplotlib.rcParams['axes.spines.top'] = False
+    matplotlib.rcParams['svg.fonttype'] = 'none'  # export SVG as text, not path
 
-    annotated_models = ['ETM', 'glove', 'skip-thoughts', 'transformer',
+    annotated_models = ['ETM', 'glove', 'skip-thoughts', 'lm_1b', 'transformer',
                         'bert-base-uncased', 'bert-large-uncased', 'roberta-large',
                         'xlm-mlm-en-2048', 'xlnet-large-cased',
                         't5-small', 'albert-xxlarge-v2',
@@ -27,52 +28,65 @@ def paper_figures():
     neural_benchmarks = [f'{prefix}-encoding' for prefix in neural_data_identifiers]
     brain_data_identifiers = neural_data_identifiers + ['Futrell2018']
     brain_benchmarks = [f'{prefix}-encoding' for prefix in brain_data_identifiers]
-    # 1b: overall LM-neural correlation
-    scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding', best_layer=True, normalize=True)
     # 2a: per benchmark scores -- we can predict
-    _logger.info("Figures 1")
+    _logger.info("Figures 2a")
     for i, benchmark in enumerate(neural_benchmarks):
         bars.whole_best(benchmark=benchmark, annotate=i == 0)
     # 2b: scores are correlated
-    _logger.info("Figures 2")
-    scores.Pereira2018_experiment_correlations(best_layer=True, plot_correlation=False)  # within Pereira
+    _logger.info("Figures 2b")
+    settings = dict(best_layer=True, plot_correlation=False, plot_significance_stars=False)
+    scores.Pereira2018_experiment_correlations(**settings)  # within Pereira
     for comparison_benchmark in neural_benchmarks[1:]:
         scores.compare(benchmark1=neural_benchmarks[0], benchmark2=comparison_benchmark,
-                       best_layer=True, plot_ceiling=False, plot_correlation=False, identity_line=True)
+                       plot_ceiling=False, identity_line=True, **settings)
     # 3: LM predicts brain
     _logger.info("Figures 3")
     for neural_benchmark in neural_benchmarks:
         scores.compare(benchmark1='wikitext-2', benchmark2=neural_benchmark, best_layer=True, annotate=annotated_models,
-                       plot_ceiling=False, plot_significance_stars=False)
+                       plot_ceiling=False, plot_significance_stars=False, identity_line=False,
+                       tick_locator_base=0.1 if neural_benchmark.startswith('Blank') else 0.2,
+                       ylim=[-0.055, 0.5] if neural_benchmark.startswith('Blank') else None)
     # 4: neural/LM predicts behavior
-    scores.compare(benchmark1='overall_neural-encoding', benchmark2='Futrell2018-encoding',
-                   best_layer=True, annotate=False)
-    scores.compare(benchmark1='wikitext-2', benchmark2='Futrell2018-encoding', best_layer=True, annotate=False)
+    bars.whole_best(benchmark='Futrell2018-encoding', annotate=True)
+    behavior_ylim = 1.335
+    settings = dict(benchmark2='Futrell2018-encoding', best_layer=True, annotate=annotated_models, plot_ceiling=False,
+                    plot_significance_stars=False, ylim=[0, behavior_ylim])
+    scores.compare(benchmark1='overall_neural-encoding', **settings)
+    scores.compare(benchmark1='wikitext-2', **settings, identity_line=False)
     # 5: untrained predicts trained
     _logger.info("Figures 4")
-    for neural_benchmark in brain_benchmarks:
-        scores.untrained_vs_trained(benchmark=neural_benchmark)
-    # S1: cross-metrics
+    for benchmark in brain_benchmarks:
+        scores.untrained_vs_trained(benchmark=benchmark)
+
+    # S1: ceiling extrapolation
     _logger.info("Figures S1")
-    for benchmark_prefix in brain_data_identifiers:
-        scores.compare(benchmark1=f"{benchmark_prefix}-encoding", benchmark2=f"{benchmark_prefix}-rdm")
-    # S2: non language signal
-    _logger.info("Figures S2")
-    scores.compare(benchmark1='Fedorenko2016v3-encoding', benchmark2='Fedorenko2016v3nonlang-encoding',
-                   identity_line=True, plot_ceiling=False)
-    scores.Pereira_language_vs_other()
-    # S3: ceiling extrapolation
-    _logger.info("Figures S3")
     tick_formatting = {benchmark: formatting for benchmark, formatting in zip(brain_benchmarks, [1, 2, 2, 1])}
     for benchmark in brain_benchmarks:
         ceiling.plot_extrapolation_ceiling(benchmark=benchmark, ytick_formatting_frequency=tick_formatting[benchmark])
-    # S4: story context
-    _logger.info("Figures S4")
-    story_context.plot_num_sentences(model='gpt2-xl')
-    # S5: layers
+    # S2: cross-metrics
+    _logger.info("Figures S2")
+    for benchmark_prefix in brain_data_identifiers:
+        scores.compare(benchmark1=f"{benchmark_prefix}-encoding", benchmark2=f"{benchmark_prefix}-rdm")
+    # S4a: non language signal
+    _logger.info("Figures S4a")
+    scores.compare(benchmark1='Fedorenko2016v3-encoding', benchmark2='Fedorenko2016v3nonlang-encoding',
+                   identity_line=True, plot_ceiling=False)
+    scores.Pereira_language_vs_other()
+    # S5: GLUE
     _logger.info("Figures S5")
+    scores.compare_glue(benchmark2='Pereira2018-encoding')
+    # S7: individual benchmarks predict behavior
+    _logger.info("Figures S7")
+    for benchmark in neural_benchmarks:
+        scores.compare(benchmark1=benchmark, benchmark2='Futrell2018-encoding', best_layer=True, annotate=False,
+                       plot_ceiling=False, plot_significance_stars=False, ylim=[0, behavior_ylim])
+    # S8: layers
+    _logger.info("Figures S6")
     for benchmark in brain_benchmarks:
         layers.layer_preference(benchmark=benchmark)
+    # S9: story context
+    _logger.info("Figures S5")
+    story_context.plot_num_sentences(model='gpt2-xl')
 
 
 if __name__ == '__main__':
