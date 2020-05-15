@@ -233,17 +233,18 @@ def significance_stars(p, max_stars=5):
     return '*' * max([i for i in range(max_stars + 1) if p <= 0.5 / (10 ** i)])
 
 
-def collect_scores(benchmark, models, normalize=True):
-    store_file = Path(__file__).parent / f"scores-{benchmark}-{'normalized' if normalize else 'raw'}.csv"
+def collect_scores(benchmark, models, normalize=True, score_hook=None):
+    store_file = Path(__file__).parent / f"scores-{benchmark}-{'normalized' if normalize else 'raw'}" \
+                                         f"{'-hook' if score_hook else ''}.csv"
     stored = False
     if store_file.is_file():
         data = pd.read_csv(store_file)
         data = data[data['model'].isin(models)]
         stored = True
-    if not stored and benchmark.startswith('overall_neural'):
-        metric = benchmark[len('overall_neural-'):]
-        data = [collect_scores(benchmark=f"{part}-{metric}", models=models, normalize=normalize)
-                for part in overall_neural_benchmarks]
+    if not stored and benchmark.startswith('overall'):
+        metric = benchmark.split('-')[-1]
+        data = [collect_scores(benchmark=f"{part}-{metric}", models=models, normalize=normalize) for part in
+                (overall_neural_benchmarks if benchmark.startswith('overall_neural') else overall_benchmarks)]
         data = reduce(lambda left, right: pd.concat([left, right]), data)
         data = average_adjacent(data)
         data = choose_best_scores(data).dropna()  # need to choose best layer per benchmark here before averaging
@@ -257,6 +258,8 @@ def collect_scores(benchmark, models, normalize=True):
         for model in tqdm(models, desc='model scores'):
             try:
                 model_scores = score(benchmark=benchmark, model=model)
+                if score_hook:
+                    model_scores = score_hook(model_scores)
             except NotCachedError:
                 missing_models.append(model)
                 continue
@@ -304,20 +307,47 @@ def Pereira2018_experiment_correlations(best_layer=False, **kwargs):
     # plot
     colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
-    fig, ax = _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if best_layer else .2,
-                              score_annotations=None, xlabel='Pereira2018 (Exp. 2)', ylabel='Pereira2018 (Exp. 3)',
-                              **kwargs)
+    fig, ax = pyplot.subplots(figsize=(6, 6))
+    _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if best_layer else .2,
+                    score_annotations=None, xlabel='Pereira2018 (Exp. 2)', ylabel='Pereira2018 (Exp. 3)', ax=ax,
+                    **kwargs)
+    ax.set_xlim([0, 1.1])
+    ax.set_ylim([0, 1.1])
     scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
     ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='gray')
-    savefig(fig, savename=Path(__file__).parent / 'fmri-correlations' + ('-best' if best_layer else '-layers'))
+    savefig(fig, savename=Path(__file__).parent / ('fmri-correlations' + ('-best' if best_layer else '-layers')))
 
 
 def collect_Pereira_experiment_scores(best_layer=False):
-    scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    from brainscore.metrics import Score
+    from scipy.stats import median_absolute_deviation
+    from neural_nlp.benchmarks.neural import consistency
+
+    def get_experiment_score(score):
+        raw_score = score.raw.raw.raw
+        raw_score = raw_score.mean('split')
+        # redo what is done in `aggregate_neuroid_scores`, but keeping the experiment dimension
+        subject_scores = raw_score.groupby('subject').median('neuroid')
+        center = subject_scores.median('subject')
+        subject_values = np.nan_to_num(subject_scores.values, nan=0)
+        error = median_absolute_deviation(subject_values, axis=subject_scores.dims.index('subject'))
+        error = center.__class__(error, coords=center.coords, dims=center.dims)
+        center = consistency(center, score.ceiling.sel(aggregation='center').values)
+        error = consistency(error, score.ceiling.sel(aggregation='center').values)
+        center, error = center.expand_dims('aggregation'), error.expand_dims('aggregation')
+        center['aggregation'], error['aggregation'] = ['center'], ['error']
+        score = Score.merge(center, error)
+        return score
+
+    # use best layer based on base average
+    base_scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    base_scores = choose_best_scores(base_scores)
+    layers = set((row.model, row.layer) for row in base_scores.itertuples())
+    # now collect per-experiment scores and sub-select layer based on base scores
+    scores = collect_scores(benchmark='Pereira2018-encoding', models=models, score_hook=get_experiment_score)
     scores = average_adjacent(scores, keep_columns=['benchmark', 'model', 'layer', 'experiment'])
     scores = scores.dropna()
-    if best_layer:
-        scores = choose_best_scores(scores)  # TODO: do we want to choose the same layer for both?
+    scores = scores[[(row.model, row.layer) in layers for row in scores.itertuples()]]
     # separate into experiments & align
     experiment2_scores = scores[scores['experiment'] == '384sentences']
     experiment3_scores = scores[scores['experiment'] == '243sentences']
