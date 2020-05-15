@@ -7,19 +7,17 @@ import os
 import pandas as pd
 import seaborn
 import sys
-from decimal import Decimal
 from functools import reduce
 from matplotlib import pyplot
 from matplotlib.colors import to_rgba
-from matplotlib.text import Text
 from matplotlib.ticker import MultipleLocator
 from numpy.polynomial.polynomial import polyfit
 from pathlib import Path
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 from tqdm import tqdm
 
 from neural_nlp import score, model_layers, benchmark_pool
-from neural_nlp.analyze import savefig
+from neural_nlp.analyze import savefig, score_formatter
 from neural_nlp.benchmarks.neural import aggregate
 from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
@@ -115,23 +113,9 @@ benchmark_label_replace = BenchmarkLabelReplace()
 model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.'})
 
 
-@matplotlib.ticker.FuncFormatter
-def score_formatter(score, pos):
-    if 0 <= score < 1:
-        mod = Decimal(f"{score}") % Decimal(f"{.1}")
-        assert mod < .001 or mod > .099  # ensure we don't display rounding errors
-        return f"{score:.1f}"[1:]  # strip "0" in front of e.g. "0.2"
-    elif np.abs(score - 1) < .001:
-        return "1."
-    elif score > 1:
-        return ""
-    else:
-        return f"{score}"
-
-
 def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
-            best_layer=True, normalize=True, reference_best=False, identity_line=False, annotate=False,
-            plot_ceiling=True, ax=None, **kwargs):
+            best_layer=True, normalize=True, reference_best=False, identity_line=True, annotate=False,
+            plot_ceiling=False, ylim=None, ax=None, **kwargs):
     ax_given = ax is not None
     all_models = models
     scores1 = collect_scores(benchmark=benchmark1, models=all_models, normalize=normalize)

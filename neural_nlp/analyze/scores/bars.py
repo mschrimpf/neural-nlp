@@ -11,10 +11,10 @@ from matplotlib.ticker import MultipleLocator
 from pathlib import Path
 from scipy.stats import pearsonr
 
-from neural_nlp.analyze import savefig
+from neural_nlp.analyze import savefig, score_formatter
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
-    align_scores, significance_stars, get_ceiling, shaded_errorbar, score_formatter, model_label_replace, \
+    align_scores, significance_stars, get_ceiling, shaded_errorbar, model_label_replace, \
     benchmark_label_replace
 from result_caching import is_iterable
 
