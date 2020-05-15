@@ -153,12 +153,13 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
                               score_annotations=score_annotations,
                               xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
                               ax=ax, **kwargs)
-    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    ylim_given = ylim is not None
+    xlim, ylim = ax.get_xlim(), ax.get_ylim() if not ylim_given else ylim
     normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     normalize_y = normalize and not any(benchmark2.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     if normalize_x:
         xlim = [0, 1.1]
-    if normalize_y:
+    if normalize_y and not ylim_given:
         ylim = [0, 1.1]
     if normalize_x and plot_ceiling:
         ceiling_err = get_ceiling(benchmark1)
@@ -175,12 +176,13 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     if not ax_given:
-        savefig(fig,
-                savename=Path(__file__).parent / f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers'))
+        savefig(fig, savename=Path(__file__).parent /
+                              (f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers')))
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
-                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, ax=None, **kwargs):
+                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, tick_locator_base=0.2,
+                    prettify_xticks=True, correlation_pos=(0.05, 0.8), ax=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
@@ -191,7 +193,7 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=F
         for annotation, _x, _y in zip(score_annotations, x, y):
             if not annotation:
                 continue
-            ax.annotate(annotation, xy=(_x, _y), xytext=(_x + .05, _y + .05), size=10, zorder=100,
+            ax.annotate(annotation, xy=(_x, _y), xytext=(_x + .05, _y + .05), size=10, zorder=1,
                         arrowprops=dict(lw=1, arrowstyle="-", color='black'))
 
     if loss_xaxis:
@@ -199,23 +201,28 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=F
 
         @matplotlib.ticker.FuncFormatter
         def loss_formatter(loss, pos):
-            return f"{loss}\n{np.exp(loss):.0f}"
+            return f"{np.exp(loss):.0f}"
 
+        ax.set_xticks(np.log([100, 200, 400, 800, 1600, 3200]))
         ax.xaxis.set_major_formatter(loss_formatter)
-    else:
+    elif prettify_xticks:
+        ax.xaxis.set_major_locator(MultipleLocator(base=tick_locator_base))
         ax.xaxis.set_major_formatter(score_formatter)
     ax.yaxis.set_major_locator(MultipleLocator(base=tick_locator_base))
     ax.yaxis.set_major_formatter(score_formatter)
 
-    r, p = pearsonr(x, y)
+    r, p = pearsonr(x if not loss_xaxis else np.exp(x), y)
     if plot_correlation:
         b, m = polyfit(x, y, 1)
         correlation_x = [min(x), max(x)]
         ax.plot(correlation_x, b + m * np.array(correlation_x), color='black', linestyle='solid')
-    ax.text(0.05, 0.8, ha='left', va='center', transform=ax.transAxes,
-            s=("$r=" + f"{(r * (-1 if loss_xaxis else 1)):.2f}$"[1:]
-               + (significance_stars(p) if plot_significance_stars else ''))
-            if p < 0.05 else f"$n.s., p={p:.2f}$")
+    ax.text(*correlation_pos, ha='left', va='center', transform=ax.transAxes,
+            s=("$r=" + f"{(r * (-1 if loss_xaxis else 1)):.2f}$"[1:] + ('' if p < 0.05 else f" (n.s.)")
+               + (significance_stars(p) if plot_significance_stars and p < 0.05 else '')))
+    if not plot_significance_stars:
+        for label, func in zip(['pearson', 'spearman'], [pearsonr, spearmanr]):
+            r, p = func(x if not loss_xaxis else np.exp(x), y)
+            logger.info(f"{label} r={r}, p={p}")
 
     ax.set_xlabel(benchmark_label_replace[xlabel])
     ax.set_ylabel(benchmark_label_replace[ylabel])
@@ -283,19 +290,12 @@ def collect_scores(benchmark, models, normalize=True):
 
 def compare_glue(benchmark2='Pereira2018-encoding'):
     from neural_nlp.benchmarks.glue import benchmark_pool as glue_benchmark_pool
-    fig, axes = pyplot.subplots(nrows=2, ncols=4, sharey=True)
-    for ax, glue_benchmark in zip(axes.flatten(), glue_benchmark_pool):
-        compare(benchmark1=glue_benchmark, benchmark2=benchmark2, ax=ax)
-        # reduce font sizes
-        ax.set_xlabel(ax.get_xlabel(), fontsize=8)
-        ax.set_ylabel(ax.get_ylabel(), fontsize=8)
-        ax.set_xticklabels([f"{tick:.1f}" for tick in ax.get_xticks()], fontsize=8)
-        ax.set_yticklabels([f"{tick:.1f}" for tick in ax.get_yticks()], fontsize=8)
-        for element in ax.get_children():
-            if not isinstance(element, Text):
-                continue
-            size = 4 if not any(element._text.startswith(corr) for corr in ['pearson', 'spearman']) else 6
-            element._fontproperties._size = 5  # size
+    fig, axes = pyplot.subplots(figsize=(18, 8), nrows=2, ncols=4, sharey=True)
+    for i, (ax, glue_benchmark) in enumerate(zip(axes.flatten(), glue_benchmark_pool)):
+        compare(benchmark1=glue_benchmark, benchmark2=benchmark2, ax=ax, identity_line=False,
+                correlation_pos=(0.5, 0.1), prettify_xticks=False)
+        if i % 4 != 0:
+            ax.set_ylabel(None)
     savefig(fig, Path(__file__).parent / f"glue-{benchmark2}")
 
 
