@@ -415,7 +415,7 @@ def align_both(data1, data2, on):
     return data1, data2
 
 
-def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
+def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best', **kwargs):
     """
     :param layer_mode: 'best' to select the best layer per model,
       'group' to keep all layers and color them based on their model,
@@ -447,9 +447,12 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best'):
     else:
         cmap = matplotlib.cm.get_cmap('binary')
         colors = cmap(scores_trained['layer_position'].values)
-    fig, ax = _plot_scores1_2(scores_untrained, scores_trained, alpha=None if layer_mode == 'best' else 0.4,
-                              color=colors, xlabel="untrained", ylabel="trained")
-    lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), max(ax.get_xlim()[1], ax.get_ylim()[1])]
+    fig, ax = pyplot.subplots(figsize=(6, 6))
+    _plot_scores1_2(scores_untrained, scores_trained, alpha=None if layer_mode == 'best' else 0.4,
+                    color=colors, xlabel="untrained", ylabel="trained", plot_significance_stars=False,
+                    ax=ax, **kwargs)
+    lims = [-.05, 1.1] if benchmark.startswith('Fedorenko') else [-.05, 1.2] if benchmark.startswith('Pereira') \
+        else [-.05, 1.]
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
