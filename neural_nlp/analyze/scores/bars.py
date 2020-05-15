@@ -90,7 +90,7 @@ def whole_best(benchmark=None, data=None, title_kwargs=None, normalize_error=Fal
     savefig(fig, Path(__file__).parent / f'bars-{benchmark}')
 
 
-def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", annotate=True,
+def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predictivity", annotate=True,
                text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
