@@ -4,6 +4,7 @@ from matplotlib import pyplot
 from pathlib import Path
 
 from neural_nlp import score
+from neural_nlp.analyze.scores import collect_scores, average_adjacent, models, choose_best_scores
 
 
 def render_mpl_table(layer_scores, col_width=0.3, row_height=0.5, font_size=14,
@@ -49,6 +50,49 @@ def scores_per_region_and_model(models=('bert', 'bert-untrained'), benchmark='Pe
         render_mpl_table(model_scores, header_columns=0, col_width=2.0)
         pyplot.tight_layout()
         pyplot.savefig(Path(__file__).parent / f"table-regions-{model}.png")
+
+
+def overview_table():
+    benchmarks = {'Pereira2018': 'Pereira2018-encoding', 'Fedorenko2016': 'Fedorenko2016v3-encoding',
+                  'Blank2014': 'Blank2014fROI-encoding', 'Futrell2018': 'Futrell2018-encoding',
+                  'Average': 'overall-encoding'}
+
+    rows = [{**dict(header=""), **{name: name for name in benchmarks}},
+            {**dict(header=''), **{name: ''.join(['-'] * 40) for name in benchmarks}}]
+    # pre-run to ensure all models are in csv
+    all_models = [[model, f"{model}-untrained"] for model in models]
+    all_models = [model for model_tuple in all_models for model in model_tuple]
+    _max_benchmark_scores(benchmarks, models=all_models)
+    # max
+    row = dict(header="Maximal Predictivity")
+    score_row = _max_benchmark_scores(benchmarks, models=models)
+    rows.append({**row, **score_row})
+    # untrained
+    row = dict(header="- Architecture only (no training)")
+    untrained_models = [f"{model}-untrained" for model in models]
+    score_row = _max_benchmark_scores(benchmarks, models=untrained_models)
+    rows.append({**row, **score_row})
+
+    # output
+    for row in rows:
+        s = f"{row['header']: <40} | " + " | ".join(f"{row[name]: >40}" for name in benchmarks)
+        print(s)
+
+
+def _max_benchmark_scores(benchmarks, models):
+    row = {}
+    for name, benchmark in benchmarks.items():
+        scores = _model_scores(benchmark, models=models)
+        max_score = scores.ix[scores['score'].idxmax()]
+        row[name] = f"{100 * min(1, max_score['score']):.0f}% ({max_score['model']})"
+    return row
+
+
+def _model_scores(benchmark, models):
+    scores = collect_scores(benchmark=benchmark, models=models, normalize=True)
+    scores = average_adjacent(scores).dropna()
+    scores = choose_best_scores(scores)
+    return scores
 
 
 if __name__ == '__main__':
