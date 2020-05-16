@@ -75,6 +75,10 @@ def paper_figures():
     # S5: GLUE
     _logger.info("Figures S5")
     scores.compare_glue(benchmark2='Pereira2018-encoding')
+    # S6b: random embedding
+    _logger.info("Figures S6b")
+    bars.random_embedding()
+    return
     # S7: individual benchmarks predict behavior
     _logger.info("Figures S7")
     for benchmark in neural_benchmarks:

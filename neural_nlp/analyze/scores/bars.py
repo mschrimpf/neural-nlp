@@ -6,6 +6,7 @@ import pandas as pd
 import seaborn
 import sys
 from decimal import Decimal
+from functools import reduce
 from matplotlib import pyplot
 from matplotlib.ticker import MultipleLocator
 from pathlib import Path
@@ -128,6 +129,38 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predic
     ax.set_xticks(x)
     ax.tick_params(axis="x", pad=-5)
     return ax
+
+
+def random_embedding():
+    models = ['gpt2-xl', 'gpt2-xl-untrained', 'random-embedding']
+    benchmarks = ['Pereira2018-encoding', 'Fedorenko2016v3-encoding', 'Blank2014fROI-encoding', 'Futrell2018-encoding']
+    scores = [collect_scores(benchmark=benchmark, models=models) for benchmark in benchmarks]
+    scores = [average_adjacent(benchmark_scores) for benchmark_scores in scores]
+    scores = [choose_best_scores(benchmark_scores).dropna() for benchmark_scores in scores]
+    scores = reduce(lambda left, right: pd.concat([left, right]), scores)
+
+    fig, ax = pyplot.subplots(figsize=(5, 4))
+    colors = {'gpt2-xl': model_colors['gpt2-xl'], 'gpt2-xl-untrained': '#284343', 'random-embedding': '#C3CCCC'}
+    offsets = {0: -.2, 1: 0, 2: +.2}
+    width = 0.5 / 3
+    text_kwargs = dict(fontdict=dict(fontsize=7), color='white')
+    base_x = np.arange(len(benchmarks))
+    for i, model in enumerate(models):
+        model_scores = scores[scores['model'] == model]
+        x = base_x + offsets[i]
+        ax.bar(x, height=model_scores['score'], yerr=model_scores['error'],
+               width=width, align='center',
+               color=colors[model], edgecolor='none', ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
+        for xpos in x:
+            ax.text(x=xpos + .6 * width / 2, y=.05, s=model_label_replace[model],
+                    rotation=90, rotation_mode='anchor', **text_kwargs)
+    ax.set_xticks(base_x)
+    ax.set_xticklabels([benchmark_label_replace[benchmark] for benchmark in benchmarks], fontsize=9)
+    ax.yaxis.set_major_locator(MultipleLocator(base=0.2))
+    ax.yaxis.set_major_formatter(score_formatter)
+    ax.set_ylim([0, 1.2])
+    ax.set_ylabel('Normalized Predictivity')
+    savefig(fig, Path(__file__).parent / "bars-random_embedding")
 
 
 def benchmark_correlations(best_layer=True):
