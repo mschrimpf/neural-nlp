@@ -96,6 +96,30 @@ class SentenceLength(BrainModel, TaskModel):
         return {self.available_layers[0]: np.array(sentence_lengths)}
 
 
+class RandomEmbedding(BrainModel):
+    """
+    control model
+    """
+    identifier = 'random-embedding'
+    available_layers = [identifier]
+    default_layers = available_layers
+
+    def __init__(self, num_embeddings=1600):
+        self._random_state = RandomState(0)
+        self._embeddings = defaultdict(lambda: self._random_state.rand(num_embeddings))
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier,
+                                                     get_activations=self._get_activations, reset=lambda: None)
+
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
+
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, self.available_layers)
+        word_embeddings = [np.array([[self._embeddings[word] for word in sentence.split()]]) for sentence in sentences]
+        return {self.available_layers[0]: word_embeddings}
+
+
 class ETM(BrainModel, TaskModel):
     """
     Dieng et al., 2019
@@ -886,6 +910,7 @@ def load_model(model_name):
 
 model_pool = {
     SentenceLength.identifier: LazyLoad(SentenceLength),
+    RandomEmbedding.identifier: LazyLoad(RandomEmbedding),
     SkipThoughts.identifier: LazyLoad(SkipThoughts),
     SkipThoughts.identifier + '-untrained': LazyLoad(lambda: SkipThoughts(load_weights=False)),
     LM1B.identifier: LazyLoad(LM1B),
@@ -901,6 +926,7 @@ model_pool = {
 }
 model_layers = {
     SentenceLength.identifier: SentenceLength.default_layers,
+    RandomEmbedding.identifier: RandomEmbedding.default_layers,
     SkipThoughts.identifier: SkipThoughts.default_layers,
     LM1B.identifier: LM1B.default_layers,
     Word2Vec.identifier: Word2Vec.default_layers,
