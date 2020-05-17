@@ -224,7 +224,7 @@ class ExtrapolationCeiling:
 
 
 def ci_error(samples, center, confidence=.95):
-    low, high = 100 * (1 - confidence) / 2, 100 * 1 - ((1 - confidence) / 2)
+    low, high = 100 * ((1 - confidence) / 2), 100 * (1 - ((1 - confidence) / 2))
     confidence_below, confidence_above = np.nanpercentile(samples, low), np.nanpercentile(samples, high)
     confidence_below, confidence_above = center - confidence_below, confidence_above - center
     return confidence_below, confidence_above
