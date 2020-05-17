@@ -16,8 +16,7 @@ from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
-from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate, \
-    standard_error_of_the_mean
+from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
@@ -310,8 +309,11 @@ class _PereiraBenchmark(Benchmark):
     def _metric(self, source_assembly, target_assembly):
         cross_scores = self._cross(target_assembly, apply=
         lambda cross_assembly: self._apply_cross(source_assembly, cross_assembly))
-        score = cross_scores.mean(['experiment', 'atlas'])
+        score = self._average_cross_scores(cross_scores)
         return score
+
+    def _average_cross_scores(self, cross_scores):
+        return cross_scores.mean(['experiment', 'atlas'])
 
     def _load_assembly(self, version='base'):
         assembly = load_Pereira2018_Blank(version=version)
@@ -480,7 +482,34 @@ class PereiraEncoding(_PereiraBenchmark):
         super(PereiraEncoding, self).__init__(metric=metric, **kwargs)
 
 
-class PereiraDecoding(_PereiraBenchmark):
+class _PereiraSubjectWise(_PereiraBenchmark):
+    def __init__(self, **kwargs):
+        super(_PereiraSubjectWise, self).__init__(**kwargs)
+        self._cross = CartesianProduct(dividers=['experiment', 'atlas', 'subject'])
+        self._ceiler = self.PereiraSubjectWiseExtrapolationCeiling(
+            extrapolation_dimension='subject', subject_column='subject', num_bootstraps=self._ceiler.num_bootstraps)
+
+    def _apply_cross(self, source_assembly, cross_assembly):
+        # some subjects have only done one experiment which leads to nans
+        cross_assembly = cross_assembly.dropna('neuroid')
+        if len(cross_assembly['neuroid']) == 0:
+            return Score([np.nan, np.nan], coords={'aggregation': ['center', 'error']}, dims=['aggregation'])
+        return super(_PereiraSubjectWise, self)._apply_cross(
+            source_assembly=source_assembly, cross_assembly=cross_assembly)
+
+    def _average_cross_scores(self, cross_scores):
+        return super(_PereiraSubjectWise, self)._average_cross_scores(cross_scores).median('subject')
+
+    class PereiraSubjectWiseExtrapolationCeiling(_PereiraBenchmark.PereiraExtrapolationCeiling):
+        def post_process(self, scores):
+            return scores.mean('sub_experiment').sel(aggregation='center')
+
+        def extrapolate(self, ceilings):
+            # skip parent implementation, go straight to parent's parent
+            return super(_PereiraBenchmark.PereiraExtrapolationCeiling, self).extrapolate(ceilings)
+
+
+class PereiraDecoding(_PereiraSubjectWise):
     """
     data source:
         Pereira et al., nature communications 2018
@@ -496,7 +525,7 @@ class PereiraDecoding(_PereiraBenchmark):
         super(PereiraDecoding, self).__init__(metric=metric, **kwargs)
 
 
-class PereiraRDM(_PereiraBenchmark):
+class PereiraRDM(_PereiraSubjectWise):
     """
     data source:
         Pereira et al., nature communications 2018

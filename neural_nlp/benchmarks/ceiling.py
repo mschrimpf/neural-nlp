@@ -36,7 +36,8 @@ class HoldoutSubjectCeiling:
                     {'neuroid': [subject in subject_pool for subject in assembly[self.subject_column].values]}]
                 score = self.score(pool_assembly, subject_assembly, metric=metric)
                 # store scores
-                apply_raw = not hasattr(score.raw, self.subject_column)  # only propagate if column not part of score
+                apply_raw = 'raw' in score.attrs and \
+                            not hasattr(score.raw, self.subject_column)  # only propagate if column not part of score
                 score = score.expand_dims(self.subject_column, _apply_raw=apply_raw)
                 score.__setitem__(self.subject_column, [subject], _apply_raw=apply_raw)
                 scores.append(score)
@@ -177,7 +178,8 @@ class ExtrapolationCeiling:
                 num_scores = ceilings.sel(num_subjects=num_subjects)
                 # the sub_subjects dimension creates nans, get rid of those
                 num_scores = num_scores.dropna(f'sub_{self.subject_column}')
-                assert set(num_scores.dims) == {f'sub_{self.subject_column}', 'split'}
+                assert set(num_scores.dims) == {f'sub_{self.subject_column}', 'split'} or \
+                       set(num_scores.dims) == {f'sub_{self.subject_column}'}
                 # choose from subject subsets and the splits therein, with replacement for variance
                 choices = num_scores.values.flatten()
                 bootstrapped_score = rng.choice(choices, size=len(choices), replace=True)
