@@ -86,6 +86,7 @@ models = tuple(model_colors.keys())
 
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 overall_neural_benchmarks = ('Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI')
+overall_benchmarks = overall_neural_benchmarks + ('Futrell2018',)
 performance_benchmarks = ['wikitext', 'glue']
 
 
@@ -97,8 +98,11 @@ class LabelReplace(dict):
 class BenchmarkLabelReplace(LabelReplace):
     def __init__(self):
         super(BenchmarkLabelReplace, self).__init__(**{
-            'overall_neural': 'Brain-Score.Language (neural)',
+            'overall_neural': 'Language Brain-Score (neural)',
+            'overall': 'Language Brain-Score',
             'Blank2014fROI': 'Blank2014',
+            'Fedorenko2016v3': 'Fedorenko2016',
+            'wikitext-2': 'wikitext-2 perplexity',
         })
 
     def __getitem__(self, item):
@@ -108,7 +112,7 @@ class BenchmarkLabelReplace(LabelReplace):
 
 
 benchmark_label_replace = BenchmarkLabelReplace()
-model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.'})
+model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.', 'lm_1b': 'lstm lm1b'})
 
 
 def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
@@ -135,11 +139,11 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
                               score_annotations=score_annotations,
                               xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
                               ax=ax, **kwargs)
-    ylim_given = ylim is not None
-    xlim, ylim = ax.get_xlim(), ax.get_ylim() if not ylim_given else ylim
+    xlim_given, ylim_given = xlim is not None, ylim is not None
+    xlim, ylim = ax.get_xlim() if not xlim_given else xlim, ax.get_ylim() if not ylim_given else ylim
     normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
     normalize_y = normalize and not any(benchmark2.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
-    if normalize_x:
+    if normalize_x and not xlim_given:
         xlim = [0, 1.1]
     if normalize_y and not ylim_given:
         ylim = [0, 1.1]
@@ -153,7 +157,10 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
                         alpha=0, shaded_kwargs=dict(color='gray', alpha=.5))
     if identity_line:
         lim = [min(xlim[0], ylim[0]), max(xlim[1], ylim[1])]
-        xlim = ylim = lim
+        if not xlim_given:
+            xlim = lim
+        if not ylim_given:
+            ylim = lim
         ax.plot(lim, lim, linestyle='dashed', color='gray')
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
@@ -164,13 +171,16 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
                     xlabel=None, ylabel=None, loss_xaxis=False, color=None, tick_locator_base=0.2,
+                    scatter_size=20, errorbar_error_alpha=0.2,
                     prettify_xticks=True, correlation_pos=(0.05, 0.8), ax=None, **kwargs):
     assert len(scores1) == len(scores2)
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
     fig, ax = pyplot.subplots() if ax is None else (None, ax)
-    ax.scatter(x=x, y=y, c=color, s=2)
-    ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
+    markers, caps, bars = ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
+    [bar.set_alpha(errorbar_error_alpha) for bar in bars]
+    [cap.set_alpha(errorbar_error_alpha) for cap in caps]
+    ax.scatter(x=x, y=y, c=color, s=scatter_size)
     if score_annotations is not None:
         for annotation, _x, _y in zip(score_annotations, x, y):
             if not annotation:
@@ -230,6 +240,7 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
         data = reduce(lambda left, right: pd.concat([left, right]), data)
         data = average_adjacent(data)
         data = choose_best_scores(data).dropna()  # need to choose best layer per benchmark here before averaging
+        data['score'][data['score'] >= 1] = 1  # more than 100% makes no sense and might skew averaging
         data = data.groupby(['model']).mean().reset_index()  # mean across benchmarks per model-layer
         data['layer'] = 'combined'
         data['benchmark'] = benchmark
@@ -255,7 +266,8 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
                 data.append({**adjunct_values,
                              **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
         if missing_models:
-            logger.warning(f"No score cached for models {missing_models} on benchmark {benchmark}")
+            logger.warning(
+                f"No score cached for {len(missing_models)} models {missing_models} on benchmark {benchmark}")
         data = pd.DataFrame(data)
         if any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
             data['layer'] = -1
@@ -431,14 +443,15 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best', **
         colors = cmap(scores_trained['layer_position'].values)
     fig, ax = pyplot.subplots(figsize=(6, 6))
     _plot_scores1_2(scores_untrained, scores_trained, alpha=None if layer_mode == 'best' else 0.4,
-                    color=colors, xlabel="untrained", ylabel="trained", plot_significance_stars=False,
-                    ax=ax, **kwargs)
+                    color=colors, xlabel="architecture (no training)", ylabel="architecture + training",
+                    plot_significance_stars=False, ax=ax, **kwargs)
     lims = [-.05, 1.1] if benchmark.startswith('Fedorenko') else [-.05, 1.2] if benchmark.startswith('Pereira') \
+        else [8, 4] if benchmark.startswith('wikitext-2') else [0, 1.335] if benchmark.startswith('Futrell') \
         else [-.05, 1.]
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(ax.get_xlim(), ax.get_xlim(), linestyle='dashed', color='darkgray')
-    ax.set_title(benchmark)
+    ax.set_title(benchmark_label_replace[benchmark])
     savefig(fig, savename=Path(__file__).parent / f"untrained_trained-{benchmark}")
 
 
@@ -471,21 +484,26 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     if not per_layer:
         scores = choose_best_scores(scores)
     # count number of features
-    num_features = []
-    for model in tqdm(ordered_set(scores['model'].values), desc='models'):
-        # mock-run stimuli that are already stored
-        mock_extractor = ActivationsExtractorHelper(get_activations=None, reset=None)
-        features = mock_extractor._from_sentences_stored(
-            layers=model_layers[model.replace('-untrained', '')], sentences=None,
-            identifier=model.replace('-untrained', ''), stimuli_identifier='Pereira2018-243sentences.astronaut')
-        if per_layer:
-            for layer in scores['layer'].values[scores['model'] == model]:
-                num_features.append({'model': model, 'layer': layer,
-                                     'score': len(features.sel(layer=layer)['neuroid'])})
-        else:
-            num_features.append({'model': model, 'score': len(features['neuroid'])})
-    num_features = pd.DataFrame(num_features)
-    num_features['error'] = np.nan
+    store_file = Path(__file__).parent / "num_features.csv"
+    if store_file.is_file():
+        num_features = pd.read_csv(store_file)
+    else:
+        num_features = []
+        for model in tqdm(ordered_set(scores['model'].values), desc='models'):
+            # mock-run stimuli that are already stored
+            mock_extractor = ActivationsExtractorHelper(get_activations=None, reset=None)
+            features = mock_extractor._from_sentences_stored(
+                layers=model_layers[model.replace('-untrained', '')], sentences=None,
+                identifier=model.replace('-untrained', ''), stimuli_identifier='Pereira2018-243sentences.astronaut')
+            if per_layer:
+                for layer in scores['layer'].values[scores['model'] == model]:
+                    num_features.append({'model': model, 'layer': layer,
+                                         'score': len(features.sel(layer=layer)['neuroid'])})
+            else:
+                num_features.append({'model': model, 'score': len(features['neuroid'])})
+        num_features = pd.DataFrame(num_features)
+        num_features['error'] = np.nan
+        num_features.to_csv(store_file, index=False)
     if per_layer:
         assert (scores['layer'].values == num_features['layer'].values).all()
     # plot
@@ -538,10 +556,10 @@ def get_ceiling(benchmark, which='error', normalize_scale=True):
     """
     :param which: one of (ceiling|error|both)
     """
-    if benchmark.startswith('overall_neural'):
-        metric = benchmark[len('overall_neural-'):]
-        ceilings = [get_ceiling(f"{part}-{metric}", which=which, normalize_scale=normalize_scale)
-                    for part in overall_neural_benchmarks]
+    if benchmark.startswith('overall'):
+        metric = benchmark.split('-')[-1]
+        ceilings = [get_ceiling(f"{part}-{metric}", which=which, normalize_scale=normalize_scale) for part in
+                    (overall_neural_benchmarks if benchmark.startswith('overall_neural') else overall_benchmarks)]
         return np.mean(ceilings, axis=0)
     elif any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
         return np.nan
