@@ -33,8 +33,6 @@ model_colors = {
     # RNNs
     'lm_1b': 'slategrey',
     'skip-thoughts': 'darkgray',
-    # naive transformer
-    'transformer': 'rosybrown',
     # BERT
     'distilbert-base-uncased': 'salmon',
     'bert-base-uncased': 'tomato',
