@@ -261,9 +261,68 @@ class Futrell2018MeanEncoding(Benchmark):
         return self._metric(model_activations, self._target_assembly)
 
 
+class Futrell2018StoriesEncoding(Futrell2018Encoding):
+    def __init__(self, *args, **kwargs):
+        super(Futrell2018StoriesEncoding, self).__init__(*args, **kwargs)
+        regression = linear_regression(xarray_kwargs=dict(
+            stimulus_coord='word_id', neuroid_coord='subject_id'))
+        correlation = pearsonr_correlation(xarray_kwargs=dict(
+            correlation_coord='word_id', neuroid_coord='subject_id'))
+        self._metric = CrossRegressedCorrelation(
+            regression=regression, correlation=correlation,
+            crossvalidation_kwargs=dict(splits=5, kfold=True, unique_split_values=True,
+                                        split_coord='story_id', stratification_coord=None))
+
+    def _load_assembly(self):
+        assembly = super(Futrell2018StoriesEncoding, self)._load_assembly()
+
+        # filter subjects that have done at least 5 stories. Otherwise, we cannot 5-fold cross-validate across stories
+        def count_stories(subject_assembly):
+            subject_assembly = subject_assembly.dropna('presentation')
+            num_stories = len(np.unique(subject_assembly['story_id'].values))
+            return xr.DataArray(num_stories)
+
+        subject_stories = assembly.groupby('subject_id').apply(count_stories)
+        keep_subjects = subject_stories[subject_stories >= 5]['subject_id'].values
+        keep_subjects = set(keep_subjects) - {'A1I02VZ07MZB7F'}  # this subject only has one data point for story 8
+        assembly = assembly[{'neuroid': [subject in keep_subjects for subject in assembly['subject_id'].values]}]
+        return assembly
+
+
+class Futrell2018SentencesEncoding(Futrell2018Encoding):
+    def __init__(self, *args, **kwargs):
+        super(Futrell2018SentencesEncoding, self).__init__(*args, **kwargs)
+        regression = linear_regression(xarray_kwargs=dict(
+            stimulus_coord='word_id', neuroid_coord='subject_id'))
+        correlation = pearsonr_correlation(xarray_kwargs=dict(
+            correlation_coord='word_id', neuroid_coord='subject_id'))
+        self._metric = CrossRegressedCorrelation(
+            regression=regression, correlation=correlation,
+            crossvalidation_kwargs=dict(splits=5, kfold=True, unique_split_values=True,
+                                        split_coord='sentence_id', stratification_coord=None))
+
+    def _load_assembly(self):
+        assembly = super(Futrell2018SentencesEncoding, self)._load_assembly()
+
+        # filter subjects that have done at least 5 sentences. Otherwise, we cannot 5-fold cross-validate across
+        def count_sentences(subject_assembly):
+            subject_assembly = subject_assembly.dropna('presentation')
+            num_sentences = len(np.unique(subject_assembly['sentence_id'].values))
+            num_words_per_story = subject_assembly.groupby('sentence_id').apply(
+                lambda sentence_assembly: xr.DataArray(len(sentence_assembly['presentation'])))
+            return xr.DataArray(num_sentences >= 5 and all(num_words_per_story >= 2))
+
+        keep_subjects = assembly.groupby('subject_id').apply(count_sentences)
+        keep_subjects = keep_subjects[keep_subjects]['subject_id'].values
+        assembly = assembly[{'neuroid': [subject in keep_subjects for subject in assembly['subject_id'].values]}]
+        return assembly
+# A1SVVVJWT7H51V
+
 benchmark_pool = [
     ('Futrell2018-encoding', Futrell2018Encoding),
     ('Futrell2018mean-encoding', Futrell2018MeanEncoding),
+    ('Futrell2018stories-encoding', Futrell2018StoriesEncoding),
+    ('Futrell2018sentences-encoding', Futrell2018SentencesEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}
