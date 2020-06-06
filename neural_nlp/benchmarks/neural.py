@@ -21,7 +21,7 @@ from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling
 from neural_nlp.neural_data.ecog import load_Fedorenko2016
 from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
-    load_Pereira2018_Blank, load_Pereira2018_Blank_languageresiduals
+    load_Pereira2018_Blank
 from neural_nlp.stimuli import load_stimuli, StimulusSet
 from neural_nlp.utils import ordered_set
 from result_caching import store
@@ -651,7 +651,6 @@ def Fedorenko2016Encoding(identifier):
     return _Fedorenko2016(identifier=identifier, metric=metric)
 
 
-# Version 3 - based on data March 24th
 def Fedorenko2016V3Encoding(identifier):
     """
     Fedorenko benchmark, language electrodes
@@ -786,16 +785,17 @@ def consistency(score, ceiling):
 
 
 benchmark_pool = [
-    ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
-    ('Blank2014fROI-encoding', Blank2014fROIEncoding),
-    ('Blank2014-rdm', Blank2014fROIRDM),
+    # primary benchmarks
     ('Pereira2018-encoding', PereiraEncoding),
-    ('Pereira2018-decoding', PereiraDecoding),
-    ('Pereira2018-rdm', PereiraRDM),
-    ('Fedorenko2016-rdm', Fedorenko2016RDM),
     ('Fedorenko2016v3-encoding', Fedorenko2016V3Encoding),
+    ('Blank2014fROI-encoding', Blank2014fROIEncoding),
+    # secondary benchmarks
+    ('Pereira2018-rdm', PereiraRDM),
+    ('Pereira2018-decoding', PereiraDecoding),
+    ('Fedorenko2016v3-rdm', Fedorenko2016V3RDM),
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
-    ('Fedorenko2016v3all-encoding', Fedorenko2016V3AllEncoding),
+    ('Blank2014fROI-rdm', Blank2014fROIRDM),
+    ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
 ]
 for num_sentences in range(1, 9):
     benchmark_pool.append((f'Blank2014sentences{num_sentences}fROI-encoding',
