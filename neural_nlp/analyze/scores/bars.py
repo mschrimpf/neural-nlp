@@ -108,12 +108,12 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predic
                 ax.text(x=xpos + .6 * width / 2, y=.005, s=model_label_replace[model],
                         rotation=90, rotation_mode='anchor', **text_kwargs)
     for (model_group, annotate_x, width) in [
-        ('Emb.', 0.076, 1.0),
-        ('BERT', 0.221, 1.71),
-        ('XLM', 0.407, 2.41),
-        ('T5', 0.6137, 1.7),
-        ('AlBERT', 0.7487, 2.749),
-        ('GPT', 0.894, 2.05),
+        ('Emb.', 0.077, 1.05),
+        ('BERT', 0.203, 1.76),
+        ('XLM', 0.3935, 2.44),
+        ('T5', 0.605, 1.75),
+        ('AlBERT', 0.7427, 2.78),
+        ('GPT', 0.8904, 2.085),
     ]:
         ax.annotate(model_group, xy=(annotate_x, +.0), xytext=(annotate_x, -.05), xycoords='axes fraction',
                     fontsize=8, ha='center', va='bottom',
