@@ -3,7 +3,7 @@ import matplotlib
 import seaborn
 import sys
 
-from neural_nlp.analyze import scores
+from neural_nlp.analyze import scores, stats
 from neural_nlp.analyze.data import ceiling
 from neural_nlp.analyze.scores import bars, layers, story_context
 
@@ -62,6 +62,9 @@ def paper_figures():
     # 6: overview table
     scores.compare(benchmark1='wikitext-2', benchmark2='overall-encoding', plot_significance_stars=False)
     scores.untrained_vs_trained(benchmark='overall-encoding')
+
+    # text: untrained/trained GloVe Pereira2018
+    stats.model_training_diff(model='glove', benchmark='Pereira2018-encoding')
 
     # S1: ceiling extrapolation
     _logger.info("Figures S1")
