@@ -63,8 +63,14 @@ def paper_figures():
     scores.compare(benchmark1='wikitext-2', benchmark2='overall-encoding', plot_significance_stars=False)
     scores.untrained_vs_trained(benchmark='overall-encoding')
 
+    # text: untrained/trained diff Pereira2018
+    scores.untrained_vs_trained(benchmark='Pereira2018-encoding', analyze_only=True)
     # text: untrained/trained GloVe Pereira2018
     stats.model_training_diff(model='glove', benchmark='Pereira2018-encoding')
+    # text: untrained/trained AlBERTs Fedorenko2016
+    scores.untrained_vs_trained(
+        benchmark='Fedorenko2016v3-encoding', analyze_only=True,
+        model_selection=[identifier for identifier in scores.models if identifier.startswith('albert')])
 
     # S1: ceiling extrapolation
     _logger.info("Figures S1")

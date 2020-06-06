@@ -409,13 +409,15 @@ def align_both(data1, data2, on):
     return data1, data2
 
 
-def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best', **kwargs):
+def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best', model_selection=None,
+                         analyze_only=False, **kwargs):
     """
     :param layer_mode: 'best' to select the best layer per model,
       'group' to keep all layers and color them based on their model,
       'pos' to keep all layers and color them based on their relative position.
     """
-    all_models = [[model, f"{model}-untrained"] for model in models]
+    all_models = model_selection or models
+    all_models = [[model, f"{model}-untrained"] for model in all_models]
     all_models = [model for model_tuple in all_models for model in model_tuple]
     scores = collect_scores(benchmark=benchmark, models=all_models)
     scores = average_adjacent(scores)  # average experiments & atlases
@@ -434,6 +436,15 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best', **
         scores_trained, scores_untrained, identifier_set=('model',) if layer_mode == 'best' else ('model', 'layer'))
     if layer_mode != 'best':
         assert (scores_trained['layer'].values == scores_untrained['layer'].values).all()
+    # analyze
+    average_trained, average_untrained = np.mean(scores_trained['score']), np.mean(scores_untrained['score'])
+    _, p_diff = pearsonr(scores_trained['score'], scores_untrained['score'])
+    logger.info(f"Trained/untrained on {benchmark}: "
+                f"score trained={average_trained:.2f}, untrained={average_untrained:.2f} | "
+                f"diff {average_trained-average_untrained:.2f} ({average_trained/average_untrained * 100:.0f}%, "
+                f"p={p_diff}")
+    if analyze_only:
+        return
     # plot
     if layer_mode in ('best', 'group'):
         colors = [model_colors[model] for model in scores_trained['model']]
