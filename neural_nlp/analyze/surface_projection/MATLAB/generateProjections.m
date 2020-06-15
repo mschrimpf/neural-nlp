@@ -1,60 +1,87 @@
-function generateProjections(matfile, inv)
-% matfile is the 3D matrix with ROI or brainscore coordinates. Contains
-% info about the subject ID and model
+function generateProjections(brainfile, hemi, language)
+% e.g. generateProjections([pwd, '/brain_matrices/018_langROIs.mat'], 'LH')
+% 
+% INPUT
+%
+% brainfile = string, path to the 3D matrix with 3D matrix with brainscore coordinates.
+% hemi = string, either 'LH' or 'RH'.
 
-addpath('/software/spm12');
-volInfo = spm_vol('SPM_T1.nii');
-filename = strcat(matfile(1:end-3), 'nii');
+% PATHS
+addpath('/cm/shared/openmind/freesurfer/6.0.0/matlab/');
+addpath('/om/group/evlab/software/spm12');
 
-% Load the brain matrix
-cd('/mindhive/evlab/u/gretatu/Desktop/surface_projection/');
-brain = load(matfile);
-brain_matrix = brain.brain_matrix;
-brain_matrix = brain_matrix * 100;
+% ADDITIONAL PATHS - load the EvLab17 pipeline and freesurfer
+% addpath('/om/group/evlab/software/evlab17');
+% evlab17 init
+% addpath('/cm/shared/openmind/xjview/xjview97/xjview');
+% spm fmri
+
+% TESTING
+% brainfile='/mindhive/evlab/u/gretatu/Desktop/surface_projection_v2/brain_matrices/407_Pereira2018_encoding_glove.mat'
+% configNum = 1;
+% hemi = 'LH';
+
+if hemi == 'LH'
+    configNum = 1;
+else hemi == 'RH'
+    configNum = 3;
+end
+
+subj_T1_path = fullfile(pwd,'forReg_ID231_T1_z69.nii');
+volInfo = spm_vol(subj_T1_path) 
+
+fb = strcat(brainfile(1:end-4), '_', hemi, '.nii');
+
+% Load the files
+brain = load(brainfile);
+brain_matrix = brain.brain_matrix; 
+
+% Set negative and zero values to 0.00001
+brain_matrix(brain_matrix < 0) = 0.01;
+
+% min(min(min(brain_matrix)))
+
+
+% If using abs values
+% brain_matrix = (abs(brain_matrix));
+
+% Plot histogram of values
+% brain_hist = squeeze(reshape(brain_matrix,[1 79*95*69]));
+% figure;histogram(brain_hist(brain_hist > 0.001), 500);title('Raw values, neg removed');ylim([0 90])
+
+% figure;histogram(brain_hist, 50);
 
 % For 3d plotting
 % [X,Y,Z] = ndgrid(1:size(brain_matrix,1), 1:size(brain_matrix,2), 1:size(brain_matrix,3));
 % pointsize = 30;
 % figure;scatter3(X(:), Y(:), Z(:), pointsize, brain_matrix(:));
 
-% Write to volume, .nii
-newVolInfo = struct('fname', filename, 'mat', volInfo.mat, 'dim',size(brain_matrix), ...
-    'dt',[spm_type('int16') spm_platform('bigend')],'pinfo',[1;0;0]);
+% Write to volume, .nii - using the volinfo dimensions
+volInfo_brain = struct('fname', fb, 'mat', volInfo.mat, 'dim',volInfo.dim, ...
+    'dt',[spm_type('float32') spm_platform('bigend')],'pinfo',[1;0;0]);
 
-spm_write_vol(newVolInfo, brain_matrix); 
-
-if inv == 1
-    % Count number of non-nans
-    fprintf('Non-nan values in brain_matrix: %.f \n and mean: \n', nnz(~isnan(brain_matrix)), nanmean(nanmean(nanmean(brain_matrix))))
-    
-    % In the .nii file
-    vol_output = MRIread(filename) 
-    fprintf('Non-zero values in volume brain_matrix (after spm_write_vol): %.f \n Dimensions: %.f %.f %.f \n', nnz((vol_output.vol ~= 0)), [size(vol_output.vol)])
-    
-    % In the file that is coregistered to SPM's T1
-    spm_output = MRIread(strcat('SPM_', filename))
-    fprintf('Non-zero values in SPM brain_matrix (after SPM coreg): %.f \n Dimensions: %.f %.f %.f \n', nnz((spm_output.vol ~= 0)), [size(spm_output.vol)])
-    
-     % In the file that is coregistered to Freesurfer's T1
-    fs_spm_output = MRIread(strcat('FS_SPM_', filename))
-    fprintf('Non-zero values in Freesurfers T1 brain_matrix: %.f \n Dimensions: %.f %.f %.f \n', nnz((fs_spm_output.vol ~= 0)), [size(fs_spm_output.vol)])
-    
-     % In the surface projected file 
-     surf_output = MRIread(strcat(filename(1:(end-4)), '_surface.nii'))
-    fprintf('Non-zero values in surface projected file: %.f \n Dimensions: %.f %.f %.f \n', nnz((surf_output.vol ~= 0)), [size(surf_output.vol)])
-    
-    % u=unique(brain_matrix);
-
-end     
+spm_write_vol(volInfo_brain, brain_matrix); 
 
 % RUN PLOTTING CODE
-projectOnSurfaceFigure_greta({[pwd, '/', filename]}, createConfig(1), 0);
+transformToSurface({fb}, createConfig(configNum), 1);
+
+% Constrain ROIs
+
+if language
+brain_surf = [fb(1:end-4), '_surface.nii']
+
+nameIdx = strfind(fb, '/'); % idx 
+subjectID = fb(nameIdx(end)+1:nameIdx(end)+3)
+
+ROI_surf = [pwd, '/ROIs/', subjectID, '_langROIs_', hemi, '_surface.nii']
+
+brain_surf_o = MRIread(brain_surf);
+ROI_surf_o = MRIread(ROI_surf);
+
+brain_surf_c = brain_surf_o; % copy, constrain
+brain_surf_c.vol(ROI_surf_o.vol == 0) = 0;
+     
+MRIwrite(brain_surf_c, [fb(1:end-4), '_surface_lang.nii'])
 
 end
-
-% for freesurfer
-% export FREESURFER_HOME=/software/Freesurfer/5.3.0; export SUBJECTS_DIR=/software/Freesurfer/5.3.0/subjects; source $FREESURFER_HOME/SetUpFreeSurfer.sh;  freeview -f /software/Freesurfer/5.3.0/subjects/cvs_avg35_inMNI152/surf/lh.inflated:edgethickness=0:overlay=/mindhive/evlab/u/gretatu/Desktop/surface_projection/braintest4_surface.nii:overlay_threshold=0.05,0.4 
-
-% rh, azimuth 180
-% export FREESURFER_HOME=/software/Freesurfer/5.3.0; export SUBJECTS_DIR=/software/Freesurfer/5.3.0/subjects; source $FREESURFER_HOME/SetUpFreeSurfer.sh;  freeview -f /software/Freesurfer/5.3.0/subjects/cvs_avg35_inMNI152/surf/rh.inflated:edgethickness=0:overlay=/mindhive/evlab/u/gretatu/Desktop/surface_projection/Pereira2018-encoding-glove_surface.nii:overlay_threshold=0.05,50 --cam azimuth 180
-
+end
