@@ -36,8 +36,10 @@ class HoldoutSubjectCeiling:
                     {'neuroid': [subject in subject_pool for subject in assembly[self.subject_column].values]}]
                 score = self.score(pool_assembly, subject_assembly, metric=metric)
                 # store scores
-                score = score.expand_dims(self.subject_column, _apply_raw=False)
-                score.__setitem__(self.subject_column, [subject], _apply_raw=False)
+                apply_raw = 'raw' in score.attrs and \
+                            not hasattr(score.raw, self.subject_column)  # only propagate if column not part of score
+                score = score.expand_dims(self.subject_column, _apply_raw=apply_raw)
+                score.__setitem__(self.subject_column, [subject], _apply_raw=apply_raw)
                 scores.append(score)
             except NoOverlapException as e:
                 self._logger.debug(f"Ignoring no overlap {e}")
@@ -63,11 +65,13 @@ class HoldoutSubjectCeiling:
 
 
 class ExtrapolationCeiling:
-    def __init__(self, subject_column='subject', num_bootstraps=100, post_process=None):
+    def __init__(self, subject_column='subject', extrapolation_dimension='neuroid',
+                 num_bootstraps=100, post_process=None):
+        self._logger = logging.getLogger(fullname(self))
         self.subject_column = subject_column
         self.holdout_ceiling = HoldoutSubjectCeiling(subject_column=subject_column)
+        self.extrapolation_dimension = extrapolation_dimension
         self.num_bootstraps = num_bootstraps
-        self._logger = logging.getLogger(fullname(self))
         self._post_process = post_process
 
     @store(identifier_ignore=['assembly', 'metric'])
@@ -118,10 +122,11 @@ class ExtrapolationCeiling:
 
     def extrapolate(self, ceilings):
         neuroid_ceilings, bootstrap_params, endpoint_xs = [], [], []
-        for i in trange(len(ceilings['neuroid']), desc='neuroid extrapolations'):
+        for i in trange(len(ceilings[self.extrapolation_dimension]),
+                        desc=f'{self.extrapolation_dimension} extrapolations'):
             try:
                 # extrapolate per-neuroid ceiling
-                neuroid_ceiling = ceilings.isel(neuroid=[i])
+                neuroid_ceiling = ceilings.isel(**{self.extrapolation_dimension: [i]})
                 extrapolated_ceiling = self.extrapolate_neuroid(neuroid_ceiling.squeeze())
                 extrapolated_ceiling = self.add_neuroid_meta(extrapolated_ceiling, neuroid_ceiling)
                 neuroid_ceilings.append(extrapolated_ceiling)
@@ -136,29 +141,29 @@ class ExtrapolationCeiling:
                 continue
         # merge and add meta
         self._logger.debug("Merging neuroid ceilings")
-        neuroid_ceilings = manual_merge(*neuroid_ceilings)
+        neuroid_ceilings = manual_merge(*neuroid_ceilings, on=self.extrapolation_dimension)
         neuroid_ceilings.attrs['raw'] = ceilings
         self._logger.debug("Merging bootstrap params")
-        bootstrap_params = manual_merge(*bootstrap_params)
+        bootstrap_params = manual_merge(*bootstrap_params, on=self.extrapolation_dimension)
         neuroid_ceilings.attrs['bootstrapped_params'] = bootstrap_params
         self._logger.debug("Merging endpoints")
-        endpoint_xs = manual_merge(*endpoint_xs)
+        endpoint_xs = manual_merge(*endpoint_xs, on=self.extrapolation_dimension)
         neuroid_ceilings.attrs['endpoint_x'] = endpoint_xs
         # aggregate
         ceiling = self.aggregate_neuroid_ceilings(neuroid_ceilings)
         return ceiling
 
     def add_neuroid_meta(self, target, source):
-        target = target.expand_dims('neuroid')
+        target = target.expand_dims(self.extrapolation_dimension)
         for coord, dims, values in walk_coords(source):
-            if array_is_element(dims, 'neuroid'):
+            if array_is_element(dims, self.extrapolation_dimension):
                 target[coord] = dims, values
         return target
 
     def aggregate_neuroid_ceilings(self, neuroid_ceilings):
-        ceiling = neuroid_ceilings.median('neuroid')
-        ceiling.attrs['bootstrapped_params'] = neuroid_ceilings.bootstrapped_params.median('neuroid')
-        ceiling.attrs['endpoint_x'] = neuroid_ceilings.endpoint_x.median('neuroid')
+        ceiling = neuroid_ceilings.median(self.extrapolation_dimension)
+        ceiling.attrs['bootstrapped_params'] = neuroid_ceilings.bootstrapped_params.median(self.extrapolation_dimension)
+        ceiling.attrs['endpoint_x'] = neuroid_ceilings.endpoint_x.median(self.extrapolation_dimension)
         ceiling.attrs['raw'] = neuroid_ceilings
         return ceiling
 
@@ -173,7 +178,8 @@ class ExtrapolationCeiling:
                 num_scores = ceilings.sel(num_subjects=num_subjects)
                 # the sub_subjects dimension creates nans, get rid of those
                 num_scores = num_scores.dropna(f'sub_{self.subject_column}')
-                assert set(num_scores.dims) == {f'sub_{self.subject_column}', 'split'}
+                assert set(num_scores.dims) == {f'sub_{self.subject_column}', 'split'} or \
+                       set(num_scores.dims) == {f'sub_{self.subject_column}'}
                 # choose from subject subsets and the splits therein, with replacement for variance
                 choices = num_scores.values.flatten()
                 bootstrapped_score = rng.choice(choices, size=len(choices), replace=True)
@@ -218,7 +224,7 @@ class ExtrapolationCeiling:
 
 
 def ci_error(samples, center, confidence=.95):
-    low, high = 100 * (1 - confidence) / 2, 100 * 1 - ((1 - confidence) / 2)
+    low, high = 100 * ((1 - confidence) / 2), 100 * (1 - ((1 - confidence) / 2))
     confidence_below, confidence_above = np.nanpercentile(samples, low), np.nanpercentile(samples, high)
     confidence_below, confidence_above = center - confidence_below, confidence_above - center
     return confidence_below, confidence_above

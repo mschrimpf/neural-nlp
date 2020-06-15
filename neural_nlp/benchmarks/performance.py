@@ -1,11 +1,12 @@
 # coding=utf-8
-import os
-import pickle
 import random
 
 import logging
 import numpy as np
+import os
+import pickle
 import torch
+from numpy.random.mtrand import RandomState
 from pathlib import Path
 from torch import nn
 from torch.nn import CrossEntropyLoss
@@ -13,7 +14,8 @@ from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampl
 from tqdm import tqdm, trange
 
 from brainscore.metrics import Score
-from neural_nlp.models.implementations import BrainModel
+from brainscore.utils import LazyLoad
+from neural_nlp.models.implementations import TaskModel
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +49,7 @@ class LMHeadModel(torch.nn.Module):
 
 
 class TextDataset(Dataset):
-    def __init__(self, model_identifier, model, file_path, vocab_size=None, block_size=512):
+    def __init__(self, model_identifier, model, file_path, vocab_size=None, block_size=512, max_features=4000):
         assert os.path.isfile(file_path), f"{file_path} is not a file"
         with open(file_path, encoding="utf-8") as f:
             text = f.read()
@@ -63,6 +65,7 @@ class TextDataset(Dataset):
             logger.info("Creating tokens from dataset file %s", file_path)
             self.examples = []
             tokenized_text = model.tokenize(text, vocab_size=vocab_size)
+            assert tokenized_text.max() < vocab_size
             # Truncate in block of block_size
             # Especially with the small block sizes we end up using together with the
             # "feeding in context one word increments at a time", this is not ideal because the model doesn't see a lot
@@ -94,11 +97,22 @@ class TextDataset(Dataset):
                     pickle.dump(self.features, handle, protocol=pickle.HIGHEST_PROTOCOL)
         assert len(self.examples) == len(self.features)
 
+        # optional subsampling
+        if self.features[0].shape[-1] > max_features:
+            indices = np.arange(self.features[0].shape[-1])
+            rnd = RandomState(0)
+            indices = rnd.choice(indices, size=max_features, replace=False)
+            self.subsample = lambda features: features[:, :, indices]
+        else:
+            self.subsample = lambda features: features
+
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, item):
-        return torch.tensor(self.features[item]), torch.tensor(self.examples[item])
+        features, labels = self.features[item], self.examples[item]
+        features = self.subsample(features)
+        return torch.tensor(features), torch.tensor(labels)
 
 
 def set_seed(seed):
@@ -113,7 +127,7 @@ def train(model, train_dataset, val_dataset, device='cuda',
           ppl_diff_threshold=1,
           train_batch_size=4, weight_decay=0.0, learning_rate=5e-5, adam_epsilon=1e-8, warmup_steps=0,
           gradient_accumulation_steps=1, num_train_epochs=50, max_grad_norm=1.0,
-          logging_steps=50):
+          seed=42, logging_steps=50):
     """ Train the model """
     from transformers import AdamW, get_linear_schedule_with_warmup
     from tensorboardX import SummaryWriter
@@ -146,7 +160,7 @@ def train(model, train_dataset, val_dataset, device='cuda',
     tr_loss, logging_loss = 0.0, 0.0
     model.zero_grad()
     train_iterator = trange(int(num_train_epochs), desc="Epoch")
-    set_seed(42)  # Added here for reproducibility (even between python 2 and 3)
+    set_seed(seed)  # Added here for reproducibility (even between python 2 and 3)
     previous_val_ppl = np.inf
     for epoch, _ in enumerate(train_iterator):
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
@@ -225,29 +239,25 @@ def evaluate(model, eval_dataset, eval_batch_size=4, device='cuda', prefix=""):
 
 
 class _PerformanceBenchmark:
-    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=64, **kwargs):
+    def __init__(self, identifier, train_data_file, val_data_file, eval_data_file, tied=False, block_size=64,
+                 seed=42, **kwargs):
         self.identifier = identifier
         self.train_data_file = train_data_file
         self.val_data_file = val_data_file
         self.eval_data_file = eval_data_file
         self.tied = tied
         self.block_size = block_size
+        self.seed = seed
         self.kwargs = kwargs
 
-    def __call__(self, model: BrainModel):
-        model.mode = BrainModel.Modes.tokens_to_features
-        set_seed(42)
+    def __call__(self, model: TaskModel):
+        model.mode = TaskModel.Modes.tokens_to_features
+        set_seed(self.seed)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         logger.debug(f"Using block size {self.block_size} for {model.identifier}")
 
-        # Decoder
-        vocab_size = min(model.vocab_size, 250000)
-        logger.info(f"Vocab size: {vocab_size}")
-        lm_head = LMHeadModel(features_size=model.features_size, vocab_size=vocab_size,
-                              embedding_weights=model.get_embedding_weights() if self.tied else None)
-        lm_head = lm_head.to(device)
-
         # Data
+        vocab_size = min(model.vocab_size, 250000)
         train_tokens = TextDataset(model_identifier=model.identifier, model=model, block_size=self.block_size,
                                    vocab_size=vocab_size, file_path=self.train_data_file)
         val_tokens = TextDataset(model_identifier=model.identifier, model=model, block_size=self.block_size,
@@ -255,8 +265,16 @@ class _PerformanceBenchmark:
         test_tokens = TextDataset(model_identifier=model.identifier, model=model, block_size=self.block_size,
                                   vocab_size=vocab_size, file_path=self.eval_data_file)
 
+        # Decoder
+        logger.info(f"Vocab size: {vocab_size}")
+        features_sample, _ = train_tokens[0]
+        lm_head = LMHeadModel(features_size=features_sample.shape[-1], vocab_size=vocab_size,
+                              embedding_weights=model.get_embedding_weights() if self.tied else None)
+        lm_head = lm_head.to(device)
+
         # Train
-        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device, **self.kwargs)
+        train(model=lm_head, train_dataset=train_tokens, val_dataset=val_tokens, device=device,
+              seed=self.seed, **self.kwargs)
 
         # Evaluation
         test_result = evaluate(model=lm_head, eval_dataset=test_tokens, device=device)

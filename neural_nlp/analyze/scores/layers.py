@@ -11,7 +11,8 @@ from pathlib import Path
 
 from neural_nlp import model_layers
 from neural_nlp.analyze.scores import collect_scores, models as all_models, model_colors, \
-    fmri_atlases, shaded_errorbar, ceiling_normalize, average_adjacent
+    fmri_atlases, shaded_errorbar, average_adjacent
+from neural_nlp.analyze import savefig
 
 _logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ def layer_preference_per_region(models=None):
     fig.text(0.5, 0.01, 'relative layer position', ha='center')
     # save
     fig.tight_layout()
-    fig.savefig(Path(__file__).parent / 'layer_ordering.png', dpi=600)
+    savefig(fig, Path(__file__).parent / 'layer_ordering')
 
 
 def layer_preference(benchmark='Pereira2018-encoding'):
@@ -103,7 +104,7 @@ def layer_preference(benchmark='Pereira2018-encoding'):
     fig.text(0.5, 0.01, 'relative layer position', ha='center')
     # save
     fig.tight_layout()
-    fig.savefig(Path(__file__).parent / f'layer_ordering-{benchmark}.png', dpi=600)
+    savefig(fig, Path(__file__).parent / f'layer_ordering-{benchmark}')
 
 
 def layer_training_delta(models=None):
@@ -150,7 +151,7 @@ def layer_training_delta(models=None):
     fig.text(0.5, 0.01, 'relative layer position', ha='center')
     # save
     fig.tight_layout()
-    fig.savefig(Path(__file__).parent / 'layer_ordering-deltas.png', dpi=600)
+    savefig(fig, Path(__file__).parent / 'layer_ordering-deltas')
 
 
 if __name__ == '__main__':

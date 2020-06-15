@@ -7,6 +7,7 @@ SUBMODULE_SEPARATOR = '.'
 
 class PytorchWrapper:
     def __init__(self, model, identifier=None, *args, **kwargs):
+        super(PytorchWrapper, self).__init__()
         self._model = model
         identifier = identifier or model.__class__.__name__
         self._extractor = ActivationsExtractorHelper(

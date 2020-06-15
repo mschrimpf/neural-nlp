@@ -1,12 +1,13 @@
-import sys
-
 import logging
 import pandas as pd
+import sys
 from functools import reduce
 from matplotlib import pyplot
+from pathlib import Path
 
 from neural_nlp import benchmark_pool
-from neural_nlp.analyze.scores import shaded_errorbar, choose_best_scores, savefig, collect_scores
+from neural_nlp.analyze import savefig
+from neural_nlp.analyze.scores import choose_best_scores, collect_scores
 
 
 def plot_num_sentences(model='gpt2-xl'):
@@ -29,7 +30,7 @@ def plot_num_sentences(model='gpt2-xl'):
         ax.set_ylabel(("Normalized " if normalize else "") + f"Consistency ({model})")
         ax.set_title(("Ceiled" if normalize else "Raw") + " Scores")
 
-    savefig(fig, savename="story_context")
+    savefig(fig, savename=Path(__file__).parent / "story_context")
 
 
 if __name__ == '__main__':

@@ -1,7 +1,4 @@
 import copy
-import os
-import pickle
-import tempfile
 from collections import OrderedDict, defaultdict
 from enum import Enum
 from importlib import import_module
@@ -9,7 +6,10 @@ from importlib import import_module
 import itertools
 import logging
 import numpy as np
+import os
 import pandas as pd
+import pickle
+import tempfile
 from brainio_collection.fetch import fullname
 from numpy.random.mtrand import RandomState
 from pathlib import Path
@@ -23,11 +23,23 @@ _ressources_dir = (Path(__file__).parent / '..' / '..' / 'ressources' / 'models'
 
 
 class BrainModel:
-    Modes = Enum('Mode', 'recording tokens_to_features sentence_features')
+    Modes = Enum('Mode', 'recording')
+
+    def __call__(self, sentences):
+        """
+        Record representations in response to sentences. Ideally this would be localized to a
+        :param sentences:
+        :return:
+        """
+        raise NotImplementedError()
+
+
+class TaskModel:
+    Modes = Enum('Mode', 'tokens_to_features sentence_features')
 
     def __init__(self):
-        super(BrainModel, self).__init__()
-        self._mode = self.Modes.recording
+        super(TaskModel, self).__init__()
+        self._mode = BrainModel.Modes.recording  # run as BrainModel by default
 
     @property
     def mode(self):
@@ -35,11 +47,8 @@ class BrainModel:
 
     @mode.setter
     def mode(self, value):
-        assert value in self.Modes
+        assert value in TaskModel.Modes or value in BrainModel.Modes
         self._mode = value
-
-    def __call__(self, sentences):
-        raise NotImplementedError()
 
     def tokenize(self, text):
         raise NotImplementedError()
@@ -62,7 +71,10 @@ class BrainModel:
         raise NotImplementedError()
 
 
-class SentenceLength(BrainModel):
+class SentenceLength(BrainModel, TaskModel):
+    """
+    control model
+    """
     available_layers = ['sentence-length']
     default_layers = available_layers
 
@@ -84,38 +96,69 @@ class SentenceLength(BrainModel):
         return {self.available_layers[0]: np.array(sentence_lengths)}
 
 
-class TopicETM(BrainModel):
-    """https://arxiv.org/abs/1907.04907"""
+class RandomEmbedding(BrainModel):
+    """
+    control model
+    """
+    identifier = 'random-embedding'
+    available_layers = [identifier]
+    default_layers = available_layers
+
+    def __init__(self, num_embeddings=1600):
+        self._random_state = RandomState(0)
+        self._embeddings = defaultdict(lambda: self._random_state.rand(num_embeddings))
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier,
+                                                     get_activations=self._get_activations, reset=lambda: None)
+
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        return _call_conditional_average(*args, extractor=self._extractor,
+                                         average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
+
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, self.available_layers)
+        word_embeddings = [np.array([[self._embeddings[word] for word in sentence.split()]]) for sentence in sentences]
+        return {self.available_layers[0]: word_embeddings}
+
+
+class ETM(BrainModel, TaskModel):
+    """
+    Dieng et al., 2019
+    https://arxiv.org/abs/1907.04907
+    """
 
     identifier = 'ETM'
 
     available_layers = ['projection']
     default_layers = available_layers
 
-    def __init__(self, identifier,
-                 weights_file,
-                 vocab_file,
-                 emb_size,
-                 binary=False):
-
+    def __init__(self, weights_file='rho_100_20ng_min_df_2.npy', vocab_file='vocab_100_20ng_min_df_2.pkl',
+                 emb_size=300, random_embeddings=False, random_std=1):
         super().__init__()
-        self.emb_size = emb_size
+        self._logger = logging.getLogger(fullname(self))
 
-        self.weights = weights_file
+        weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
+        vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
         self.weights = np.load(weights_file)
-
+        self.emb_size = emb_size
         with open(vocab_file, 'rb') as f:
             self.vocab = pickle.load(f)
         self.vocab_index = {word: index for index, word in enumerate(self.vocab)}
         self.index_vocab = {index: word for index, word in enumerate(self.vocab)}
 
-        wordEmb_TopicSpace = {}
-        for elm in tqdm(self.vocab, desc='vocab'):
-            i = self.vocab.index(elm)  # get index of word
-            wordEmb_TopicSpace[elm] = self.weights[:, i]
-        self.wordEmb_TopicSpace = wordEmb_TopicSpace
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)
+        if random_embeddings:
+            self._logger.debug(f"Replacing embeddings with random N(0, {random_std})")
+            random_embedding = RandomState(0).randn(len(self.vocab), self.emb_size) * random_std
+            self.wordEmb_TopicSpace = {word: random_embedding[i] for i, word in enumerate(sorted(self.vocab))}
+        else:
+            wordEmb_TopicSpace = {}
+            for elm in tqdm(self.vocab, desc='vocab'):
+                i = self.vocab.index(elm)  # get index of word
+                wordEmb_TopicSpace[elm] = self.weights[i]
+            self.wordEmb_TopicSpace = wordEmb_TopicSpace
+
+        self._extractor = ActivationsExtractorHelper(
+            identifier=self.identifier + ('-untrained' if random_embeddings else ''),
+            get_activations=self._get_activations, reset=lambda: None)
         self._extractor.insert_attrs(self)
         self._logger = logging.getLogger(self.__class__.__name__)
 
@@ -123,7 +166,7 @@ class TopicETM(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             return self._encode_sentence(*args, **kwargs)
 
     def _encode_sentence(self, sentence):
@@ -133,6 +176,7 @@ class TopicETM(BrainModel):
             words = [self.index_vocab[index] for index in sentence]
         feature_vectors = []
         for word in words:
+            word = word.lower()
             if word in self.vocab:
                 feature_vectors.append(self.wordEmb_TopicSpace[word])
             else:
@@ -162,54 +206,24 @@ class TopicETM(BrainModel):
         return len(self.vocab)
 
 
-class ETM_topicspace(TopicETM):
-    """Uses the distributed representation of topics from the ETM as embedding features"""
-
-    identifier = TopicETM.identifier
-
-    def __init__(self, weights_file='normalized_betas_50K.npy',
-                 vocab_file='vocab_50K.pkl',
-                 emb_size=100):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
-        emb_size = emb_size
-
-        super(ETM_topicspace, self).__init__(identifier=self.identifier, weights_file=weights_file,
-                                             vocab_file=vocab_file, emb_size=emb_size)
-
-
-class ETM_featurespace(TopicETM):
-    """Uses the jointly learned embedding space for words and topics from the ETM as embedding features"""
-
-    identifier = TopicETM.identifier + '-featurespace'
-
-    def __init__(self, weights_file='rho-50-wikitext_df1.npy',
-                 vocab_file='vocab_wikitext_df_1.pkl',
-                 emb_size=300):
-        weights_file = os.path.join(_ressources_dir, 'topicETM', weights_file)
-        vocab_file = os.path.join(_ressources_dir, 'topicETM', vocab_file)
-        emb_size = emb_size
-
-        super(ETM_featurespace, self).__init__(identifier=self.identifier, weights_file=weights_file,
-                                               vocab_file=vocab_file, emb_size=emb_size)
-
-
-class SkipThoughts(BrainModel):
+class SkipThoughts(BrainModel, TaskModel):
     """
+    Kiros et al., 2015
     http://papers.nips.cc/paper/5950-skip-thought-vectors
     """
 
     identifier = 'skip-thoughts'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts')):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts'), load_weights=True):
         super().__init__()
         self._logger = logging.getLogger(fullname(self))
         import skipthoughts
         weights = weights + '/'
         model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
         self._encoder = LazyLoad(lambda: skipthoughts.Encoder(model))
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)  # not sure if this resets states on its own
+        self._extractor = ActivationsExtractorHelper(
+            identifier=self.identifier + ("-untrained" if not load_weights else ''),
+            get_activations=self._get_activations, reset=lambda: None)  # resets states on its own
         self._extractor.insert_attrs(self)
         # setup prioritized vocabulary entries to map to indices and back.
         # unfortunately it does not seem straight-forward to retrieve preferred words/tokens for the model, such as
@@ -244,7 +258,7 @@ class SkipThoughts(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             return self._encode_sentence(*args, **kwargs)
 
     def _get_activations(self, sentences, layers):
@@ -270,26 +284,28 @@ class SkipThoughts(BrainModel):
     default_layers = available_layers
 
 
-class LM1B(BrainModel):
+class LM1B(BrainModel, TaskModel):
     """
+    Jozefowicz et al., 2016
     https://arxiv.org/pdf/1602.02410.pdf
     """
 
     identifier = 'lm_1b'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b')):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b'), reset_weights=False):
         super().__init__()
         self._logger = logging.getLogger(self.__class__.__name__)
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
-                                ckpt=os.path.join(weights, 'ckpt-*'))
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)
+                                ckpt=os.path.join(weights, 'ckpt-*'),
+                                reset_weights=reset_weights)
+        self._extractor = ActivationsExtractorHelper(
+            identifier=self.identifier + ('-untrained' if reset_weights else ''),
+            get_activations=self._get_activations, reset=self._initialize)
         self._extractor.insert_attrs(self)
         self._vocab_index = self._encoder.vocab._word_to_id
         self._index_vocab = {index: word for word, index in self._vocab_index.items()}
-        self._is_initialized = False
 
     @property
     def vocab_size(self):
@@ -314,7 +330,8 @@ class LM1B(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
+            self._initialize()  # reset
             readout_layer = self.default_layers[-1]
             return self._encode_sentence(*args, layers=[readout_layer], **kwargs)[readout_layer]
 
@@ -338,6 +355,8 @@ class LM1B(BrainModel):
             sentence = '<S> ' + sentence
         word_ids = [self._encoder.vocab.word_to_id(w) for w in sentence.split()]
         char_ids = [self._encoder.vocab.word_to_char_ids(w) for w in sentence.split()]
+        # some unknown characters end up as '�' (ord 65533). Replace those with empty (4)
+        char_ids = [np.array([c if c < 256 else 4 for c in chars]) for chars in char_ids]
         inputs = np.zeros([lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS], np.int32)
         char_ids_inputs = np.zeros(
             [lm_1b_eval.BATCH_SIZE, lm_1b_eval.NUM_TIMESTEPS, self._encoder.vocab.max_word_length], np.int32)
@@ -362,14 +381,11 @@ class LM1B(BrainModel):
             # embeddings is `words x layers x (1 x 1024)`
             layer_activations[layer] = [embedding[i] for embedding in embeddings]
             # words x 1 x 1024 --> words x 1024
-            layer_activations[layer] = np.array(layer_activations[layer]).transpose(1, 0, 2).squeeze()
+            layer_activations[layer] = np.array(layer_activations[layer]).transpose(1, 0, 2).squeeze(axis=0)
         return layer_activations
 
     def _initialize(self):
-        if self._is_initialized:
-            return
         self._encoder.sess.run(self._encoder.t['states_init'])
-        self._is_initialized = True
 
     def available_layers(self, filter_inputs=True):
         return [tensor_name for tensor_name in self._encoder.t if not filter_inputs or not tensor_name.endswith('_in')]
@@ -392,14 +408,15 @@ def word_mean(layer_activations):
     return layer_activations
 
 
-class Transformer(PytorchWrapper, BrainModel):
+class Transformer(PytorchWrapper, BrainModel, TaskModel):
     """
+    Vaswani & Shazeer & Parmar & Uszkoreit & Jones & Gomez & Kaiser & Polosukhin, 2017
     https://arxiv.org/pdf/1706.03762.pdf
     """
 
     identifier = 'transformer'
 
-    def __init__(self):
+    def __init__(self, untrained=False):
         weights = os.path.join(_ressources_dir, 'transformer/averaged-10-epoch.pt')
         from onmt.opts import add_md_help_argument, translate_opts
         from onmt.translate.translator import build_translator
@@ -408,22 +425,25 @@ class Transformer(PytorchWrapper, BrainModel):
         add_md_help_argument(parser)
         translate_opts(parser, weights)
         opt = parser.parse_args(['-batch_size', '1'])
-        translator = build_translator(opt, report_score=True)
+        translator = build_translator(opt, report_score=True, untrained=untrained)
 
         self._model_container = self.TransformerContainer(translator, opt)
         self.vocab_index = {word: index for index, word in
                             enumerate(self._model_container.translator.fields["src"].vocab.freqs)}
         index_vocab = {index: word for word, index in self.vocab_index.items()}
         self._model_container.index_vocab = index_vocab
-        super(Transformer, self).__init__(model=self._model_container, identifier=self.identifier,
-                                          reset=lambda: None)  # transformer is feed-forward
+        super(Transformer, self).__init__(
+            identifier=self.identifier + ('-untrained' if untrained else ''),
+            model=self._model_container, reset=lambda: None)  # transformer is feed-forward
 
     def __call__(self, *args, average_sentence=True, **kwargs):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_last, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
-            return self._model_container(*args, **kwargs)
+        elif self.mode == TaskModel.Modes.tokens_to_features:
+            encodings = self._model_container(*args, **kwargs)
+            # the onmt implementation concats things together, undo this
+            return encodings[0].reshape(-1, self.features_size)
 
     class TransformerContainer:
         def __init__(self, translator, opt):
@@ -438,7 +458,7 @@ class Transformer(PytorchWrapper, BrainModel):
             with tempfile.NamedTemporaryFile(mode='w+') as file:
                 # separating sentences with newline, combined with a batch size of 1
                 # will lead to one set of activations per sentence (albeit multiple words).
-                if isinstance(sentences, np.ndarray):
+                if isinstance(sentences, np.ndarray) and not isinstance(sentences[0], str):
                     sentences = [" ".join([self.index_vocab[index] for index in sentences])]
                 file.write('\n'.join(sentences) + '\n')
                 file.flush()
@@ -455,8 +475,6 @@ class Transformer(PytorchWrapper, BrainModel):
         hook = layer.register_forward_hook(hook_function)
         return hook
 
-    default_layers = [f'encoder.transformer.{i}.{layer}'
-                      for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
     """
     For each of the 6 encoder blocks, we're using two layers,
     one following the Multi-Head Attention and one following the Feed Forward block (cf. Figure 1).
@@ -479,6 +497,8 @@ class Transformer(PytorchWrapper, BrainModel):
     Note however that the attended input has not yet been added back to the feed forward output with
     `feed_forward.dropout_2`; with this framework we cannot capture that operation (we'd have to change the code).
     """
+    default_layers = [f'encoder.transformer.{i}.{layer}'
+                      for i in range(6) for layer in ['feed_forward.layer_norm', 'feed_forward.dropout_2']]
 
     def tokenize(self, text, vocab_size=None):
         assert not vocab_size or vocab_size == self.vocab_size
@@ -488,14 +508,14 @@ class Transformer(PytorchWrapper, BrainModel):
 
     @property
     def features_size(self):
-        return 4608
+        return 512  # encoding output of onmt transformer
 
     @property
     def vocab_size(self):
         return len(self._model_container.translator.fields["src"].vocab)
 
 
-class _PytorchTransformerWrapper(BrainModel):
+class _PytorchTransformerWrapper(BrainModel, TaskModel):
     def __init__(self, identifier, tokenizer, model, layers, sentence_average, tokenizer_special_tokens=()):
         super(_PytorchTransformerWrapper, self).__init__()
         self._logger = logging.getLogger(fullname(self))
@@ -513,9 +533,9 @@ class _PytorchTransformerWrapper(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(*args, extractor=self._extractor, average_sentence=average_sentence,
                                              sentence_averaging=self._sentence_average, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             return self._tokens_to_features(*args, **kwargs)
-        elif self.mode == BrainModel.Modes.sentence_features:
+        elif self.mode == TaskModel.Modes.sentence_features:
             return self._sentence_features(*args, **kwargs)
         else:
             raise ValueError(f"Unknown mode {self.mode}")
@@ -555,7 +575,7 @@ class _PytorchTransformerWrapper(BrainModel):
         # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
         sequence_output = features_outputs[0]
         if any(self.identifier.startswith(first_token_model) for first_token_model in
-               ['bert', 'roberta', 'xlm', 'albert']):
+               ['bert', 'roberta', 'xlm', 'albert', 'distilbert', 'distilroberta']):
             # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L454
             return sequence_output[:, 0]  # sentence features from first token (usually CLS)
         elif any(self.identifier.startswith(last_token_model) for last_token_model in
@@ -732,7 +752,7 @@ class _PytorchTransformerWrapper(BrainModel):
                 yield context_ids
 
 
-class KeyedVectorModel(BrainModel):
+class KeyedVectorModel(BrainModel, TaskModel):
     """
     Lookup-table-like models where each word has an embedding.
     To retrieve the sentence activation, we take the mean of the word embeddings.
@@ -760,7 +780,7 @@ class KeyedVectorModel(BrainModel):
         if self.mode == BrainModel.Modes.recording:
             return _call_conditional_average(stimuli, *args, extractor=self._extractor,
                                              average_sentence=average_sentence, sentence_averaging=word_mean, **kwargs)
-        elif self.mode == BrainModel.Modes.tokens_to_features:
+        elif self.mode == TaskModel.Modes.tokens_to_features:
             stimuli = " ".join(self._model.index2word[index] for index in stimuli)
             return self._encode_sentence(stimuli, *args, **kwargs)
 
@@ -788,6 +808,25 @@ class KeyedVectorModel(BrainModel):
                   and self._vocab[word].index < vocab_size]  # only top-k vocab words
         return np.array(tokens)
 
+    def glue_dataset(self, task, examples, label_list, output_mode, max_seq_length):
+        import torch
+        from torch.utils.data import TensorDataset
+        tokens = [np.concatenate((self.tokenize(example.text_a),) +
+                                 ((self.tokenize(example.text_b),) if example.text_b is not None else ()))
+                  for example in examples]
+        label_map = {label: i for i, label in enumerate(label_list)}
+        labels = [label_map[label] for label in label_list]
+
+        # Convert to Tensors and build dataset   - 3688 * 128
+        # TODO: pad -- but how?
+        token_tensors = torch.tensor(tokens, dtype=torch.long)
+        if output_mode == "classification":
+            all_labels = torch.tensor(labels, dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor(labels, dtype=torch.float)
+        dataset = TensorDataset(token_tensors, all_labels)
+        return dataset
+
     @property
     def vocab_size(self):
         return len(self._vocab)
@@ -799,40 +838,43 @@ class KeyedVectorModel(BrainModel):
 
 class Word2Vec(KeyedVectorModel):
     """
+    Mikolov et al., 2013
     https://arxiv.org/pdf/1310.4546.pdf
     """
 
     identifier = 'word2vec'
 
-    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin', **kwargs):
+    def __init__(self, weights_file='GoogleNews-vectors-negative300.bin', random_embeddings=False, **kwargs):
         weights_file = os.path.join(_ressources_dir, 'word2vec', weights_file)
         super(Word2Vec, self).__init__(
-            identifier=self.identifier, weights_file=weights_file, binary=True,
+            identifier=self.identifier + ('-untrained' if random_embeddings else ''),
+            weights_file=weights_file, binary=True,
             # standard embedding std
             # https://github.com/pytorch/pytorch/blob/ecbf6f99e6a4e373105133b31534c9fb50f2acca/torch/nn/modules/sparse.py#L106
-            random_std=1, **kwargs)
+            random_std=1, random_embeddings=random_embeddings, **kwargs)
 
 
 class Glove(KeyedVectorModel):
     """
+    Pennington et al., 2014
     http://www.aclweb.org/anthology/D14-1162
     """
 
     identifier = 'glove'
 
-    def __init__(self, weights='glove.840B.300d.txt', **kwargs):
+    def __init__(self, weights='glove.840B.300d.txt', random_embeddings=False, **kwargs):
         from gensim.scripts.glove2word2vec import glove2word2vec
         weights_file = os.path.join(_ressources_dir, 'glove', weights)
         word2vec_weightsfile = weights_file + '.word2vec'
         if not os.path.isfile(word2vec_weightsfile):
             glove2word2vec(weights_file, word2vec_weightsfile)
         super(Glove, self).__init__(
-            identifier=self.identifier, weights_file=word2vec_weightsfile,
+            identifier=self.identifier + ('-untrained' if random_embeddings else ''), weights_file=word2vec_weightsfile,
             # std from https://gist.github.com/MatthieuBizien/de26a7a2663f00ca16d8d2558815e9a6#file-fast_glove-py-L16
-            random_std=.01, **kwargs)
+            random_std=.01, random_embeddings=random_embeddings, **kwargs)
 
 
-class RecursiveNeuralTensorNetwork(BrainModel):
+class RecursiveNeuralTensorNetwork(BrainModel, TaskModel):
     """
     http://www.aclweb.org/anthology/D13-1170
     """
@@ -853,37 +895,6 @@ class RecursiveNeuralTensorNetwork(BrainModel):
         return result.values
 
 
-class Pereira2018NonLanguage(BrainModel):
-    identifier = 'Pereira2018-non_language'
-    default_layers = available_layers = ['precomputed']
-
-    def __init__(self):
-        super(Pereira2018NonLanguage, self).__init__()
-        from neural_nlp.benchmarks.neural import PereiraEncoding
-        assembly = PereiraEncoding()._target_assembly
-        self._assembly = assembly[{'neuroid': [atlas in ['visual', 'auditory'] for atlas in assembly['atlas'].values]}]
-        self._extractor = ActivationsExtractorHelper(identifier=self.identifier, get_activations=self._get_activations,
-                                                     reset=lambda: None)
-        self._extractor.insert_attrs(self)
-
-    def __call__(self, *args, average_sentence=True, **kwargs):
-        if not average_sentence:
-            raise NotImplementedError("we only have the sentence signal from the Pereira2018 data")
-        return self._extractor(*args, **kwargs)
-
-    def _get_activations(self, sentences, layers):
-        np.testing.assert_array_equal(layers, self.available_layers)
-        stimuli = self._assembly.stimulus_set[self._assembly.stimulus_set['sentence'].isin(sentences)]
-        if len(stimuli) == 0:
-            raise NotImplementedError("this pseudo-model only works for the Pereira2018 stimuli")
-        assembly = self._assembly[{'presentation': [stimulus_id in stimuli['stimulus_id'].values
-                                                    for stimulus_id in self._assembly['stimulus_id'].values]}]
-        assert len(assembly['presentation']) == len(sentences)
-        assembly = assembly.transpose('presentation', 'neuroid')
-        # there are nans in the assembly, but the regression is going to take care of that for us
-        return {self.available_layers[0]: assembly.values}
-
-
 def _call_conditional_average(*args, extractor, average_sentence, sentence_averaging, **kwargs):
     if average_sentence:
         handle = extractor.register_activations_hook(sentence_averaging)
@@ -899,27 +910,29 @@ def load_model(model_name):
 
 model_pool = {
     SentenceLength.identifier: LazyLoad(SentenceLength),
+    RandomEmbedding.identifier: LazyLoad(RandomEmbedding),
     SkipThoughts.identifier: LazyLoad(SkipThoughts),
+    SkipThoughts.identifier + '-untrained': LazyLoad(lambda: SkipThoughts(load_weights=False)),
     LM1B.identifier: LazyLoad(LM1B),
+    LM1B.identifier + '-untrained': LazyLoad(lambda: LM1B(reset_weights=True)),
     Word2Vec.identifier: LazyLoad(Word2Vec),
     Word2Vec.identifier + '-untrained': LazyLoad(lambda: Word2Vec(random_embeddings=True)),
     Glove.identifier: LazyLoad(Glove),
     Glove.identifier + '-untrained': LazyLoad(lambda: Glove(random_embeddings=True)),
     Transformer.identifier: LazyLoad(Transformer),
-    ETM_topicspace.identifier: LazyLoad(ETM_topicspace),
-    ETM_featurespace.identifier: LazyLoad(ETM_featurespace),
-    Pereira2018NonLanguage.identifier: LazyLoad(Pereira2018NonLanguage),
+    Transformer.identifier + '-untrained': LazyLoad(lambda: Transformer(untrained=True)),
+    ETM.identifier: LazyLoad(ETM),
+    ETM.identifier + '-untrained': LazyLoad(lambda: ETM(random_embeddings=True)),
 }
 model_layers = {
     SentenceLength.identifier: SentenceLength.default_layers,
+    RandomEmbedding.identifier: RandomEmbedding.default_layers,
     SkipThoughts.identifier: SkipThoughts.default_layers,
     LM1B.identifier: LM1B.default_layers,
     Word2Vec.identifier: Word2Vec.default_layers,
     Glove.identifier: Glove.default_layers,
     Transformer.identifier: Transformer.default_layers,
-    ETM_topicspace.identifier: ETM_topicspace.default_layers,
-    ETM_featurespace.identifier: ETM_featurespace.default_layers,
-    Pereira2018NonLanguage.identifier: Pereira2018NonLanguage.default_layers,
+    ETM.identifier: ETM.default_layers,
 }
 # untrained layers are the same as trained ones
 model_layers = {**model_layers, **{f"{identifier}-untrained": layers for identifier, layers in model_layers.items()}}
@@ -1113,8 +1126,9 @@ for untrained in False, True:
             tokenizer = tokenizer_ctr.from_pretrained(configuration['weight_identifier'])
             state_dict = None
             if not configuration.get('trained', True):  # if untrained
+                # load standard model constructor: this will only create modules and initialize them for training
                 model = model_ctr(config=config)
-                state_dict = model.state_dict()  # force loading of initial
+                state_dict = model.state_dict()  # capture initial random weights and force load them later
             model = model_ctr.from_pretrained(configuration['weight_identifier'],
                                               output_hidden_states=True, state_dict=state_dict)
             model_wrapper = configuration.get('model_wrapper', None)

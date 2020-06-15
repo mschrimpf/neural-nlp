@@ -1,6 +1,7 @@
 import fire
 import itertools
 import logging
+import matplotlib
 import numpy as np
 import seaborn
 import sys
@@ -15,6 +16,8 @@ from brainscore.metrics import Score
 from brainscore.metrics.regression import pearsonr_correlation
 from brainscore.metrics.transformations import apply_aggregate
 from neural_nlp import benchmark_pool
+from neural_nlp.analyze import savefig
+from neural_nlp.analyze.data import subject_columns
 from neural_nlp.benchmarks.ceiling import ci_error, v
 from neural_nlp.neural_data.fmri import load_voxels
 from result_caching import store
@@ -67,7 +70,7 @@ def average_subregions(assembly):
     return assembly
 
 
-def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
+def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding', ytick_formatting_frequency=None):
     benchmark_impl = benchmark_pool[benchmark]
     ceiling = benchmark_impl.ceiling
 
@@ -80,7 +83,7 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
     elif benchmark.startswith('Pereira'):
         raw_ceilings = ceiling.raw.raw.sel(atlas='language')
         bootstrapped_params = ceiling.raw.bootstrapped_params.sel(atlas='language')
-        bootstrapped_params = bootstrapped_params.median('neuroid')
+        bootstrapped_params = bootstrapped_params.median(benchmark_impl._ceiler.extrapolation_dimension)
     else:
         raw_ceilings = ceiling.raw.raw
     subject_column = "sub_" + subject_columns[benchmark]
@@ -89,14 +92,15 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
     jitter = .25 * step_size
     rng = RandomState(0)
     x = num_splits['num_subjects'].values + (-jitter / 2 + jitter * rng.rand(len(num_splits['num_subjects'])))
-    y = num_splits.median('neuroid').values if not benchmark.startswith('Futrell') else num_splits.values
+    y = num_splits.median(benchmark_impl._ceiler.extrapolation_dimension).values \
+        if not benchmark.startswith('Futrell') else num_splits.values
     ax.scatter(x, y, color='black', s=1, zorder=10)
 
     # bootstrap and average fits
     x = np.arange(0, max(ceiling.endpoint_x, max(raw_ceilings['num_subjects'].values)) * 1.3)
     ys = np.array([v(x, *params) for params in bootstrapped_params.values])
     for y in ys:
-        ax.plot(x, y, alpha=.05 if not benchmark.startswith('Pereira') else .1, color='gray')
+        ax.plot(x, y, alpha=.05, color='gray')
     median_ys = np.nanmedian(ys, axis=0)
     error = confidence_interval(ys.T, centers=median_ys)
     ax.errorbar(x=x, y=median_ys, yerr=list(zip(*error)), linestyle='dashed', color='gray')
@@ -108,12 +112,17 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding'):
     ax.set_title(benchmark)
     ax.set_xlabel('# subjects')
     ax.set_ylabel('estimated ceiling')
-    ax.set_ylim([0.9 * np.min(y), .29 if benchmark.startswith('Fedorenko') else (1.2 * np.max(y))])
+    ax.set_ylim([0.9 * np.min(y), (1.35 if not benchmark.startswith('Futrell') else 1.1) * np.max(y)])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    if ytick_formatting_frequency:
+        @matplotlib.ticker.FuncFormatter
+        def score_formatter(score, pos):
+            return f"{score:.{ytick_formatting_frequency}f}"[1:]  # strip "0" in front of e.g. "0.2"
+
+        ax.yaxis.set_major_formatter(score_formatter)
     fig.tight_layout()
-    savepath = Path(__file__).parent / f'extrapolation-{benchmark}.png'
-    _logger.debug(f"Saving to {savepath}")
-    fig.savefig(savepath)
+    savefig(fig, Path(__file__).parent / f'extrapolation-{benchmark}')
 
 
 def confidence_interval(data, centers, confidence=0.95):
@@ -135,7 +144,7 @@ def plot_ceiling_subsamples(benchmark='Fedorenko2016-encoding'):
         ax.hist(num_splits.sel(num_subjects=ns).values.flatten())
         ax.set_xlabel(f"{ns}")
     fig.tight_layout()
-    fig.savefig(Path(__file__).parent / f'hist-{benchmark}.png')
+    savefig(Path(__file__).parent / f'hist-{benchmark}.png')
 
 
 if __name__ == '__main__':

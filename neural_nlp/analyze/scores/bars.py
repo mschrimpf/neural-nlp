@@ -1,20 +1,21 @@
-from decimal import Decimal
-
 import fire
 import itertools
 import logging
-import matplotlib
 import numpy as np
 import pandas as pd
 import seaborn
 import sys
+from decimal import Decimal
+from functools import reduce
 from matplotlib import pyplot
 from matplotlib.ticker import MultipleLocator
+from pathlib import Path
 from scipy.stats import pearsonr
 
+from neural_nlp.analyze import savefig, score_formatter
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
-    align_scores, savefig, significance_stars, get_ceiling, shaded_errorbar, score_formatter, model_label_replace, \
+    align_scores, significance_stars, get_ceiling, shaded_errorbar, model_label_replace, \
     benchmark_label_replace
 from result_caching import is_iterable
 
@@ -58,7 +59,7 @@ def fmri_per_network(models=all_models, benchmark='Pereira2018-encoding'):
             ax.set_xticklabels([])
 
     fig.subplots_adjust(wspace=0, hspace=.2)
-    savefig(fig, f'bars-network-{benchmark}')
+    savefig(fig, Path(__file__).parent / f'bars-network-{benchmark}')
 
 
 def wikitext_best(benchmark='wikitext-2'):
@@ -83,15 +84,14 @@ def whole_best(benchmark=None, data=None, title_kwargs=None, normalize_error=Fal
         ax.set_ylim([-.05, max(1.05 + ceiling_err[-1], max(data['score']) + .05)])
     ax.set_xticks([])
     ax.set_xticklabels([])
-    axis_locator = MultipleLocator(base=0.2)
-    ax.yaxis.set_major_locator(axis_locator)
+    ax.yaxis.set_major_locator(MultipleLocator(base=0.2))
     ax.yaxis.set_major_formatter(score_formatter)
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)
-    savefig(fig, f'bars-{benchmark}')
+    savefig(fig, Path(__file__).parent / f'bars-{benchmark}')
 
 
-def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consistency", annotate=True,
+def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predictivity", annotate=True,
                text_kwargs=None):
     text_kwargs = {**dict(fontdict=dict(fontsize=7), color='white'), **(text_kwargs or {})}
     step = (len(models) + 1) * width
@@ -108,12 +108,12 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consis
                 ax.text(x=xpos + .6 * width / 2, y=.005, s=model_label_replace[model],
                         rotation=90, rotation_mode='anchor', **text_kwargs)
     for (model_group, annotate_x, width) in [
-        ('Emb.', 0.076, 1.0),
-        ('BERT', 0.221, 1.71),
-        ('XLM', 0.407, 2.41),
-        ('T5', 0.6137, 1.7),
-        ('AlBERT', 0.7487, 2.749),
-        ('GPT', 0.894, 2.05),
+        ('Emb.', 0.077, 1.05),
+        ('BERT', 0.203, 1.76),
+        ('XLM', 0.3935, 2.44),
+        ('T5', 0.605, 1.75),
+        ('AlBERT', 0.7427, 2.78),
+        ('GPT', 0.8904, 2.085),
     ]:
         ax.annotate(model_group, xy=(annotate_x, +.0), xytext=(annotate_x, -.05), xycoords='axes fraction',
                     fontsize=8, ha='center', va='bottom',
@@ -129,6 +129,38 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Consis
     ax.set_xticks(x)
     ax.tick_params(axis="x", pad=-5)
     return ax
+
+
+def random_embedding():
+    models = ['gpt2-xl', 'gpt2-xl-untrained', 'random-embedding']
+    benchmarks = ['Pereira2018-encoding', 'Fedorenko2016v3-encoding', 'Blank2014fROI-encoding', 'Futrell2018-encoding']
+    scores = [collect_scores(benchmark=benchmark, models=models) for benchmark in benchmarks]
+    scores = [average_adjacent(benchmark_scores) for benchmark_scores in scores]
+    scores = [choose_best_scores(benchmark_scores).dropna() for benchmark_scores in scores]
+    scores = reduce(lambda left, right: pd.concat([left, right]), scores)
+
+    fig, ax = pyplot.subplots(figsize=(5, 4))
+    colors = {'gpt2-xl': model_colors['gpt2-xl'], 'gpt2-xl-untrained': '#284343', 'random-embedding': '#C3CCCC'}
+    offsets = {0: -.2, 1: 0, 2: +.2}
+    width = 0.5 / 3
+    text_kwargs = dict(fontdict=dict(fontsize=7), color='white')
+    base_x = np.arange(len(benchmarks))
+    for i, model in enumerate(models):
+        model_scores = scores[scores['model'] == model]
+        x = base_x + offsets[i]
+        ax.bar(x, height=model_scores['score'], yerr=model_scores['error'],
+               width=width, align='center',
+               color=colors[model], edgecolor='none', ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
+        for xpos in x:
+            ax.text(x=xpos + .6 * width / 2, y=.05, s=model_label_replace[model],
+                    rotation=90, rotation_mode='anchor', **text_kwargs)
+    ax.set_xticks(base_x)
+    ax.set_xticklabels([benchmark_label_replace[benchmark] for benchmark in benchmarks], fontsize=9)
+    ax.yaxis.set_major_locator(MultipleLocator(base=0.2))
+    ax.yaxis.set_major_formatter(score_formatter)
+    ax.set_ylim([0, 1.2])
+    ax.set_ylabel('Normalized Predictivity')
+    savefig(fig, Path(__file__).parent / "bars-random_embedding")
 
 
 def benchmark_correlations(best_layer=True):
@@ -165,7 +197,7 @@ def benchmark_correlations(best_layer=True):
     for _x, r, p in zip(x, data['r'].values, data['p'].values):
         ax.text(_x, r + .05, significance_stars(p) if p < .05 else 'n.s.', fontsize=12,
                 horizontalalignment='center', verticalalignment='center')
-    savefig(fig, 'benchmark-correlations' + ('-best' if best_layer else '-layers'))
+    savefig(fig, Path(__file__).parent / 'benchmark-correlations' + ('-best' if best_layer else '-layers'))
 
 
 if __name__ == '__main__':
