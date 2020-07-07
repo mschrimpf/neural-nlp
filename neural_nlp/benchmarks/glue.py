@@ -15,24 +15,24 @@
 # limitations under the License.
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa, Albert, XLM-RoBERTa)."""
 
-import json
-import os
 import random
 
+import json
 import logging
 import numpy as np
+import os
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm import tqdm, trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 from transformers import glue_compute_metrics as compute_metrics
-from transformers import glue_convert_examples_to_features as convert_examples_to_features
 from transformers import glue_output_modes as output_modes
 from transformers import glue_processors as processors
 
 from brainscore.metrics import Score
+from brainscore.utils import LazyLoad
 from neural_nlp.models.implementations import BrainModel
 
 try:
@@ -175,8 +175,8 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
 def _get_val_stop_score(results):
     if 'acc' in results:  # acc,[f1,acc_and_f1]
         return results['acc']
-    elif 'corr' in results:  # pearson,spearman,corr
-        return results['corr']
+    elif 'pearson' in results:  # pearson,spearman,corr
+        return results['pearson']
     else:
         raise ValueError(f"Unknown results {results}")
 
@@ -303,5 +303,5 @@ class GLUEBenchmark:
         return results
 
 
-benchmark_pool = {f'glue-{task}': lambda _task=task: GLUEBenchmark(_task) for task in
-                  ['cola', 'mnli', 'mrpc', 'sst-2', 'sts-b', 'qqp', 'qnli', 'rte', 'wnli']}
+benchmark_pool = {f'glue-{task}': LazyLoad(lambda _task=task: GLUEBenchmark(_task))
+                  for task in ['cola', 'mnli', 'mrpc', 'sst-2', 'sts-b', 'qqp', 'qnli', 'rte', 'wnli']}
