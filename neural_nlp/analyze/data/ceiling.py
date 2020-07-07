@@ -110,7 +110,7 @@ def plot_extrapolation_ceiling(benchmark='Pereira2018-encoding', ytick_formattin
 
     # plot meta
     ax.set_title(benchmark)
-    ax.set_xlabel('# subjects')
+    ax.set_xlabel('# participants')
     ax.set_ylabel('estimated ceiling')
     ax.set_ylim([0.9 * np.min(y), (1.35 if not benchmark.startswith('Futrell') else 1.1) * np.max(y)])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
@@ -152,5 +152,6 @@ if __name__ == '__main__':
 
     warnings.simplefilter(action='ignore')
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    logging.getLogger('brainscore.metrics').setLevel(logging.INFO)
     seaborn.set(context='talk')
     fire.Fire()
