@@ -1,5 +1,4 @@
 import logging
-import numpy as np
 import pickle
 import sys
 from pathlib import Path
@@ -7,6 +6,7 @@ from scipy.stats import median_absolute_deviation
 from tqdm import tqdm
 
 from brainscore.metrics.transformations import standard_error_of_the_mean
+from neural_nlp.benchmarks.neural import consistency
 
 
 def testing():
@@ -49,17 +49,17 @@ def change():
             ceiled_score = pickle.load(f)['data']
         unceiled_score = ceiled_score.raw
         # recompute
-        raw = unceiled_score.raw
-        subject_scores = raw.groupby('subject').median('neuroid')
-        subject_values = np.nan_to_num(subject_scores.values, nan=0)
-        unceiled_error = median_absolute_deviation(subject_values, axis=subject_scores.dims.index('subject'))
-        ceiled_error = unceiled_error / ceiled_score.ceiling.sel(aggregation='center').values
-        # set
-        ceiled_score.loc[{'aggregation': 'error'}] = ceiled_error  # will apply to unceiled score due to apply_raw
-        unceiled_score.loc[{'aggregation': 'error'}] = unceiled_error
+        ceiling = ceiled_score.ceiling
+        language_neuroids = ceiling.raw.sel(atlas='language')
+        # original: language_neuroids.median('neuroid')
+        new_ceiling = language_neuroids.groupby('subject').apply(lambda a: a.median('neuroid')).median('subject')
+        new_ceiling.attrs = ceiling.attrs
+        new_score = consistency(unceiled_score, new_ceiling.sel(aggregation='center').values)
+        new_score.attrs = ceiled_score.attrs
+        new_score.attrs['ceiling'] = new_ceiling
         # update file
         with open(score_file, 'wb') as f:
-            pickle.dump({'data': ceiled_score}, f, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump({'data': new_score}, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 if __name__ == '__main__':
