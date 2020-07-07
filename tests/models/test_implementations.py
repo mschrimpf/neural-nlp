@@ -23,6 +23,7 @@ class TestActivations:
         layers = list(set(activations['layer'].values))
         base_shape = activations.sel(layer=layers[0]).shape
         assert all([activations.sel(layer=layer).shape == base_shape for layer in layers])
+        assert len(activations.sel(layer=layers[0])['neuroid']) == model.features_size
 
     @pytest.mark.parametrize('num_words', [8])
     @pytest.mark.parametrize("model", models)
