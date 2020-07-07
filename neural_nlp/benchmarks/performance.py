@@ -91,6 +91,7 @@ class TextDataset(Dataset):
             for block in tqdm(self.examples, desc="token blocks to features"):  # pass tokens to model
                 block_features = model(block)
                 self.features.append(block_features)
+            self.features = np.array(self.features)
             if os.getenv('NOSAVE', '0') != '1':
                 logger.info("Saving features into cached file %s", cached_features_file)
                 with open(cached_features_file, 'wb') as handle:
@@ -300,5 +301,5 @@ def Wikitext2Benchmark(identifier='wikitext-2', **kwargs):
 
 
 benchmark_pool = {
-    'wikitext-2': Wikitext2Benchmark,
+    'wikitext-2': LazyLoad(lambda: Wikitext2Benchmark(identifier='wikitext-2', tied=False, block_size=32)),
 }
