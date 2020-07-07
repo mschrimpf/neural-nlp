@@ -223,25 +223,35 @@ class Blank2014fROIEncoding(Blank2014VoxelEncoding):
         return averaged_assembly
 
 
-class Blank2014SentencesfROIEncoding(Blank2014fROIEncoding):
-    def __init__(self, *args, num_sentences, **kwargs):
-        super(Blank2014SentencesfROIEncoding, self).__init__(*args, **kwargs)
-        self.num_sentences = num_sentences
+class Blank2014SentencefROIEncoding(Blank2014fROIEncoding):
+    def __init__(self, *args, sentence_num, **kwargs):
+        super(Blank2014SentencefROIEncoding, self).__init__(*args, **kwargs)
+        self.sentence_num = sentence_num
 
     def _load_assembly(self, bold_shift):
         assembly = super(Blank2014fROIEncoding, self)._load_assembly(bold_shift)
         # choose only up to nth sentence
         # stimulus_id is ['story', 'sentence_num', 'sentence_part']
         assembly = assembly[{'presentation': [
-            int(stimulus_id.split('.')[1]) < self.num_sentences
+            int(stimulus_id.split('.')[1]) == self.sentence_num
             for stimulus_id in assembly['stimulus_id'].values]}]
         return assembly
+
+    def __call__(self, candidate):
+        _logger.info('Computing activations')
+        model_activations = listen_to(candidate, self._target_assembly.attrs['stimulus_set'])
+        assert all(stimulus_id in set(model_activations['stimulus_id'].values)
+                   for stimulus_id in set(self._target_assembly['stimulus_id'].values))
+        _logger.info('Scoring model')
+        score = self.apply_metric(model_activations, self._target_assembly)
+        score = self.ceiling_normalize(score)
+        return score
 
     def apply_metric(self, model_activations, target_assembly):
         stimulus_ids = set(self._target_assembly['stimulus_id'].values)
         model_activations = model_activations[{'presentation': [
             stimulus_id in stimulus_ids for stimulus_id in model_activations['stimulus_id'].values]}]
-        return super(Blank2014SentencesfROIEncoding, self).apply_metric(model_activations, target_assembly)
+        return super(Blank2014SentencefROIEncoding, self).apply_metric(model_activations, target_assembly)
 
     def ceiling_normalize(self, score):
         raw_neuroids = apply_aggregate(lambda values: values.mean('split'), score.raw)
@@ -797,8 +807,9 @@ benchmark_pool = [
     ('Blank2014fROI-rdm', Blank2014fROIRDM),
     ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
 ]
-for num_sentences in range(1, 9):
-    benchmark_pool.append((f'Blank2014sentences{num_sentences}fROI-encoding',
-                           lambda *args, **kwargs: Blank2014SentencesfROIEncoding(*args, num_sentences=1, **kwargs)))
+for sentence_num in range(1, 10, 2):
+    benchmark_pool.append((f'Blank2014sentence{sentence_num}fROI-encoding',
+                           lambda *args, sentence_num=sentence_num, **kwargs:
+                           Blank2014SentencefROIEncoding(*args, sentence_num=sentence_num, **kwargs)))
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}
