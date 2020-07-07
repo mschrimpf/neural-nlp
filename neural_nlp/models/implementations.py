@@ -96,6 +96,31 @@ class SentenceLength(BrainModel, TaskModel):
         return {self.available_layers[0]: np.array(sentence_lengths)}
 
 
+class WordPosition(BrainModel):
+    """
+    control model
+    """
+    available_layers = ['word-position']
+    default_layers = available_layers
+
+    identifier = 'word-position'
+
+    def __init__(self):
+        super(WordPosition, self).__init__()
+        self._extractor = ActivationsExtractorHelper(identifier=self.identifier,
+                                                     get_activations=self._get_activations, reset=lambda: None)
+
+    def __call__(self, *args, average_sentence=True, **kwargs):
+        if average_sentence:
+            raise ValueError("This model only works on a word-level")
+        return self._extractor(*args, **kwargs)
+
+    def _get_activations(self, sentences, layers):
+        np.testing.assert_array_equal(layers, self.available_layers)
+        word_positions = [np.array([[[i] for i, word in enumerate(sentence.split(' '))]]) for sentence in sentences]
+        return {self.available_layers[0]: word_positions}
+
+
 class RandomEmbedding(BrainModel):
     """
     control model
@@ -910,6 +935,7 @@ def load_model(model_name):
 
 model_pool = {
     SentenceLength.identifier: LazyLoad(SentenceLength),
+    WordPosition.identifier: LazyLoad(WordPosition),
     RandomEmbedding.identifier: LazyLoad(RandomEmbedding),
     SkipThoughts.identifier: LazyLoad(SkipThoughts),
     SkipThoughts.identifier + '-untrained': LazyLoad(lambda: SkipThoughts(load_weights=False)),
@@ -926,6 +952,7 @@ model_pool = {
 }
 model_layers = {
     SentenceLength.identifier: SentenceLength.default_layers,
+    WordPosition.identifier: WordPosition.default_layers,
     RandomEmbedding.identifier: RandomEmbedding.default_layers,
     SkipThoughts.identifier: SkipThoughts.default_layers,
     LM1B.identifier: LM1B.default_layers,
