@@ -35,7 +35,7 @@ def _print_stimulus_info(benchmark_identifier, group_column='story', group_value
 def print_Pereira2018():
     benchmark_identifier = 'Pereira2018-encoding'
     score_object = score(model='bert-base-uncased', benchmark=benchmark_identifier)
-    score_object.attrs['raw'] = score_object.raw.sel(atlas='language')  # language only
+    score_object.attrs['raw'] = score_object.raw.raw  # language only
     print(f"## {benchmark_identifier} ##")
     print(
         f"  score\n"
@@ -43,6 +43,19 @@ def print_Pereira2018():
     )
     _print_assembly_info(benchmark_identifier=benchmark_identifier)
     _print_stimulus_info(benchmark_identifier=benchmark_identifier)
+
+    # num voxels
+    for atlas in ['MD', 'DMN']:
+        benchmark = benchmark_pool[benchmark_identifier]
+        assembly = benchmark._target_assembly
+        atlas_assembly = assembly.sel(atlas=atlas)
+        # some subjects have nans for either experiment. The sum gets rid of those
+        subject_assembly = atlas_assembly.sum('presentation')
+        subject_assembly = subject_assembly.groupby('subject').count('neuroid')
+        mean, std = subject_assembly.mean().values, subject_assembly.std().values
+        print(
+            f"  {atlas}: {len(atlas_assembly['neuroid'])} voxels ({mean:.0f}+-{std:.1f})"
+        )
 
 
 def print_Fedorenko2016():
