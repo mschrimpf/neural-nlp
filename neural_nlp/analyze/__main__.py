@@ -5,7 +5,7 @@ import sys
 
 from neural_nlp.analyze import scores, stats
 from neural_nlp.analyze.data import ceiling
-from neural_nlp.analyze.scores import bars, layers, story_context
+from neural_nlp.analyze.scores import bars, layers
 
 _logger = logging.getLogger(__name__)
 
@@ -60,8 +60,12 @@ def paper_figures():
     for benchmark in brain_benchmarks:
         scores.untrained_vs_trained(benchmark=benchmark)
     # 6: overview table
-    scores.compare(benchmark1='wikitext-2', benchmark2='overall-encoding', plot_significance_stars=False)
+    scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding',
+                   plot_significance_stars=False, identity_line=False)
+    scores.compare(benchmark1='overall_neural-encoding', benchmark2='Futrell2018-encoding',
+                   plot_significance_stars=False)
     scores.untrained_vs_trained(benchmark='overall-encoding')
+    bars.whole_best(benchmark='overall-encoding', annotate=True)
 
     # text: untrained/trained diff Pereira2018
     scores.untrained_vs_trained(benchmark='Pereira2018-encoding', analyze_only=True)
@@ -92,20 +96,16 @@ def paper_figures():
     _logger.info("Figures S5")
     scores.compare_glue(benchmark2='Pereira2018-encoding')
     # S6: individual benchmarks predict behavior
-    _logger.info("Figures S7")
+    _logger.info("Figures S6")
     for benchmark in neural_benchmarks:
         scores.compare(benchmark1=benchmark, benchmark2='Futrell2018-encoding', best_layer=True, annotate=False,
                        plot_ceiling=False, plot_significance_stars=False, ylim=[0, behavior_ylim])
-    # S7b: random embedding
-    _logger.info("Figures S6b")
+    # S7: untrained controls
+    _logger.info("Figures S7: a) wikitext untrained; b) random embedding")
+    scores.untrained_vs_trained(benchmark='wikitext-2', identity_line=False, loss_xaxis=True)
     bars.random_embedding()
-    # S8: layers
-    _logger.info("Figures S6")
     for benchmark in neural_benchmarks:
         layers.layer_preference(benchmark=benchmark)
-    # S9: story context
-    _logger.info("Figures S5")
-    story_context.plot_num_sentences(model='gpt2-xl')
 
 
 if __name__ == '__main__':
