@@ -116,8 +116,8 @@ model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.', 'l
 
 
 def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
-            best_layer=True, normalize=True, reference_best=False, identity_line=True, annotate=False,
-            plot_ceiling=False, ylim=None, ax=None, **kwargs):
+            best_layer=True, normalize=True, reference_best=False, identity_line=False, annotate=False,
+            plot_ceiling=False, xlim=None, ylim=None, ax=None, **kwargs):
     ax_given = ax is not None
     all_models = models
     scores1 = collect_scores(benchmark=benchmark1, models=all_models, normalize=normalize)
@@ -279,7 +279,7 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
         os.environ['RESULTCACHING_CACHEDONLY'] = previous_resultcaching_cachedonly
     non_overlap = list(set(data['model']).symmetric_difference(set(models)))
     if len(non_overlap) > 0:
-        logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")
+        logger.warning(f"Non-overlapping identifiers in {benchmark}: {sorted(non_overlap)}")
     if not stored:
         data.to_csv(store_file, index=False)
     return data
@@ -547,7 +547,12 @@ def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=
 def get_score_center_err(s, combine_layers=True):
     s = aggregate(s, combine_layers=combine_layers)
     if hasattr(s, 'aggregation'):
-        return s.sel(aggregation='center').values.tolist(), s.sel(aggregation='error').values.tolist()
+        center = s.sel(aggregation='center').values.tolist()
+        try:
+            error = s.sel(aggregation='error').values.tolist()
+        except KeyError:
+            error = np.nan
+        return center, error
     if hasattr(s, 'measure'):
         if len(s['measure'].values.shape) > 0:
             if 'test_loss' in s['measure'].values:  # wikitext
