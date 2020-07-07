@@ -7,7 +7,7 @@ import seaborn
 import sys
 from decimal import Decimal
 from functools import reduce
-from matplotlib import pyplot
+from matplotlib import pyplot, patheffects
 from matplotlib.ticker import MultipleLocator
 from pathlib import Path
 from scipy.stats import pearsonr
@@ -152,8 +152,9 @@ def random_embedding():
                width=width, align='center',
                color=colors[model], edgecolor='none', ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
         for xpos in x:
-            ax.text(x=xpos + .6 * width / 2, y=.05, s=model_label_replace[model],
-                    rotation=90, rotation_mode='anchor', **text_kwargs)
+            text = ax.text(x=xpos + .6 * width / 2, y=.05, s=model_label_replace[model],
+                           rotation=90, rotation_mode='anchor', **text_kwargs)
+            text.set_path_effects([patheffects.withStroke(linewidth=0.75, foreground='black')])
     ax.set_xticks(base_x)
     ax.set_xticklabels([benchmark_label_replace[benchmark] for benchmark in benchmarks], fontsize=9)
     ax.yaxis.set_major_locator(MultipleLocator(base=0.2))
@@ -161,6 +162,26 @@ def random_embedding():
     ax.set_ylim([0, 1.2])
     ax.set_ylabel('Normalized Predictivity')
     savefig(fig, Path(__file__).parent / "bars-random_embedding")
+
+
+def shortcomings(model):
+    benchmarks = ['Futrell2018-encoding', 'Futrell2018sentences-encoding', 'Futrell2018stories-encoding']
+    scores = [collect_scores(models=[model], benchmark=benchmark) for benchmark in benchmarks]
+    scores = reduce(lambda left, right: pd.concat([left, right]), scores)
+    scores = average_adjacent(scores).dropna()
+    scores = choose_best_scores(scores)
+    fig, ax = pyplot.subplots(figsize=(3.5, 5))
+    x = np.arange(len(benchmarks))
+    ax.bar(x, height=scores['score'], yerr=scores['error'],
+           color=model_colors[model], edgecolor='none', ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
+    ax.set_xticks(x)
+    ax.set_xticklabels(['words', 'sentences', 'stories'], rotation=45)
+    ax.yaxis.set_major_locator(MultipleLocator(base=0.2))
+    ax.yaxis.set_major_formatter(score_formatter)
+    ax.set_ylim([0, 1.2])
+    ax.set_ylabel('Normalized Predictivity')
+    ax.set_title('Futrell2018 variations')
+    savefig(fig, Path(__file__).parent / "bars-generalization")
 
 
 def benchmark_correlations(best_layer=True):
