@@ -60,7 +60,7 @@ def load_Fedorenko2016(electrodes, version):
             
             filepath_neural = glob(os.path.join(neural_data_dir, '*g_lang_v4.mat'))
 
-        _logger.debug('Running Fedorenko2016 benchmark with language responsive electrodes, data version: ', version)
+        _logger.debug(f'Running Fedorenko2016 benchmark with language responsive electrodes, data version: {version}')
 
     # For non-noisy electrodes
     if electrodes == 'all':
