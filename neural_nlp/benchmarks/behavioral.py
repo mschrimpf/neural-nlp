@@ -316,7 +316,6 @@ class Futrell2018SentencesEncoding(Futrell2018Encoding):
         keep_subjects = keep_subjects[keep_subjects]['subject_id'].values
         assembly = assembly[{'neuroid': [subject in keep_subjects for subject in assembly['subject_id'].values]}]
         return assembly
-# A1SVVVJWT7H51V
 
 benchmark_pool = [
     ('Futrell2018-encoding', Futrell2018Encoding),
