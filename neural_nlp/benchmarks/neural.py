@@ -899,11 +899,9 @@ benchmark_pool = [
     ('Blank2014fROI-encoding', Blank2014fROIEncoding),
     # secondary benchmarks
     ('Pereira2018-rdm', PereiraRDM),
-    ('Pereira2018-decoding', PereiraDecoding),
     ('Fedorenko2016v3-rdm', Fedorenko2016V3RDM),
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
     ('Blank2014fROI-rdm', Blank2014fROIRDM),
-    ('Blank2014voxel-encoding', Blank2014VoxelEncoding),
 ]
 for sentence_num in range(1, 10, 2):
     benchmark_pool.append((f'Blank2014sentence{sentence_num}fROI-encoding',
