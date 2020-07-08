@@ -18,6 +18,7 @@ from brainscore.metrics.transformations import CartesianProduct, apply_aggregate
 from brainscore.utils import LazyLoad
 from neural_nlp.benchmarks.ceiling import ExtrapolationCeiling, HoldoutSubjectCeiling, NoOverlapException
 from neural_nlp.benchmarks.neural import read_words, consistency
+from neural_nlp.benchmarks.s3 import load_s3
 from neural_nlp.neural_data.naturalStories import load_naturalStories
 
 
@@ -50,6 +51,7 @@ class Futrell2018Encoding(Benchmark):
     def identifier(self):
         return self._identifier
 
+    @load_s3(key='Futrell2018')
     def _load_assembly(self):
         assembly = load_naturalStories()
         # we're going to treat subjects as "neuroids" to make it easier for our metrics which mostly deal with neurons
@@ -100,6 +102,7 @@ class Futrell2018Encoding(Benchmark):
         return score
 
     @property
+    @load_s3(key='Futrell2018-encoding-ceiling')
     def ceiling(self):
         return self._ceiler(identifier=self.identifier, assembly=self._target_assembly, metric=self._metric)
 
@@ -319,9 +322,6 @@ class Futrell2018SentencesEncoding(Futrell2018Encoding):
 
 benchmark_pool = [
     ('Futrell2018-encoding', Futrell2018Encoding),
-    ('Futrell2018mean-encoding', Futrell2018MeanEncoding),
-    ('Futrell2018stories-encoding', Futrell2018StoriesEncoding),
-    ('Futrell2018sentences-encoding', Futrell2018SentencesEncoding),
 ]
 benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
                   for identifier, ctr in benchmark_pool}

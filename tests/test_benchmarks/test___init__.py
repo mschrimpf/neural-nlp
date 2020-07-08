@@ -2,7 +2,7 @@ import pytest
 from brainio_base.assemblies import DataAssembly
 from pytest import approx
 
-from neural_nlp.benchmarks.neural import benchmark_pool
+from neural_nlp.benchmarks import benchmark_pool
 
 
 @pytest.mark.parametrize('benchmark_identifier, expected', [
@@ -13,6 +13,7 @@ from neural_nlp.benchmarks.neural import benchmark_pool
     ('Fedorenko2016v3-rdm', .11739),
     ('Blank2014fROI-encoding', .200405),
     ('Blank2014fROI-rdm', .020128),
+    ('Futrell2018-encoding', .76),
 ])
 def test_ceiling(benchmark_identifier, expected):
     benchmark = benchmark_pool[benchmark_identifier]
@@ -29,6 +30,7 @@ def test_ceiling(benchmark_identifier, expected):
     'Fedorenko2016v3-rdm',
     'Blank2014fROI-encoding',
     'Blank2014fROI-rdm',
+    'Futrell2018-encoding',
 ])
 def test_is_stored(benchmark_identifier):
     benchmark = benchmark_pool[benchmark_identifier]
