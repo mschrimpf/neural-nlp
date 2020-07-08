@@ -80,6 +80,8 @@ class _S3Storage(_Storage):
                 _, attr_key = value.split('s3:')
                 value = self._retrieve(attr_key, dir)
                 assembly.attrs[attr] = value
+                if attr == 'stimulus_set':
+                    value.name = assembly.attrs['stimulus_set_name']
         # put into correct class
         cls_module = importlib.import_module(assembly.attrs['class_module'])
         cls = getattr(cls_module, assembly.attrs['class_name'])

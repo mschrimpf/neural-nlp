@@ -13,8 +13,8 @@ parser.add_argument('--log_level', type=str, default='INFO')
 FLAGS, FIRE_FLAGS = parser.parse_known_args()
 logging.basicConfig(stream=sys.stdout, level=logging.getLevelName(FLAGS.log_level))
 _logger.info(f"Running with args {FLAGS}, {FIRE_FLAGS}")
-for ignore_logger in ['transformers.data.processors']:
-    logging.getLogger(ignore_logger).setLevel(logging.WARNING)
+for ignore_logger in ['transformers.data.processors', 'botocore', 'boto3', 'urllib3', 's3transfer']:
+    logging.getLogger(ignore_logger).setLevel(logging.INFO)
 
 
 def run(benchmark, model, layers=None, subsample=None):

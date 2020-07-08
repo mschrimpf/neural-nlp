@@ -32,7 +32,10 @@ def test_ceiling(benchmark_identifier, expected):
 ])
 def test_is_stored(benchmark_identifier):
     benchmark = benchmark_pool[benchmark_identifier]
-    assert isinstance(benchmark._target_assembly, DataAssembly)
-    assert set(benchmark._target_assembly.dims) == {'presentation', 'neuroid'}
+    assembly = benchmark._target_assembly
+    assert isinstance(assembly, DataAssembly)
+    assert set(assembly.dims) == {'presentation', 'neuroid'}
+    stimulus_set = assembly.stimulus_set
+    assert hasattr(stimulus_set, 'name')
     ceiling = benchmark.ceiling
     assert ceiling.sel(aggregation='center') > 0

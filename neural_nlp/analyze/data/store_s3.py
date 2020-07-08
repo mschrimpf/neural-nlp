@@ -16,10 +16,10 @@ def main():
                 continue
             identifier = f"{assembly_identifier}-{metric_identifier}"
             benchmark = benchmark_pool[identifier]
-            assembly = benchmark._target_assembly
-            assembly._ensure_loaded()  # force LazyLoad to retrieve the content
-            assembly = assembly.content
             if i == 0:
+                assembly = benchmark._target_assembly
+                assembly._ensure_loaded()  # force LazyLoad to retrieve the content
+                assembly = assembly.content
                 _store_s3(assembly, key=assembly_identifier)
             ceiling = benchmark.ceiling
             _store_s3(ceiling, key=identifier + '-ceiling')
@@ -35,8 +35,9 @@ def _store_s3(assembly, key):
         assembly = assembly.content
     assembly.attrs['class_module'] = assembly.__module__
     assembly.attrs['class_name'] = type(assembly).__name__
-    # deal with stimulus_set: upload separately, replace the attribute with s3 link
+    # deal with stimulus_set: upload separately, replace the attribute with s3 link, add name to assembly attributes
     if 'stimulus_set' in assembly.attrs:
+        assembly.attrs['stimulus_set_name'] = assembly.attrs['stimulus_set'].name
         stimulus_set_key = key + '-stimulus_set.csv'
         assembly.attrs['stimulus_set'].to_csv(os.path.join(os.path.dirname(__file__), stimulus_set_key), index=False)
         assembly.attrs['stimulus_set'] = 's3:' + stimulus_set_key
