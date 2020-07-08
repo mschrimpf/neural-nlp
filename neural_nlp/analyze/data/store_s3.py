@@ -11,8 +11,7 @@ _logger = logging.getLogger(__name__)
 
 def main():
     for assembly_identifier in [
-        # 'Pereira2018', 'Fedorenko2016v3', 'Fedorenko2016v3nonlang', 'Blank2014fROI',
-        'Futrell2018'
+        'Pereira2018', 'Fedorenko2016v3', 'Fedorenko2016v3nonlang', 'Blank2014fROI', 'Futrell2018'
     ]:
         for i, metric_identifier in enumerate(['encoding', 'rdm']):
             if metric_identifier == 'rdm' and assembly_identifier in ['Fedorenko2016v3nonlang', 'Futrell2018']:
