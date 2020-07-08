@@ -134,7 +134,7 @@ def load_Fedorenko2016(electrodes, version):
             subject6 = np.repeat(6, 6) 
 
 
-        _logger.debug('Running Fedorenko2016 benchmark with non-language electrodes, data version: ', version)
+        _logger.debug(f'Running Fedorenko2016 benchmark with non-language electrodes, data version: {version}')
 
     ecog_mat = sio.loadmat(filepath_neural[0])
     ecog_mtrix = ecog_mat['ecog']

@@ -1,12 +1,19 @@
 """
 Neural benchmarks to probe match of model internals against human internals.
 """
-
+import importlib
 import warnings
 
+import boto3
 import itertools
 import logging
 import numpy as np
+import os
+import pandas as pd
+import sys
+import xarray as xr
+from botocore import UNSIGNED
+from botocore.config import Config
 from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, array_is_element
 from numpy.random.mtrand import RandomState
 from scipy.stats import median_absolute_deviation
@@ -24,7 +31,7 @@ from neural_nlp.neural_data.fmri import load_voxels, load_rdm_sentences, \
     load_Pereira2018_Blank
 from neural_nlp.stimuli import load_stimuli, StimulusSet
 from neural_nlp.utils import ordered_set
-from result_caching import store
+from result_caching import store, _Storage
 
 _logger = logging.getLogger(__name__)
 
@@ -36,6 +43,65 @@ class Invert:
     def __call__(self, source, target):
         source, target = target, source
         return self._metric(source, target)
+
+
+class _S3Storage(_Storage):
+    """
+    load pre-computed xarray assemblies from S3
+    """
+
+    _NO_SIGNATURE = Config(signature_version=UNSIGNED)
+
+    def __init__(self, *args, key, bucket='brainio-language', region='us-east-1', **kwargs):
+        super(_S3Storage, self).__init__(*args, **kwargs)
+        self._key = key
+        self._bucket = bucket
+        self._region = region
+        self._local_root_dir = os.path.expanduser('~/.neural_nlp/')
+        os.makedirs(self._local_root_dir, exist_ok=True)
+
+    def is_stored(self, function_identifier):
+        return True  # everything is on S3
+
+    def load(self, function_identifier):
+        assembly = self._retrieve(self._key + '.nc', self._local_root_dir)
+        return assembly
+
+    def _retrieve(self, key, dir):
+        local_path = os.path.join(dir, key)
+        if not os.path.isfile(local_path):
+            self._download_file(key, local_path)
+        if key.endswith('.csv'):  # stimulus_set is no xarray and does not need attrs dealt with
+            return StimulusSet(pd.read_csv(local_path))
+        assembly = xr.open_dataarray(local_path)
+        # deal with nested assemblies
+        for attr, value in assembly.attrs.items():
+            if isinstance(value, str) and value.startswith('s3:'):
+                _, attr_key = value.split('s3:')
+                value = self._retrieve(attr_key, dir)
+                assembly.attrs[attr] = value
+        # put into correct class
+        cls_module = importlib.import_module(assembly.attrs['class_module'])
+        cls = getattr(cls_module, assembly.attrs['class_name'])
+        assembly = cls(assembly)
+        return assembly
+
+    def _download_file(self, key, local_path):
+        self._logger.debug(f"Downloading {key} to {local_path}")
+        s3 = boto3.resource('s3', region_name=self._region, config=self._NO_SIGNATURE)
+        obj = s3.Object(self._bucket, key)
+        # show progress. see https://gist.github.com/wy193777/e7607d12fad13459e8992d4f69b53586
+        with tqdm(total=obj.content_length, unit='B', unit_scale=True, desc=key, file=sys.stdout) as progress_bar:
+            def progress_hook(bytes_amount):
+                progress_bar.update(bytes_amount)
+
+            obj.download_file(local_path, Callback=progress_hook)
+
+    def save(self, result, function_identifier):
+        raise NotImplementedError("can only load from S3, but not save")
+
+
+load_s3 = _S3Storage
 
 
 class StoriesRDMBenchmark:
@@ -194,6 +260,7 @@ class Blank2014fROIEncoding(Blank2014VoxelEncoding):
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord='story'))
 
+    @load_s3(key='Blank2014fROI')
     def _load_assembly(self, bold_shift):
         assembly = super(Blank2014fROIEncoding, self)._load_assembly(bold_shift)
         assembly = self.average_subregions(bold_shift=bold_shift, assembly=assembly)
@@ -221,6 +288,11 @@ class Blank2014fROIEncoding(Blank2014VoxelEncoding):
         averaged_assembly['neuroid_id'] = 'neuroid', [".".join([str(value) for value in values]) for values in zip(*[
             averaged_assembly[coord].values for coord in ['subject_UID', 'fROI_area']])]
         return averaged_assembly
+
+    @property
+    @load_s3(key='Blank2014fROI-encoding-ceiling')
+    def ceiling(self):
+        return super(Blank2014fROIEncoding, self).ceiling
 
 
 class Blank2014SentencefROIEncoding(Blank2014fROIEncoding):
@@ -289,6 +361,11 @@ class Blank2014fROIRDM(Blank2014fROIEncoding):
         score.attrs['raw'] = cross_scores
         return score
 
+    @property
+    @load_s3(key='Blank2014fROI-rdm-ceiling')
+    def ceiling(self):
+        return super(Blank2014fROIRDM, self).ceiling
+
     def ceiling_normalize(self, score):
         score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
         return score
@@ -301,7 +378,7 @@ class _PereiraBenchmark(Benchmark):
     """
     data source:
         Pereira et al., nature communications 2018
-        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+        https://www.nature.com/articles/s41467-018-03068-4
     """
 
     def __init__(self, identifier, metric, data_version='base'):
@@ -325,6 +402,7 @@ class _PereiraBenchmark(Benchmark):
     def _average_cross_scores(self, cross_scores):
         return cross_scores.mean(['experiment', 'atlas'])
 
+    @load_s3(key='Pereira2018')
     def _load_assembly(self, version='base'):
         assembly = load_Pereira2018_Blank(version=version)
         assembly = assembly.sel(atlas_selection_lower=90)
@@ -491,6 +569,11 @@ class PereiraEncoding(_PereiraBenchmark):
             crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id', stratification_coord=None))
         super(PereiraEncoding, self).__init__(metric=metric, **kwargs)
 
+    @property
+    @load_s3(key='Pereira2018-encoding-ceiling')
+    def ceiling(self):
+        return super(PereiraEncoding, self).ceiling
+
 
 class _PereiraSubjectWise(_PereiraBenchmark):
     def __init__(self, **kwargs):
@@ -549,6 +632,11 @@ class PereiraRDM(_PereiraSubjectWise):
                                         kfold=True, test_size=None))
         super(PereiraRDM, self).__init__(metric=metric, **kwargs)
 
+    @property
+    @load_s3(key='Pereira2018-rdm-ceiling')
+    def ceiling(self):
+        return super(PereiraRDM, self).ceiling
+
 
 class _Fedorenko2016:
     """
@@ -559,7 +647,7 @@ class _Fedorenko2016:
 
     def __init__(self, identifier, metric):
         self._identifier = identifier
-        assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=1))
+        assembly = LazyLoad(self.load_assembly)
         self._target_assembly = assembly
         self._metric = metric
         self._average_sentence = False
@@ -569,6 +657,9 @@ class _Fedorenko2016:
     @property
     def identifier(self):
         return self._identifier
+
+    def load_assembly(self):
+        raise NotImplementedError()
 
     def __call__(self, candidate):
         _logger.info('Computing activations')
@@ -645,37 +736,44 @@ class _Fedorenko2016:
             return choices
 
 
-def Fedorenko2016Encoding(identifier):
+class Fedorenko2016Encoding(_Fedorenko2016):
     """
-    Fedorenko benchmark with NO z-scored recordings
+    Fedorenko benchmark with encoding metric
 
     data source:
         Fedorenko et al., PNAS 2016
         https://www.pnas.org/content/113/41/E6256
     """
-    regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
-    correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
-    metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
-                                       crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
-                                                                   stratification_coord='sentence_id'))
-    return _Fedorenko2016(identifier=identifier, metric=metric)
+
+    def __init__(self, identifier):
+        regression = linear_regression(xarray_kwargs=dict(stimulus_coord='stimulus_id'))  # word
+        correlation = pearsonr_correlation(xarray_kwargs=dict(correlation_coord='stimulus_id'))
+        metric = CrossRegressedCorrelation(regression=regression, correlation=correlation,
+                                           crossvalidation_kwargs=dict(splits=5, kfold=True, split_coord='stimulus_id',
+                                                                       stratification_coord='sentence_id'))
+        super(Fedorenko2016Encoding, self).__init__(identifier=identifier, metric=metric)
 
 
-def Fedorenko2016V3Encoding(identifier):
+class Fedorenko2016V3Encoding(Fedorenko2016Encoding):
     """
     Fedorenko benchmark, language electrodes
-    Data 03/24/2020: sentence_electrode_lang_elec_max_window_dat (not demeaned across sentences)
 
     data source:
         Fedorenko et al., PNAS 2016
         https://www.pnas.org/content/113/41/E6256
     """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
-    return benchmark
+
+    @load_s3(key='Fedorenko2016v3')
+    def load_assembly(self):
+        return LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+
+    @property
+    @load_s3(key='Fedorenko2016v3-encoding-ceiling')
+    def ceiling(self):
+        return super(Fedorenko2016V3Encoding, self).ceiling
 
 
-def Fedorenko2016V3NonLangEncoding(identifier):
+class Fedorenko2016V3NonLangEncoding(Fedorenko2016Encoding):
     """
     Fedorenko benchmark, non-language electrodes (only sorted based on signal)
     Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)
@@ -684,23 +782,15 @@ def Fedorenko2016V3NonLangEncoding(identifier):
         Fedorenko et al., PNAS 2016
         https://www.pnas.org/content/113/41/E6256
     """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=3))
-    return benchmark
 
+    @load_s3(key='Fedorenko2016v3nonlang')
+    def load_assembly(self):
+        return LazyLoad(lambda: load_Fedorenko2016(electrodes='non-language', version=3))
 
-def Fedorenko2016V3AllEncoding(identifier):
-    """
-    Fedorenko benchmark, all electrodes (only sorted based on signal)
-    Data 03/24/2020: sentence_electrode_more_elec_max_window_dat (not demeaned across sentences)
-
-    data source:
-        Fedorenko et al., PNAS 2016
-        https://www.pnas.org/content/113/41/E6256
-    """
-    benchmark = Fedorenko2016Encoding(identifier)
-    benchmark._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='all', version=3))
-    return benchmark
+    @property
+    @load_s3(key='Fedorenko2016v3nonlang-encoding-ceiling')
+    def ceiling(self):
+        return super(Fedorenko2016V3NonLangEncoding, self).ceiling
 
 
 class Fedorenko2016V3RDM(_Fedorenko2016):
@@ -718,9 +808,17 @@ class Fedorenko2016V3RDM(_Fedorenko2016):
                                         # even though `train` is not needed, CrossValidation still splits it that way
                                         splits=5, kfold=True, test_size=None))
         super(Fedorenko2016V3RDM, self).__init__(identifier=identifier, metric=metric)
-        self._target_assembly = LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
         self._ceiler.extrapolation_dimension = 'subject_UID'
         self._cross = CartesianProduct(dividers=['subject_UID'])
+
+    @load_s3(key='Fedorenko2016v3')
+    def load_assembly(self):
+        return LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+
+    @property
+    @load_s3(key='Fedorenko2016v3-rdm-ceiling')
+    def ceiling(self):
+        return super(Fedorenko2016V3RDM, self).ceiling
 
     def apply_metric(self, source_assembly, target_assembly):
         cross_scores = self._cross(target_assembly, apply=

@@ -1,4 +1,5 @@
 import pytest
+from brainio_base.assemblies import DataAssembly
 from pytest import approx
 
 from neural_nlp.benchmarks.neural import benchmark_pool
@@ -17,3 +18,21 @@ def test_ceiling(benchmark_identifier, expected):
     benchmark = benchmark_pool[benchmark_identifier]
     ceiling = benchmark.ceiling
     assert ceiling.sel(aggregation='center') == approx(expected, abs=.005)
+
+
+@pytest.mark.timeout(30)  # maximum time to load -- if the assemblies are re-packaged locally, this should fail
+@pytest.mark.parametrize('benchmark_identifier', [
+    'Pereira2018-encoding',
+    'Pereira2018-rdm',
+    'Fedorenko2016v3-encoding',
+    'Fedorenko2016v3nonlang-encoding',
+    'Fedorenko2016v3-rdm',
+    'Blank2014fROI-encoding',
+    'Blank2014fROI-rdm',
+])
+def test_is_stored(benchmark_identifier):
+    benchmark = benchmark_pool[benchmark_identifier]
+    assert isinstance(benchmark._target_assembly, DataAssembly)
+    assert set(benchmark._target_assembly.dims) == {'presentation', 'neuroid'}
+    ceiling = benchmark.ceiling
+    assert ceiling.sel(aggregation='center') > 0
