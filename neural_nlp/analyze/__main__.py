@@ -47,6 +47,9 @@ def paper_figures():
                        tick_locator_base=0.1 if neural_benchmark.startswith('Blank') else 0.2,
                        ylim=[-0.055, 0.5] if neural_benchmark.startswith('Blank') else None,
                        annotate=annotated_models if neural_benchmark.startswith('Pereira') else None)
+    scores.compare(benchmark1='overall_glue', benchmark2='overall_neural-encoding', **settings,
+                   xlim=[.25, .7], xtick_locator_base=0.1, annotate=False)
+    bars.task_predictors('overall_neural-encoding')
     scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding', **settings)  # text only
     # 4: neural/LM predicts behavior
     bars.whole_best(benchmark='Futrell2018-encoding', annotate=True)

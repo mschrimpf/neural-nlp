@@ -16,7 +16,7 @@ from neural_nlp.analyze import savefig, score_formatter
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
     align_scores, significance_stars, get_ceiling, shaded_errorbar, model_label_replace, \
-    benchmark_label_replace
+    benchmark_label_replace, glue_benchmarks
 from result_caching import is_iterable
 
 _logger = logging.getLogger(__name__)
@@ -129,6 +129,45 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predic
     ax.set_xticks(x)
     ax.tick_params(axis="x", pad=-5)
     return ax
+
+
+def task_predictors(target_benchmark='overall_neural-encoding'):
+    # collect
+    predictors = glue_benchmarks + ['wikitext-2']
+    data = []
+    for predictor in predictors:
+        predictor_scores = retrieve_scores(predictor)
+        scores = retrieve_scores(target_benchmark)
+        predictor_scores, scores = align_scores(predictor_scores, scores, identifier_set=('model',))
+        r, p = pearsonr(predictor_scores['score'] if predictor != 'wikitext-2' else np.exp(predictor_scores['score']),
+                        scores['score'])
+        r = -r  # flip because lower is better
+        data.append({'predictor': predictor, 'target': target_benchmark, 'r': r, 'p': p})
+    data = pd.DataFrame(data)
+
+    # plot
+    fig, ax = pyplot.subplots(figsize=(5, 4))
+    wiki_color, glue_color = '#0035ff', '#ababab'
+    width = 0.5
+    x, y, p = data.index, data['r'], data['p']
+    ax.bar(x, height=y, align='center', width=width, color=[glue_color] * len(glue_benchmarks) + [wiki_color])
+    for i, (xpos, ypos, pvalue) in enumerate(zip(x, y, p)):
+        ax.text(x=xpos + .5 * width / 2, y=.01, s=benchmark_label_replace[predictors[i]],
+                rotation=90, rotation_mode='anchor',
+                fontdict=dict(fontsize=12), color='black' if i < len(glue_benchmarks) else 'white')
+        ax.text(x=xpos, y=-.05, s=significance_stars(pvalue) if pvalue < .05 else 'n.s.', horizontalalignment='center',
+                fontdict=dict(fontsize=10, fontweight='normal' if i < len(glue_benchmarks) else 'bold'))
+    ax.yaxis.tick_right()
+    ax.yaxis.set_label_position("right")
+    ax.set_ylabel('Correlation')
+    ax.set_xticks([])
+    ax.tick_params(axis='y', which=u'both', length=0)
+    ax.yaxis.set_major_formatter(score_formatter)
+    ax.spines['left'].set_visible(False)
+    ax.spines['right'].set_visible(True)
+    ax.spines['bottom'].set_position(('data', 0))
+    ax.spines['bottom'].set_linewidth(0.75)
+    savefig(fig, Path(__file__).parent / "task_predictors")
 
 
 def random_embedding():

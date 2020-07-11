@@ -23,6 +23,8 @@ from neural_nlp.models.wrapper.core import ActivationsExtractorHelper
 from neural_nlp.utils import ordered_set
 from result_caching import NotCachedError, is_iterable
 
+from neural_nlp.benchmarks.glue import benchmark_pool as glue_benchmark_pool
+
 logger = logging.getLogger(__name__)
 
 model_colors = {
@@ -87,6 +89,7 @@ models = tuple(model_colors.keys())
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 overall_neural_benchmarks = ('Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI')
 overall_benchmarks = overall_neural_benchmarks + ('Futrell2018',)
+glue_benchmarks = [benchmark for benchmark in glue_benchmark_pool if benchmark != 'glue-wnli']
 performance_benchmarks = ['wikitext', 'glue']
 
 
@@ -98,8 +101,9 @@ class LabelReplace(dict):
 class BenchmarkLabelReplace(LabelReplace):
     def __init__(self):
         super(BenchmarkLabelReplace, self).__init__(**{
-            'overall_neural': 'Language Brain-Score (neural)',
+            'overall_neural': 'Normalized neural predictivity',
             'overall': 'Language Brain-Score',
+            'overall_glue': 'GLUE tasks average',
             'Blank2014fROI': 'Blank2014',
             'Fedorenko2016v3': 'Fedorenko2016',
             'wikitext-2': 'wikitext-2 perplexity',
@@ -170,10 +174,13 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
 
 
 def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
-                    xlabel=None, ylabel=None, loss_xaxis=False, color=None, tick_locator_base=0.2,
+                    xlabel=None, ylabel=None, loss_xaxis=False, color=None,
+                    tick_locator_base=0.2, xtick_locator_base=None, ytick_locator_base=None,
                     scatter_size=20, errorbar_error_alpha=0.2,
                     prettify_xticks=True, correlation_pos=(0.05, 0.8), ax=None, **kwargs):
     assert len(scores1) == len(scores2)
+    xtick_locator_base = xtick_locator_base or tick_locator_base
+    ytick_locator_base = ytick_locator_base or tick_locator_base
     x, xerr = scores1['score'].values, scores1['error'].values
     y, yerr = scores2['score'].values, scores2['error'].values
     fig, ax = pyplot.subplots() if ax is None else (None, ax)
@@ -198,9 +205,9 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=F
         ax.set_xticks(np.log([100, 200, 400, 800, 1600, 3200]))
         ax.xaxis.set_major_formatter(loss_formatter)
     elif prettify_xticks:
-        ax.xaxis.set_major_locator(MultipleLocator(base=tick_locator_base))
+        ax.xaxis.set_major_locator(MultipleLocator(base=xtick_locator_base))
         ax.xaxis.set_major_formatter(score_formatter)
-    ax.yaxis.set_major_locator(MultipleLocator(base=tick_locator_base))
+    ax.yaxis.set_major_locator(MultipleLocator(base=ytick_locator_base))
     ax.yaxis.set_major_formatter(score_formatter)
 
     r, p = pearsonr(x if not loss_xaxis else np.exp(x), y)
@@ -234,9 +241,11 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
         data = data[data['model'].isin(models)]
         stored = True
     if not stored and benchmark.startswith('overall'):
-        metric = benchmark.split('-')[-1]
-        data = [collect_scores(benchmark=f"{part}-{metric}", models=models, normalize=normalize) for part in
-                (overall_neural_benchmarks if benchmark.startswith('overall_neural') else overall_benchmarks)]
+        metric = ('-' + benchmark.split('-')[-1]) if '-' in benchmark else ''
+        data = [collect_scores(benchmark=f"{part}{metric}", models=models, normalize=normalize) for part in
+                (overall_neural_benchmarks if benchmark.startswith('overall_neural')
+                 else glue_benchmarks if benchmark == "overall_glue"
+                else overall_benchmarks)]
         data = reduce(lambda left, right: pd.concat([left, right]), data)
         data = average_adjacent(data)
         data = choose_best_scores(data).dropna()  # need to choose best layer per benchmark here before averaging
@@ -441,7 +450,7 @@ def untrained_vs_trained(benchmark='Pereira2018-encoding', layer_mode='best', mo
     _, p_diff = pearsonr(scores_trained['score'], scores_untrained['score'])
     logger.info(f"Trained/untrained on {benchmark}: "
                 f"score trained={average_trained:.2f}, untrained={average_untrained:.2f} | "
-                f"diff {average_trained-average_untrained:.2f} ({average_trained/average_untrained * 100:.0f}%, "
+                f"diff {average_trained - average_untrained:.2f} ({average_trained / average_untrained * 100:.0f}%, "
                 f"p={p_diff}")
     if analyze_only:
         return
