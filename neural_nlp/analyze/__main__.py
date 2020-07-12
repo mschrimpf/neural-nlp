@@ -39,16 +39,15 @@ def paper_figures():
     for comparison_benchmark in neural_benchmarks[1:]:
         scores.compare(benchmark1=neural_benchmarks[0], benchmark2=comparison_benchmark,
                        plot_ceiling=False, identity_line=True, **settings)
-    # 3: LM predicts brain
+    # 3: LM predicts brain, but other tasks don't
     _logger.info("Figures 3")
     settings = dict(best_layer=True, plot_ceiling=False, plot_significance_stars=False, identity_line=False)
-    for neural_benchmark in neural_benchmarks:
-        scores.compare(benchmark1='wikitext-2', benchmark2=neural_benchmark, **settings,
-                       tick_locator_base=0.1 if neural_benchmark.startswith('Blank') else 0.2,
-                       ylim=[-0.055, 0.5] if neural_benchmark.startswith('Blank') else None,
-                       annotate=annotated_models if neural_benchmark.startswith('Pereira') else None)
+    scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding', **settings,
+                   annotate=annotated_models)
+    bars.predictor('wikitext-2', neural_benchmarks, ylim=[0, .65])
     scores.compare(benchmark1='overall_glue', benchmark2='overall_neural-encoding', **settings,
                    xlim=[.25, .7], xtick_locator_base=0.1, annotate=False)
+    bars.predictor('overall_glue', neural_benchmarks, ylim=[0, .65])
     bars.task_predictors('overall_neural-encoding')
     scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding', **settings)  # text only
     # 4: neural/LM predicts behavior
@@ -60,8 +59,8 @@ def paper_figures():
     scores.compare(benchmark1='wikitext-2', **settings, identity_line=False)
     # 5: untrained predicts trained
     _logger.info("Figures 4")
-    for benchmark in brain_benchmarks:
-        scores.untrained_vs_trained(benchmark=benchmark)
+    scores.untrained_vs_trained(benchmark='overall_neural-encoding')
+    scores.untrained_vs_trained(benchmark='Futrell2018-encoding')
     # 6: overview table
     scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding',
                    plot_significance_stars=False, identity_line=False)

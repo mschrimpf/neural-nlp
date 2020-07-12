@@ -89,7 +89,7 @@ models = tuple(model_colors.keys())
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 overall_neural_benchmarks = ('Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI')
 overall_benchmarks = overall_neural_benchmarks + ('Futrell2018',)
-glue_benchmarks = [benchmark for benchmark in glue_benchmark_pool if benchmark != 'glue-wnli']
+glue_benchmarks = [f'glue-{task}'  for task in ['cola', 'sst-2', 'qqp', 'mrpc', 'sts-b', 'mnli', 'rte', 'qnli']]
 performance_benchmarks = ['wikitext', 'glue']
 
 
@@ -106,7 +106,16 @@ class BenchmarkLabelReplace(LabelReplace):
             'overall_glue': 'GLUE tasks average',
             'Blank2014fROI': 'Blank2014',
             'Fedorenko2016v3': 'Fedorenko2016',
-            'wikitext-2': 'wikitext-2 perplexity',
+
+            'wikitext-2': 'Next-word prediction',
+            'glue-cola': 'sentence grammaticality (CoLa)',
+            'glue-sst-2': 'sentence sentiment (SST-2)',
+            'glue-qqp': 'semantic similarity - questions (QQP)',
+            'glue-mrpc': 'semantic similarity - sentences (MRPC)',
+            'glue-sts-b': 'sentence similarity - sentences (STS-B)',
+            'glue-mnli': 'entailment (MNLI)',
+            'glue-rte': 'entailment (RTE)',
+            'glue-qnli': 'question-answer coherence (QNLI)',
         })
 
     def __getitem__(self, item):
