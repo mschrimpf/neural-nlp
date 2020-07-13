@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from numpy.random import RandomState
 import fire
 import itertools
@@ -13,7 +15,7 @@ from matplotlib.ticker import MultipleLocator
 from pathlib import Path
 from scipy.stats import pearsonr
 
-from neural_nlp.analyze import savefig, score_formatter
+from neural_nlp.analyze import savefig, score_formatter, stats
 from neural_nlp.analyze.scores import models as all_models, fmri_atlases, model_colors, \
     collect_scores, average_adjacent, choose_best_scores, collect_Pereira_experiment_scores, \
     align_scores, significance_stars, get_ceiling, shaded_errorbar, model_label_replace, \
@@ -23,8 +25,8 @@ from result_caching import is_iterable
 _logger = logging.getLogger(__name__)
 
 
-def retrieve_scores(benchmark):
-    scores = collect_scores(benchmark, all_models)
+def retrieve_scores(benchmark, models=all_models):
+    scores = collect_scores(benchmark, models)
     scores = average_adjacent(scores)  # average each model+layer's score per experiment and atlas
     scores = scores.fillna(0)  # nan scores are 0
     scores = choose_best_scores(scores)
@@ -132,7 +134,7 @@ def _plot_bars(ax, models, data, ylim=None, width=0.5, ylabel="Normalized Predic
     return ax
 
 
-def predictor(benchmark1, benchmarks2, ylim, num_bootstraps=10, bootstrap_size=.9):
+def predictor(benchmark1, benchmarks2, ylim=None, num_bootstraps=1000, bootstrap_size=.9, color='#ababab'):
     # collect
     data = []
     for benchmark2 in benchmarks2:
@@ -157,21 +159,55 @@ def predictor(benchmark1, benchmarks2, ylim, num_bootstraps=10, bootstrap_size=.
     data = pd.DataFrame(data)
 
     # plot
+    _plot_predictor(benchmark1, data, benchmark_labels=[benchmark_label_replace[b] for b in benchmarks2],
+                    color=color, ylim=ylim)
+
+
+def untrained_predictor(benchmarks, ylim=None, num_bootstraps=1000, bootstrap_size=.9, color='#ababab'):
+    # collect
+    data = []
+    for benchmark in benchmarks:
+        models = [[model, f"{model}-untrained"] for model in all_models]
+        models = [model for model_tuple in models for model in model_tuple]
+        scores = retrieve_scores(benchmark, models=models)
+        untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
+        scores1, scores2 = scores[~untrained_rows], scores[untrained_rows]
+
+        x = scores1['score'].values
+        y = scores2['score'].values
+        # compute overall p value
+        _, p = pearsonr(x, y)
+        # bootstrap error bars
+        rng = RandomState(0)
+        rs = []
+        for bootstrap in range(num_bootstraps):
+            indices = rng.choice(np.arange(len(x)), size=int(bootstrap_size * len(x)))
+            bootstrap_x, bootstrap_y = x[indices], y[indices]
+            r, _ = pearsonr(bootstrap_x, bootstrap_y)
+            rs.append(r)
+        data.append({'benchmark': benchmark, 'r': np.mean(rs), 'err': np.std(rs), 'p': p})
+    data = pd.DataFrame(data)
+
+    # plot
+    _plot_predictor(title='untrained', data=data, benchmark_labels=[benchmark_label_replace[b] for b in benchmarks],
+                    color=color, ylim=ylim)
+
+
+def _plot_predictor(title, data, benchmark_labels, color='#ababab', ylim=None):
     fig, ax = pyplot.subplots(figsize=(3, 4))
-    wiki_color, glue_color = '#0035ff', '#ababab'
-    color = wiki_color if benchmark1.startswith('wikitext') else glue_color
     width = 0.5
     x, y, yerr, p = data.index / 1.5, data['r'], data['err'], data['p']
     ax.bar(x, height=y, yerr=yerr, align='center', width=width, color=color, alpha=0.5, edgecolor='none',
            ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
     for i, (xpos, ypos, pvalue) in enumerate(zip(x, y, p)):
-        ax.text(x=xpos + .15 * width / 2, y=.01, s=benchmark_label_replace[benchmarks2[i]],
+        ax.text(x=xpos + .15 * width / 2, y=.01, s=benchmark_labels[i],
                 rotation=90, rotation_mode='anchor',
                 fontdict=dict(fontsize=20), color='black')  # 16
         ax.text(x=xpos, y=-.05, s=significance_stars(pvalue) if pvalue < .05 else 'n.s.', horizontalalignment='center',
                 fontdict=dict(fontsize=14, fontweight='normal'))
     ax.set_ylabel('Correlation')
-    ax.set_ylim(ylim)
+    if ylim:
+        ax.set_ylim(ylim)
     ax.set_xticks([])
     ax.yaxis.set_major_formatter(score_formatter)
     ax.yaxis.tick_right()
@@ -181,13 +217,14 @@ def predictor(benchmark1, benchmarks2, ylim, num_bootstraps=10, bootstrap_size=.
     ax.spines['right'].set_visible(True)
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)
-    savefig(fig, Path(__file__).parent / f"predictor-{benchmark1}")
+    savefig(fig, Path(__file__).parent / f"predictor-{title}")
 
 
-def task_predictors(target_benchmark='overall_neural-encoding', num_bootstraps=10, bootstrap_size=.9):
+def task_predictors(target_benchmark='overall_neural-encoding',
+                    num_bootstraps=1000, bootstrap_size=.9, bar_labels=False):
     # collect
     predictors = ['wikitext-2'] + glue_benchmarks
-    data = []
+    correlation_data, values_data = [], defaultdict(list)
     for predictor in predictors:
         predictor_scores = retrieve_scores(predictor)
         scores = retrieve_scores(target_benchmark)
@@ -195,6 +232,9 @@ def task_predictors(target_benchmark='overall_neural-encoding', num_bootstraps=1
         x = predictor_scores['score'] if not predictor.startswith('wikitext-2') else np.exp(predictor_scores['score'])
         y = scores['score']
         x, y = x.values, y.values
+        values_data['x'].extend(x)
+        values_data['y'].extend(y)
+        values_data['predictor'].extend([predictor] * len(x))
         # compute overall p value
         _, p = pearsonr(x, y)
         # bootstrap error bars
@@ -207,26 +247,54 @@ def task_predictors(target_benchmark='overall_neural-encoding', num_bootstraps=1
             if predictor.startswith('wikitext'):
                 r = -r  # flip because lower perplexity is better
             rs.append(r)
-        data.append({'predictor': predictor, 'target': target_benchmark, 'r': np.mean(rs), 'err': np.std(rs), 'p': p})
-    data = pd.DataFrame(data)
+        correlation_data.append({'predictor': predictor, 'target': target_benchmark,
+                                 'r': np.mean(rs), 'err': np.std(rs), 'p': p})
+    correlation_data = pd.DataFrame(correlation_data)
+    assert all(correlation_data['predictor'].values == predictors)  # ensure ordering
+
+    # stats
+    values_data = pd.DataFrame(values_data)
+    interactions = stats.interaction_test(values_data, category_column='predictor', compare_only='wikitext-2')
+    pd.options.display.width = 0
+    print(interactions)
 
     # plot
+    groups = [[0], [1], [2], [3, 4, 5], [6, 7], [8]]  # group GLUE benchmarks
     fig, ax = pyplot.subplots(figsize=(5, 6))
-    wiki_color, glue_color = '#0035ff', '#ababab'
+    wiki_color = '#0035ff'
     width = 0.5
-    x, y, yerr, p = data.index, data['r'], data['err'], data['p']
+    y, yerr, p = correlation_data['r'], correlation_data['err'], correlation_data['p']
+    x, color, group_color, i = [], [], [], 0
+    for group_iter, group in enumerate(groups):
+        mono_color = 0.2 + (group_iter / len(groups)) * (1.0 - 0.2)
+        group_color.append((mono_color, mono_color, mono_color))
+        for _ in group:
+            x.append(i)
+            color.append((mono_color, mono_color, mono_color))
+            i += 1.1 * width
+        i += width / 2
+    color[0] = group_color[0] = wiki_color
     ax.bar(x, height=y, yerr=yerr, align='center', width=width,
-           color=[wiki_color] + [glue_color] * len(glue_benchmarks), edgecolor='none',
-           ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
+           color=color, edgecolor='none', ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
+    # legend
+    labels = ['next-word prediction', 'sentence grammaticality (CoLA)', 'sentence sentiment (SST-2)',
+              'semantic similarity (QQP, MRPC, STS-B)', 'entailment (MNLT, RTE)', 'question-answer coherence (QNLI)']
+    handles = [pyplot.Rectangle((0, 0), 1, 1, color=color) for color in group_color]
+    legend = ax.legend(handles, labels, prop=dict(size=9))
+    legend.get_frame().set_linewidth(0.5)
+    legend.get_frame().set_edgecolor('black')
+    # text
     for i, (xpos, ypos, pvalue) in enumerate(zip(x, y, p)):
-        ax.text(x=xpos + .5 * width / 2, y=.01, s=benchmark_label_replace[predictors[i]],
-                rotation=90, rotation_mode='anchor',
-                fontdict=dict(fontsize=12), color='white' if i == 0 else 'black')
-        ax.text(x=xpos, y=-.05, s=significance_stars(pvalue) if pvalue < .05 else 'n.s.', horizontalalignment='center',
+        if bar_labels:
+            ax.text(x=xpos + .5 * width / 2, y=.01, s=benchmark_label_replace[predictors[i]],
+                    rotation=90, rotation_mode='anchor',
+                    fontdict=dict(fontsize=12), color='white' if i == 0 else 'black')
+        ax.text(x=xpos, y=-.03, s=significance_stars(pvalue) if pvalue < .05 else 'n.s.', horizontalalignment='center',
                 fontdict=dict(fontsize=10, fontweight='bold' if i == 0 else 'normal'))
+    # plot formatting
     ax.set_ylabel('Correlation')
     ax.set_xticks([])
-    # ax.yaxis.set_major_formatter(score_formatter)
+    ax.yaxis.set_major_formatter(score_formatter)
     ax.set_ylim([-.5, .6])
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)

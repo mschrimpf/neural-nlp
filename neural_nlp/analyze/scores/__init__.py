@@ -103,19 +103,11 @@ class BenchmarkLabelReplace(LabelReplace):
         super(BenchmarkLabelReplace, self).__init__(**{
             'overall_neural': 'Normalized neural predictivity',
             'overall': 'Language Brain-Score',
-            'overall_glue': 'GLUE tasks average',
+            'overall_glue': 'GLUE language tasks average',
             'Blank2014fROI': 'Blank2014',
             'Fedorenko2016v3': 'Fedorenko2016',
 
             'wikitext-2': 'Next-word prediction',
-            'glue-cola': 'sentence grammaticality (CoLa)',
-            'glue-sst-2': 'sentence sentiment (SST-2)',
-            'glue-qqp': 'semantic similarity - questions (QQP)',
-            'glue-mrpc': 'semantic similarity - sentences (MRPC)',
-            'glue-sts-b': 'sentence similarity - sentences (STS-B)',
-            'glue-mnli': 'entailment (MNLI)',
-            'glue-rte': 'entailment (RTE)',
-            'glue-qnli': 'question-answer coherence (QNLI)',
         })
 
     def __getitem__(self, item):
@@ -304,9 +296,8 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
 
 
 def compare_glue(benchmark2='Pereira2018-encoding'):
-    from neural_nlp.benchmarks.glue import benchmark_pool as glue_benchmark_pool
     fig, axes = pyplot.subplots(figsize=(18, 8), nrows=2, ncols=4, sharey=True)
-    for i, (ax, glue_benchmark) in enumerate(zip(axes.flatten(), glue_benchmark_pool)):
+    for i, (ax, glue_benchmark) in enumerate(zip(axes.flatten(), glue_benchmarks)):
         compare(benchmark1=glue_benchmark, benchmark2=benchmark2, ax=ax, identity_line=False,
                 correlation_pos=(0.5, 0.1), prettify_xticks=False)
         if i % 4 != 0:
@@ -372,6 +363,7 @@ def align_scores(scores1, scores2, identifier_set=('model', 'layer')):
     identifiers1 = list(zip(*[scores1[identifier_key].values for identifier_key in identifier_set]))
     identifiers2 = list(zip(*[scores2[identifier_key].values for identifier_key in identifier_set]))
     overlap = list(set(identifiers1).intersection(set(identifiers2)))
+    overlap = list(sorted(overlap))  # use consistent ordering
     non_overlap = list(set(identifiers1).symmetric_difference(set(identifiers2)))
     if len(non_overlap) > 0:
         logger.warning(f"Non-overlapping identifiers: {sorted(non_overlap)}")

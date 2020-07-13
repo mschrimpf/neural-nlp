@@ -28,6 +28,8 @@ def paper_figures():
     neural_benchmarks = [f'{prefix}-encoding' for prefix in neural_data_identifiers]
     brain_data_identifiers = neural_data_identifiers + ['Futrell2018']
     brain_benchmarks = [f'{prefix}-encoding' for prefix in brain_data_identifiers]
+    wiki_color = '#0035ff'
+
     # 2a: per benchmark scores -- we can predict
     _logger.info("Figures 2a")
     for i, benchmark in enumerate(neural_benchmarks):
@@ -44,7 +46,7 @@ def paper_figures():
     settings = dict(best_layer=True, plot_ceiling=False, plot_significance_stars=False, identity_line=False)
     scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding', **settings,
                    annotate=annotated_models)
-    bars.predictor('wikitext-2', neural_benchmarks, ylim=[0, .65])
+    bars.predictor('wikitext-2', neural_benchmarks, ylim=[0, .65], color=wiki_color)
     scores.compare(benchmark1='overall_glue', benchmark2='overall_neural-encoding', **settings,
                    xlim=[.25, .7], xtick_locator_base=0.1, annotate=False)
     bars.predictor('overall_glue', neural_benchmarks, ylim=[0, .65])
@@ -56,10 +58,12 @@ def paper_figures():
     settings = dict(benchmark2='Futrell2018-encoding', best_layer=True, annotate=annotated_models, plot_ceiling=False,
                     plot_significance_stars=False, ylim=[0, behavior_ylim])
     scores.compare(benchmark1='overall_neural-encoding', **settings, xlim=[0, 1])
+    bars.predictor('Futrell2018-encoding', neural_benchmarks, ylim=[0, .65])
     scores.compare(benchmark1='wikitext-2', **settings, identity_line=False)
     # 5: untrained predicts trained
     _logger.info("Figures 4")
     scores.untrained_vs_trained(benchmark='overall_neural-encoding')
+    bars.untrained_predictor(benchmarks=neural_benchmarks)
     scores.untrained_vs_trained(benchmark='Futrell2018-encoding')
     # 6: overview table
     scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding',
@@ -94,9 +98,14 @@ def paper_figures():
     _logger.info("Figures S4a")
     scores.compare(benchmark1='Fedorenko2016v3-encoding', benchmark2='Fedorenko2016v3nonlang-encoding',
                    identity_line=True, plot_ceiling=False, plot_significance_stars=False)
-    # S5: GLUE
+    # S5: predictors (individual wikitext + GLUE)
     _logger.info("Figures S5")
-    scores.compare_glue(benchmark2='Pereira2018-encoding')
+    settings = dict(best_layer=True, plot_ceiling=False, plot_significance_stars=False, identity_line=False)
+    for neural_benchmark in neural_benchmarks:
+        scores.compare(benchmark1='wikitext-2', benchmark2=neural_benchmark, **settings,
+                       tick_locator_base=0.1 if neural_benchmark.startswith('Blank') else 0.2,
+                       ylim=[-0.055, 0.5] if neural_benchmark.startswith('Blank') else None, annotate=None)
+        scores.compare_glue(benchmark2=neural_benchmark)
     # S6: individual benchmarks predict behavior
     _logger.info("Figures S6")
     for benchmark in neural_benchmarks:
