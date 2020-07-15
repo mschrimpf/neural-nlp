@@ -222,11 +222,15 @@ def _plot_predictor(title, data, benchmark_labels, color='#ababab', ylim=None):
 
 def task_predictors(target_benchmark='overall_neural-encoding',
                     num_bootstraps=1000, bootstrap_size=.9, bar_labels=False):
-    # collect
     predictors = ['wikitext-2'] + glue_benchmarks
+    # determine model overlap
+    models = [set(retrieve_scores(predictor)['model'].values) for predictor in predictors]
+    models = set.intersection(*models)
+    _logger.info(f"{len(models)} are overlapping")
+    # collect
     correlation_data, values_data = [], defaultdict(list)
     for predictor in predictors:
-        predictor_scores = retrieve_scores(predictor)
+        predictor_scores = retrieve_scores(predictor, models=models)
         scores = retrieve_scores(target_benchmark)
         predictor_scores, scores = align_scores(predictor_scores, scores, identifier_set=('model',))
         x = predictor_scores['score'] if not predictor.startswith('wikitext-2') else np.exp(predictor_scores['score'])
