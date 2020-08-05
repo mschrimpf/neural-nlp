@@ -400,14 +400,19 @@ def computeDropNoCeil(score,comparison):
 
 def computeDropFedorenko(score_l,score_nl,ceil=True):
     b=bestLangLayer(score_l)
+    
+    o_l=freezeBestLangLayer(score_l,b)
+    o_comp=freezeBestLangLayer(score_nl,b) # freeze same layer
+    
     if ceil:
-        o_l=freezeBestLangLayer(score_l,b)
-        o_comp=freezeBestLangLayer(score_nl,b) # freeze same layer
-        center_lang=getCenter2(o_l).values
+        center_lang=getCenter2(o_l).values # Martin has the ceiled median/median across subs scores in the first level of the object. thus this corresponds to manually computing median first, and median again. see langSpec_Fedorenko.ipynb sanity checking. these values are ceiled.
         center_comp=getCenter2(o_comp).values
     if not ceil:
-        center_lang=freezeBestLangLayer(score_l.raw.raw,b).median()
-        center_comp=freezeBestLangLayer(score_nl.raw.raw,b).median()
+#         center_lang=freezeBestLangLayer(score_l.raw.raw,b).median() #prev. analyses: wrong median. need to do subjects first.
+#         center_comp=freezeBestLangLayer(score_nl.raw.raw,b).median()
+
+        center_lang = o_l.raw.raw.groupby('subject_UID').median().median() # fetches the not ceiled scores.
+        center_comp = o_comp.raw.raw.groupby('subject_UID').median().median() # fetches the not ceiled scores.
 
     diff = center_lang - center_comp
     mult = center_lang / center_comp
