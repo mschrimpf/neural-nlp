@@ -1,18 +1,19 @@
 import copy
-import sys
 from collections import OrderedDict
 
 import fire
 import logging
 import numpy as np
 import seaborn
+import sys
 from matplotlib import pyplot
 from pathlib import Path
+from scipy.signal import savgol_filter
 
 from neural_nlp import model_layers
+from neural_nlp.analyze import savefig
 from neural_nlp.analyze.scores import collect_scores, models as all_models, model_colors, \
     fmri_atlases, shaded_errorbar, average_adjacent
-from neural_nlp.analyze import savefig
 
 _logger = logging.getLogger(__name__)
 
@@ -80,7 +81,6 @@ def layer_preference(benchmark='Pereira2018-encoding'):
     models = [model for model in all_models if len(model_layers[model]) > 1]  # need at least 2 layers to plot
     data = collect_scores(benchmark=benchmark, models=models)
     data = average_adjacent(data)
-    data = ceiling_normalize(data)
 
     groups = copy.deepcopy(model_groups)
     groups['other'] = [model for model in models if not any(model in group for group in groups.values())]
@@ -99,12 +99,46 @@ def layer_preference(benchmark='Pereira2018-encoding'):
             ax.set_yticklabels([])
         else:
             ax.set_ylabel('score')
-        ax.set_ylim([0, 1])
+        ax.set_ylim([0, 1.2])
     # xlabel
     fig.text(0.5, 0.01, 'relative layer position', ha='center')
     # save
     fig.tight_layout()
     savefig(fig, Path(__file__).parent / f'layer_ordering-{benchmark}')
+
+
+def layer_preference_single(model='gpt2-xl',
+                            benchmarks=('Pereira2018-encoding', 'Fedorenko2016v3-encoding', 'Blank2014fROI-encoding'),
+                            smoothing=False,
+                            ):
+    data = [collect_scores(benchmark=benchmark, models=[model]) for benchmark in benchmarks]
+    data = [average_adjacent(d) for d in data]
+
+    fig, axes = pyplot.subplots(figsize=(15, 6), nrows=1, ncols=len(benchmarks), sharey=True)
+    for benchmark_iter, (ax, benchmark_name, benchmark_data) in enumerate(zip(axes.flatten(), benchmarks, data)):
+        ax.set_title(benchmark_name)
+        num_layers = len(benchmark_data['layer'])  # assume layers are correctly ordered
+        relative_position = np.arange(num_layers) / (num_layers - 1)
+        y, error = benchmark_data['score'], benchmark_data['error']
+        if smoothing:
+            window_size = int(len(y) * 2 / 3)
+            if window_size % 2 == 0:  # if even
+                window_size += 1  # make odd (required for filter)
+            y = savgol_filter(y, window_size, 3)
+        shaded_errorbar(x=relative_position, y=y, error=error, label=model, ax=ax,
+                        alpha=0.4, color=model_colors[model],
+                        linewidth=7.0 if model == 'gpt2-xl' else 1.0,
+                        shaded_kwargs=dict(alpha=0.2, color=model_colors[model]))
+        if benchmark_iter > 0:
+            ax.set_yticklabels([])
+        else:
+            ax.set_ylabel('score')
+        ax.set_ylim([0, 1.2])
+    # xlabel
+    fig.text(0.5, 0.01, 'relative layer position', ha='center')
+    # save
+    fig.tight_layout()
+    savefig(fig, Path(__file__).parent / f'layer_ordering-{model}')
 
 
 def layer_training_delta(models=None):
