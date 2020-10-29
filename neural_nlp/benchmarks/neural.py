@@ -804,7 +804,7 @@ def aggregate_neuroid_scores(neuroid_scores, subject_column):
 
 
 def consistency_neuroids(neuroids, ceiling_neuroids):
-    assert set(neuroids['neuroid_id'].values) == set(ceiling_neuroids['neuroid_id'].values)
+    assert set(neuroids['neuroid_id'].values) == set(ceiling_neuroids['neuroid'].values)
     ceiling_neuroids = ceiling_neuroids[{'neuroid': [neuroids['neuroid_id'].values.tolist().index(neuroid_id)
                                                      for neuroid_id in neuroids['neuroid_id'].values]}]  # align
     ceiling_neuroids = ceiling_neuroids.sel(aggregation='center')
