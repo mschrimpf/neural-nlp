@@ -34,6 +34,7 @@ from transformers import glue_processors as processors
 from brainscore.metrics import Score
 from brainscore.utils import LazyLoad
 from neural_nlp.models.implementations import BrainModel
+from neural_nlp.models.implementations import TaskModel
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -244,8 +245,8 @@ class GLUEBenchmark:
         self.task_name = task_name
         self.seed = seed
 
-    def __call__(self, model: BrainModel):
-        model.mode = BrainModel.Modes.sentence_features
+    def __call__(self, model: TaskModel):
+        model.mode = TaskModel.Modes.sentence_features
         data_dir = self.task_name.upper().replace('COLA', 'CoLA')
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..',
                                                 'ressources', 'ml', 'glue', data_dir))
