@@ -1,3 +1,5 @@
+import re
+
 import fire
 import itertools
 import logging
@@ -5,7 +7,7 @@ import matplotlib
 import numpy as np
 import os
 import pandas as pd
-import seaborn
+import seaborn as sns
 import sys
 from functools import reduce
 from matplotlib import pyplot
@@ -89,7 +91,7 @@ models = tuple(model_colors.keys())
 fmri_atlases = ('DMN', 'MD', 'language', 'auditory', 'visual')
 overall_neural_benchmarks = ('Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI')
 overall_benchmarks = overall_neural_benchmarks + ('Futrell2018',)
-glue_benchmarks = [f'glue-{task}'  for task in ['cola', 'sst-2', 'qqp', 'mrpc', 'sts-b', 'mnli', 'rte', 'qnli']]
+glue_benchmarks = [f'glue-{task}' for task in ['cola', 'sst-2', 'qqp', 'mrpc', 'sts-b', 'mnli', 'rte', 'qnli']]
 performance_benchmarks = ['wikitext', 'glue']
 
 
@@ -120,11 +122,14 @@ benchmark_label_replace = BenchmarkLabelReplace()
 model_label_replace = LabelReplace({'word2vec': 'w2v', 'transformer': 'trf.', 'lm_1b': 'lstm lm1b'})
 
 
-def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
+def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding', include_untrained=False,
             best_layer=True, normalize=True, reference_best=False, identity_line=False, annotate=False,
             plot_ceiling=False, xlim=None, ylim=None, ax=None, **kwargs):
     ax_given = ax is not None
     all_models = models
+    if include_untrained:
+        all_models = [([model] if include_untrained != 'only' else []) + [f"{model}-untrained"] for model in all_models]
+        all_models = [model for model_tuple in all_models for model in model_tuple]
     scores1 = collect_scores(benchmark=benchmark1, models=all_models, normalize=normalize)
     scores2 = collect_scores(benchmark=benchmark2, models=all_models, normalize=normalize)
     scores1, scores2 = average_adjacent(scores1).dropna(), average_adjacent(scores2).dropna()
@@ -140,10 +145,10 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
         score_annotations = scores1['model'].values
     else:
         score_annotations = [model if model in annotate else None for model in scores1['model'].values]
-    fig, ax = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
-                              score_annotations=score_annotations,
-                              xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
-                              ax=ax, **kwargs)
+    fig, ax, info = _plot_scores1_2(scores1, scores2, color=colors, alpha=None if best_layer else .2,
+                                    score_annotations=score_annotations,
+                                    xlabel=benchmark1, ylabel=benchmark2, loss_xaxis=benchmark1.startswith('wikitext'),
+                                    ax=ax, return_info=True, **kwargs)
     xlim_given, ylim_given = xlim is not None, ylim is not None
     xlim, ylim = ax.get_xlim() if not xlim_given else xlim, ax.get_ylim() if not ylim_given else ylim
     normalize_x = normalize and not any(benchmark1.startswith(perf_prefix) for perf_prefix in performance_benchmarks)
@@ -172,13 +177,15 @@ def compare(benchmark1='wikitext-2', benchmark2='Blank2014fROI-encoding',
     if not ax_given:
         savefig(fig, savename=Path(__file__).parent /
                               (f"{benchmark1}__{benchmark2}" + ('-best' if best_layer else '-layers')))
+    return fig, ax, info
 
 
-def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=False, plot_significance_stars=True,
+def _plot_scores1_2(scores1, scores2, score_annotations=None,
+                    plot_correlation=False, plot_significance_p=False, plot_significance_stars=True,
                     xlabel=None, ylabel=None, loss_xaxis=False, color=None,
                     tick_locator_base=0.2, xtick_locator_base=None, ytick_locator_base=None,
                     scatter_size=20, errorbar_error_alpha=0.2,
-                    prettify_xticks=True, correlation_pos=(0.05, 0.8), ax=None, **kwargs):
+                    prettify_xticks=True, correlation_pos=(0.05, 0.8), ax=None, return_info=False, **kwargs):
     assert len(scores1) == len(scores2)
     xtick_locator_base = xtick_locator_base or tick_locator_base
     ytick_locator_base = ytick_locator_base or tick_locator_base
@@ -212,12 +219,14 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=F
     ax.yaxis.set_major_formatter(score_formatter)
 
     r, p = pearsonr(x if not loss_xaxis else np.exp(x), y)
+    info = {'r': r, 'p': p}
     if plot_correlation:
         b, m = polyfit(x, y, 1)
         correlation_x = [min(x), max(x)]
         ax.plot(correlation_x, b + m * np.array(correlation_x), color='black', linestyle='solid')
     ax.text(*correlation_pos, ha='left', va='center', transform=ax.transAxes,
             s=("$r=" + f"{(r * (-1 if loss_xaxis else 1)):.2f}$"[1:] + ('' if p < 0.05 else f" (n.s.)")
+               + (significance_p(p) if plot_significance_p else '')
                + (significance_stars(p) if plot_significance_stars and p < 0.05 else '')))
     if not plot_significance_stars:
         for label, func in zip(['pearson', 'spearman'], [pearsonr, spearmanr]):
@@ -226,7 +235,16 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None, plot_correlation=F
 
     ax.set_xlabel(benchmark_label_replace[xlabel])
     ax.set_ylabel(benchmark_label_replace[ylabel])
-    return fig, ax
+    output = fig, ax
+    if return_info:
+        output += (info,)
+    return output
+
+
+def significance_p(p, max_decimals=5):
+    num_zeros = max([i for i in range(max_decimals + 1) if p <= 0.5 / (10 ** i)])
+    return 'p' + ('<' if p > 0.1 / (10 ** (num_zeros + 1)) else '<<') + \
+           '0.' + ('0' * num_zeros) + ('5' if p > 0.1 / (10 ** num_zeros) else '1')
 
 
 def significance_stars(p, max_stars=5):
@@ -280,7 +298,7 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
                 f"No score cached for {len(missing_models)} models {missing_models} on benchmark {benchmark}")
         data = pd.DataFrame(data)
         if any(benchmark.startswith(performance_benchmark) for performance_benchmark in ['wikitext', 'glue']):
-            data['layer'] = -1
+            data['layer'] = data['layer'] if 'layer' in data.columns else -1
             data['error'] = 0  # nans will otherwise be dropped later on
         if benchmark.startswith('wikitext'):
             data = data[data['measure'] == 'test_loss']
@@ -533,6 +551,56 @@ def num_features_vs_score(benchmark='Pereira2018-encoding', per_layer=True, incl
     savefig(fig, savename=Path(__file__).parent / f"num_features-{benchmark}" + ("-layerwise" if per_layer else ""))
 
 
+def metric_generalizations():
+    data_identifiers = ['Pereira2018', 'Fedorenko2016v3', 'Blank2014fROI']
+    base_metric = 'encoding'
+    comparison_metrics = ['rdm']  # , 'cka']
+    fig = pyplot.figure(figsize=(20, 10 * len(comparison_metrics)), constrained_layout=True)
+    gridspec = fig.add_gridspec(nrows=len(data_identifiers) * len(comparison_metrics), ncols=4)
+    for benchmark_index, benchmark_prefix in enumerate(data_identifiers):
+        settings = dict(xlim=[0, 1.2], ylim=[0, 1.8]) if benchmark_prefix.startswith("Pereira") else \
+            dict(xlim=[0, .4], ylim=[0, .4]) if benchmark_prefix.startswith('Blank') else dict()
+        for metric_index, comparison_metric in enumerate(comparison_metrics):
+            grid_row = (benchmark_index * len(comparison_metrics)) + metric_index
+            correlations = []
+            # all as well as trained and untrained separately
+            for train_index, include_untrained in enumerate([True, False, 'only']):
+                gridpos = gridspec[grid_row, 1 + train_index]
+                ax = fig.add_subplot(gridpos)
+                train_description = 'all' if include_untrained is True \
+                    else 'trained' if include_untrained is False \
+                    else 'untrained'
+                ax.set_title(f"{comparison_metric} {train_description}")
+                _, _, info = compare(benchmark1=f"{benchmark_prefix}-{base_metric}",
+                                     benchmark2=f"{benchmark_prefix}-{comparison_metric}",
+                                     **settings, plot_significance_p=False, plot_significance_stars=True,
+                                     include_untrained=include_untrained, ax=ax)
+                ax.set_xlabel(ax.get_xlabel() + '-' + base_metric)
+                correlations.append(
+                    {'trained': train_description, 'r': info['r'], 'p': info['p'], 'index': train_index})
+            # plot bars
+            correlations = pd.DataFrame(correlations).sort_values(by='index')
+            ax = fig.add_subplot(gridspec[grid_row, 0])
+            ticks = list(reversed(correlations['index']))
+            bar_width = 0.5
+            ax.barh(y=ticks, width=correlations['r'], height=bar_width, color='#ababab')
+            ax.set_yticks([])
+            for ypos, label, pvalue in zip(ticks, correlations['trained'], correlations['p']):
+                ax.text(y=ypos + .15 * bar_width / 2, x=.01, s=label,
+                        verticalalignment='center',
+                        fontdict=dict(fontsize=20), color='black')
+                ax.text(y=ypos, x=0, s=significance_stars(pvalue) if pvalue < .05 else 'n.s.',
+                        rotation=90, rotation_mode='anchor',
+                        horizontalalignment='center',
+                        fontdict=dict(fontsize=14, fontweight='normal'))
+            ax.set_title(comparison_metric)
+        fig.text(x=0.007, y=1 - (.33 * benchmark_index + .15), s=benchmark_prefix,
+                 rotation=90, horizontalalignment='center',verticalalignment='center',
+                 fontdict=dict(fontsize=20, fontweight='bold'))
+
+    savefig(fig, savename=Path(__file__).parent / f"metric_generalizations")
+
+
 def Pereira_language_vs_other(best_layer=True):
     scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
     scores_lang, scores_other = scores[scores['atlas'] == 'language'], scores[scores['atlas'] == 'auditory']
@@ -622,5 +690,5 @@ if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     for ignore_logger in ['matplotlib']:
         logging.getLogger(ignore_logger).setLevel(logging.INFO)
-    seaborn.set(context='talk')
+    sns.set(context='talk')
     fire.Fire()

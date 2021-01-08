@@ -61,22 +61,21 @@ def paper_figures():
     bars.predictor('Futrell2018-encoding', neural_benchmarks, ylim=[0, .65])
     scores.compare(benchmark1='wikitext-2', **settings, identity_line=False)
     # 5: untrained predicts trained
-    _logger.info("Figures 4")
+    _logger.info("Figures 5")
     scores.untrained_vs_trained(benchmark='overall_neural-encoding')
     bars.untrained_predictor(benchmarks=neural_benchmarks)
-    scores.untrained_vs_trained(benchmark='Futrell2018-encoding')
     # 6: overview table
     scores.compare(benchmark1='wikitext-2', benchmark2='overall_neural-encoding',
                    plot_significance_stars=False, identity_line=False)
     scores.compare(benchmark1='overall_neural-encoding', benchmark2='Futrell2018-encoding',
                    plot_significance_stars=False)
-    scores.untrained_vs_trained(benchmark='overall-encoding')
+    scores.untrained_vs_trained(benchmark='overall_neural-encoding')
     bars.whole_best(benchmark='overall-encoding', annotate=True)
 
-    # text: untrained/trained diff Pereira2018
-    scores.untrained_vs_trained(benchmark='Pereira2018-encoding', analyze_only=True)
-    # text: untrained/trained GloVe Pereira2018
-    stats.model_training_diff(model='glove', benchmark='Pereira2018-encoding')
+    # fig6 caption: untrained/trained diff
+    scores.untrained_vs_trained(benchmark='overall-encoding', analyze_only=True)
+    # text: untrained/trained gpt2-xl
+    stats.model_training_diff(model='gpt2-xl', benchmark='overall-encoding')
     # text: untrained/trained AlBERTs Fedorenko2016
     scores.untrained_vs_trained(
         benchmark='Fedorenko2016v3-encoding', analyze_only=True,
@@ -89,11 +88,7 @@ def paper_figures():
         ceiling.plot_extrapolation_ceiling(benchmark=benchmark, ytick_formatting_frequency=tick_formatting[benchmark])
     # S2: cross-metrics
     _logger.info("Figures S2")
-    for benchmark_prefix in neural_data_identifiers:
-        settings = dict(xlim=[0, 1.2], ylim=[0, 1.8]) if benchmark_prefix.startswith("Pereira") else \
-            dict(xlim=[0, .4], ylim=[0, .4]) if benchmark_prefix.startswith('Blank') else dict()
-        scores.compare(benchmark1=f"{benchmark_prefix}-encoding", benchmark2=f"{benchmark_prefix}-rdm",
-                       **settings, plot_significance_stars=False)
+    scores.metric_generalizations()
     # S4b: non language signal
     _logger.info("Figures S4a")
     scores.compare(benchmark1='Fedorenko2016v3-encoding', benchmark2='Fedorenko2016v3nonlang-encoding',
@@ -111,10 +106,14 @@ def paper_figures():
     for benchmark in neural_benchmarks:
         scores.compare(benchmark1=benchmark, benchmark2='Futrell2018-encoding', best_layer=True, annotate=False,
                        plot_ceiling=False, plot_significance_stars=False, ylim=[0, behavior_ylim])
-    # S7: untrained controls
+    # S7: untrained/trained per dataset
+    for benchmark in brain_benchmarks:
+        scores.untrained_vs_trained(benchmark=benchmark)
+    # S8: untrained controls
     _logger.info("Figures S7: a) wikitext untrained; b) random embedding")
     scores.untrained_vs_trained(benchmark='wikitext-2', identity_line=False, loss_xaxis=True)
     bars.random_embedding()
+    layers.layer_preference_single()
     for benchmark in neural_benchmarks:
         layers.layer_preference(benchmark=benchmark)
 
