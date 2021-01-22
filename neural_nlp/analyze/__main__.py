@@ -3,7 +3,7 @@ import matplotlib
 import seaborn
 import sys
 
-from neural_nlp.analyze import scores, stats
+from neural_nlp.analyze import scores, stats, data
 from neural_nlp.analyze.data import ceiling
 from neural_nlp.analyze.scores import bars, layers
 
@@ -116,6 +116,10 @@ def paper_figures():
     layers.layer_preference_single()
     for benchmark in neural_benchmarks:
         layers.layer_preference(benchmark=benchmark)
+
+    # additional controls
+    for benchmark in neural_benchmarks:
+        data.print_train_test(benchmark)
 
 
 if __name__ == '__main__':
