@@ -119,7 +119,7 @@ def paper_figures():
 
     # additional controls
     for benchmark in neural_benchmarks:
-        data.print_train_test(benchmark)
+        data.train_test_overlap(benchmark)
 
 
 if __name__ == '__main__':
