@@ -239,9 +239,10 @@ class SkipThoughts(BrainModel, TaskModel):
 
     identifier = 'skip-thoughts'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts'), load_weights=True):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'skip-thoughts'), load_weights=True, glue_batch_size=64):
         super().__init__()
         self._logger = logging.getLogger(fullname(self))
+        self._glue_batch_size = glue_batch_size
         import skipthoughts
         weights = weights + '/'
         model = LazyLoad(lambda: skipthoughts.load_model(path_to_models=weights, path_to_tables=weights))
@@ -313,17 +314,28 @@ class SkipThoughts(BrainModel, TaskModel):
 
         if examples[0].text_b is not None:
             self._logger.debug("************** \n\n This benchmark requires two input sentences \n\n **************")
-            for example in tqdm(examples):
-                sent1 = torch.tensor(self._encode_sentence(example.text_a)[-1][-1])
-                sent2 = torch.tensor(self._encode_sentence(example.text_b)[-1][-1])
-                f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
-                features.append(PytorchWrapper._tensor_to_numpy(f))
+            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
+                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
+                text_a = [batch_example.text_a for batch_example in batch_examples]
+                text_b = [batch_example.text_b for batch_example in batch_examples]
+                sents1 = self._encoder.encode(text_a)  # sentences x features encoding
+                sents2 = self._encoder.encode(text_b)
+                for sent1, sent2 in zip(sents1, sents2):
+                    sent1 = torch.tensor(sent1)
+                    sent2 = torch.tensor(sent2)
+                    f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                    features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features)
         else:
-            self._logger.debug("************** \n\n This benchmark requires only one input sentence \n\n **************")
-            for example in tqdm(examples): # Here we could also concatenate 4 times if we want to keep fc layer the same dim!
-                f = torch.tensor(self._encode_sentence(example.text_a)[-1][-1])
-                features.append(PytorchWrapper._tensor_to_numpy(f))
+            self._logger.debug(
+                "************** \n\n This benchmark requires only one input sentence \n\n **************")
+            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
+                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
+                text_a = [batch_example.text_a for batch_example in batch_examples]
+                sents = self._encoder.encode(text_a)
+                for sent in sents:
+                    sent = torch.tensor(sent)
+                    features.append(PytorchWrapper._tensor_to_numpy(sent))
             all_features = torch.tensor(features)
 
         if output_mode == "classification":
@@ -576,6 +588,7 @@ class _PytorchTransformerWrapper(BrainModel, TaskModel):
         self.default_layers = self.available_layers = layers
         self._tokenizer = tokenizer
         self._model = model
+        self._layers = layers
         self._model_container = self.ModelContainer(tokenizer, model, layers, tokenizer_special_tokens)
         self._sentence_average = sentence_average
         self._extractor = ActivationsExtractorHelper(identifier=identifier, get_activations=self._model_container,
@@ -594,7 +607,7 @@ class _PytorchTransformerWrapper(BrainModel, TaskModel):
         else:
             raise ValueError(f"Unknown mode {self.mode}")
 
-    def _tokens_to_features(self, token_ids):
+    def _tokens_to_features(self, token_ids, layer=None):
         import torch
         max_num_words = 512 - 2  # -2 for [cls], [sep]
         if os.getenv('ALLATONCE', '0') == '1':
@@ -609,8 +622,13 @@ class _PytorchTransformerWrapper(BrainModel, TaskModel):
             context_ids = token_ids[context_start:token_index + 1]
             tokens_tensor = torch.tensor([context_ids])
             tokens_tensor = tokens_tensor.to('cuda' if torch.cuda.is_available() else 'cpu')
-            context_features = self._model(tokens_tensor)[0]
-            features.append(PytorchWrapper._tensor_to_numpy(context_features[:, -1, :]))
+            overall_features, _, context_encoding = self._model(tokens_tensor)
+            if layer is None:
+                context_features = overall_features[:, -1, :]
+            else:
+                layer_pos = self._layers.index(layer)
+                context_features = context_encoding[layer_pos][:, -1, :]
+            features.append(PytorchWrapper._tensor_to_numpy(context_features))
         return np.concatenate(features)
 
     def _sentence_features(self, batch):
