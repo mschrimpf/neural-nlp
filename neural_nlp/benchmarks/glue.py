@@ -142,6 +142,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
         epoch_train_loss = 0
         for step, batch in enumerate(epoch_iterator):
             decoder_head.train()
+            batch = tuple(t.to(device) for t in batch)
             if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
                 features = batch[0]
                 labels = batch[-1]
@@ -149,7 +150,6 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
                 # i.e., features and labels.
                 outputs = decoder_head(features, labels=labels)
             else:
-                batch = tuple(t.to(device) for t in batch)
                 features = features_model(batch=batch)
                 outputs = decoder_head(features, labels=batch[-1])
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
