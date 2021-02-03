@@ -48,7 +48,24 @@ class DecoderHead(torch.nn.Module):
     def __init__(self, features_size, num_labels):
         super(DecoderHead, self).__init__()
         self.num_labels = num_labels
-        self.linear = nn.Linear(features_size, num_labels)
+
+        import argparse  #If we choose to concatenate 4 times, then this parser is not needed.
+        parser = argparse.ArgumentParser(description='glue parser')
+        parser.add_argument('--log_level', type=str)
+        parser.add_argument('--model', type=str)
+        parser.add_argument('--benchmark', type=str)
+        parser.add_argument('run', type=str)
+        args = parser.parse_args()
+
+        if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
+            if args.benchmark in ['glue-cola', 'glue-sst-2']: #single-sentence benchmarks
+                logger.info("***** Parsed environment variable nontransformer, COLA! *****")
+                self.linear = nn.Linear(features_size, num_labels) #like this or concatenate 4 times, i.e., also times 4?
+            else:
+                logger.info("***** Parsed environment variable nontransformer! *****")
+                self.linear = nn.Linear(features_size * 4, num_labels)  # *4 due to concatenation
+        else:
+            self.linear = nn.Linear(features_size, num_labels)
 
     def forward(self, features, labels=None):
         features = features.view(-1, np.prod(features.shape[1:]))
@@ -119,15 +136,22 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
     previous_val_score = -np.inf
     decoder_head.zero_grad()
     train_iterator = trange(epochs_trained, int(num_train_epochs), desc="Epoch")
-    set_seed(seed)  # Added here for reproductibility
+    set_seed(seed)  # Added here for reproducibility
     for epoch in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
         epoch_train_loss = 0
         for step, batch in enumerate(epoch_iterator):
             decoder_head.train()
-            batch = tuple(t.to(device) for t in batch)
-            features = features_model(batch=batch)
-            outputs = decoder_head(features, labels=batch[-1])
+            if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
+                features = batch[0]
+                labels = batch[-1]
+                # features = features_model(batch=batch) #here we're passing 4 arguments, but we only want to pass 2
+                # i.e., features and labels.
+                outputs = decoder_head(features, labels=labels)
+            else:
+                batch = tuple(t.to(device) for t in batch)
+                features = features_model(batch=batch)
+                outputs = decoder_head(features, labels=batch[-1])
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -178,6 +202,8 @@ def _get_val_stop_score(results):
         return results['acc']
     elif 'pearson' in results:  # pearson,spearman,corr
         return results['pearson']
+    elif 'mcc' in results:  # cola has mcc
+        return results['mcc']
     else:
         raise ValueError(f"Unknown results {results}")
 
@@ -201,7 +227,10 @@ def evaluate(features_model, decoder_head, task_name, eval_dataset, output_mode,
         batch = tuple(t.to(device) for t in batch)
 
         with torch.no_grad():
-            features = features_model(batch=batch)
+            if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
+                features = batch[0]
+            else:
+                features = features_model(batch=batch)
             labels = batch[-1]
             outputs = decoder_head(features, labels=labels)
             tmp_eval_loss, logits = outputs[:2]
@@ -272,7 +301,11 @@ class GLUEBenchmark:
             # Loop to handle MNLI double evaluation (matched, mis-matched)
             for eval_task in eval_task_names:
                 examples, label_list, output_mode = get_examples(data_dir=data_dir, task=eval_task, evaluate=True)
-                eval_dataset = model.glue_dataset(task=eval_task, examples=examples, label_list=label_list,
+                if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
+                    eval_dataset = model.glue_dataset(examples=examples, label_list=label_list,
+                                                      output_mode=output_mode)
+                else:
+                    eval_dataset = model.glue_dataset(task=eval_task, examples=examples, label_list=label_list,
                                                   output_mode=output_mode, max_seq_length=max_seq_length)
                 result = evaluate(features_model=model, decoder_head=decoder_head,
                                   eval_dataset=eval_dataset, task_name=eval_task, output_mode=output_mode,
@@ -292,7 +325,11 @@ class GLUEBenchmark:
 
         # Training
         examples, label_list, output_mode = get_examples(data_dir=data_dir, task=self.task_name, evaluate=False)
-        train_dataset = model.glue_dataset(task=self.task_name, examples=examples, label_list=label_list,
+        if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
+            train_dataset = model.glue_dataset(examples=examples, label_list=label_list,
+                                               output_mode=output_mode)
+        else:
+            train_dataset = model.glue_dataset(task=self.task_name, examples=examples, label_list=label_list,
                                            output_mode=output_mode, max_seq_length=max_seq_length)
         train(features_model=model, decoder_head=decoder_head,
               train_dataset=train_dataset, run_evaluation=run_evaluation,

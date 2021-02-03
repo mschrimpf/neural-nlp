@@ -305,6 +305,35 @@ class SkipThoughts(BrainModel, TaskModel):
         sentence_encoding = np.array(sentence_encoding).transpose([1, 0, 2])
         return sentence_encoding
 
+    def glue_dataset(self, examples, label_list, output_mode):
+        import torch
+        from torch.utils.data import TensorDataset
+        label_map = {label: i for i, label in enumerate(label_list)}
+        features = []
+
+        if examples[0].text_b is not None:
+            self._logger.debug("************** \n\n This benchmark requires two input sentences \n\n **************")
+            for example in tqdm(examples):
+                sent1 = torch.tensor(self._encode_sentence(example.text_a)[-1][-1])
+                sent2 = torch.tensor(self._encode_sentence(example.text_b)[-1][-1])
+                f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                features.append(PytorchWrapper._tensor_to_numpy(f))
+            all_features = torch.tensor(features)
+        else:
+            self._logger.debug("************** \n\n This benchmark requires only one input sentence \n\n **************")
+            for example in tqdm(examples): # Here we could also concatenate 4 times if we want to keep fc layer the same dim!
+                f = torch.tensor(self._encode_sentence(example.text_a)[-1][-1])
+                features.append(PytorchWrapper._tensor_to_numpy(f))
+            all_features = torch.tensor(features)
+
+        if output_mode == "classification":
+            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.float)
+
+        dataset = TensorDataset(all_features, all_labels)
+        return dataset
+
     available_layers = ['encoder']
     default_layers = available_layers
 
