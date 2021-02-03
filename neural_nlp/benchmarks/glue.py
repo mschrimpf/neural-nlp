@@ -49,7 +49,7 @@ class DecoderHead(torch.nn.Module):
         super(DecoderHead, self).__init__()
         self.num_labels = num_labels
 
-        import argparse  #If we choose to concatenate 4 times, then this parser is not needed.
+        import argparse  # If we choose to concatenate 4 times, then this parser is not needed.
         parser = argparse.ArgumentParser(description='glue parser')
         parser.add_argument('--log_level', type=str)
         parser.add_argument('--model', type=str)
@@ -58,7 +58,7 @@ class DecoderHead(torch.nn.Module):
         args = parser.parse_args()
 
         if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
-            if args.benchmark in ['glue-cola', 'glue-sst-2']: #single-sentence benchmarks
+            if args.benchmark in ['glue-cola', 'glue-sst-2']:  # single-sentence benchmarks
                 logger.info("***** Parsed environment variable nontransformer, COLA! *****")
                 self.linear = nn.Linear(features_size, num_labels) #like this or concatenate 4 times, i.e., also times 4?
             else:
@@ -295,18 +295,21 @@ class GLUEBenchmark:
 
         # setup Evaluation
         eval_task_names = ("mnli", "mnli-mm") if self.task_name == "mnli" else (self.task_name,)
+        eval_datasets = {}
+        for eval_task in eval_task_names:
+            examples, label_list, output_mode = get_examples(data_dir=data_dir, task=eval_task, evaluate=True)
+            if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
+                eval_datasets[eval_task] = model.glue_dataset(examples=examples, label_list=label_list,
+                                                              output_mode=output_mode)
+            else:
+                eval_datasets[eval_task] = model.glue_dataset(task=eval_task, examples=examples, label_list=label_list,
+                                                              output_mode=output_mode, max_seq_length=max_seq_length)
 
         def run_evaluation(return_score=False):
             scores = []
             # Loop to handle MNLI double evaluation (matched, mis-matched)
             for eval_task in eval_task_names:
-                examples, label_list, output_mode = get_examples(data_dir=data_dir, task=eval_task, evaluate=True)
-                if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
-                    eval_dataset = model.glue_dataset(examples=examples, label_list=label_list,
-                                                      output_mode=output_mode)
-                else:
-                    eval_dataset = model.glue_dataset(task=eval_task, examples=examples, label_list=label_list,
-                                                  output_mode=output_mode, max_seq_length=max_seq_length)
+                eval_dataset = eval_datasets[eval_task]
                 result = evaluate(features_model=model, decoder_head=decoder_head,
                                   eval_dataset=eval_dataset, task_name=eval_task, output_mode=output_mode,
                                   device=device)
@@ -330,7 +333,7 @@ class GLUEBenchmark:
                                                output_mode=output_mode)
         else:
             train_dataset = model.glue_dataset(task=self.task_name, examples=examples, label_list=label_list,
-                                           output_mode=output_mode, max_seq_length=max_seq_length)
+                                               output_mode=output_mode, max_seq_length=max_seq_length)
         train(features_model=model, decoder_head=decoder_head,
               train_dataset=train_dataset, run_evaluation=run_evaluation,
               seed=self.seed, device=device)
