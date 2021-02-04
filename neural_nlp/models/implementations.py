@@ -358,9 +358,10 @@ class LM1B(BrainModel, TaskModel):
 
     identifier = 'lm_1b'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b'), reset_weights=False):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b'), reset_weights=False, glue_batch_size=64):
         super().__init__()
         self._logger = logging.getLogger(self.__class__.__name__)
+        self._glue_batch_size = glue_batch_size
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
@@ -441,12 +442,12 @@ class LM1B(BrainModel, TaskModel):
                                                          self._encoder.t['target_weights_in']: weights})
             if i > 0:  # 0 is <S>
                 embeddings.append(lstm_emb)
-        # `embeddings` shape is now: words x layers x *layer_shapes
+            #`embeddings` shape is now: words x layers x *layer_shapes
         layer_activations = {}
         for i, layer in enumerate(layers):
             # embeddings is `words x layers x (1 x 1024)`
             layer_activations[layer] = [embedding[i] for embedding in embeddings]
-            # words x 1 x 1024 --> words x 1024
+            # `words x 1 x 1024` --> `words x 1024`
             layer_activations[layer] = np.array(layer_activations[layer]).transpose(1, 0, 2).squeeze(axis=0)
         return layer_activations
 
@@ -455,6 +456,51 @@ class LM1B(BrainModel, TaskModel):
 
     def available_layers(self, filter_inputs=True):
         return [tensor_name for tensor_name in self._encoder.t if not filter_inputs or not tensor_name.endswith('_in')]
+
+    def glue_dataset(self, examples, label_list, output_mode):
+        import torch
+        from torch.utils.data import TensorDataset
+        label_map = {label: i for i, label in enumerate(label_list)}
+        features = []
+
+        readout_layer = [self.default_layers[-1]]
+
+        def last_word_encoding_glue(readout_activations):
+            # shape of activations here `words * hidden_dim` e.g. (13, 1024) > (1024,)
+            activations = readout_activations[-1, :]
+            return activations
+
+        if examples[0].text_b is not None:
+            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
+                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
+                text_a = [batch_example.text_a for batch_example in batch_examples]
+                text_b = [batch_example.text_b for batch_example in batch_examples]
+                sents1 = [last_word_encoding_glue(self._encode_sentence(elm, readout_layer)[readout_layer[0]]) for elm in tqdm(text_a)]  # sentences x features encoding
+                sents2 = [last_word_encoding_glue(self._encode_sentence(elm, readout_layer)[readout_layer[0]]) for elm in tqdm(text_b)]
+                for sent1, sent2 in zip(sents1, sents2):
+                    sent1 = torch.tensor(sent1)
+                    sent2 = torch.tensor(sent2)
+                    f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                    features.append(PytorchWrapper._tensor_to_numpy(f))
+            all_features = torch.tensor(features)
+
+        else:
+            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
+                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
+                text_a = [batch_example.text_a for batch_example in batch_examples]
+                sents = [last_word_encoding_glue(self._encode_sentence(elm, readout_layer)[readout_layer[0]]) for elm in tqdm(text_a)]
+                for sent in sents:
+                    sent = torch.tensor(sent)
+                    features.append(PytorchWrapper._tensor_to_numpy(sent))
+            all_features = torch.tensor(features)
+
+        if output_mode == "classification":
+            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.float)
+
+        dataset = TensorDataset(all_features, all_labels)
+        return dataset
 
     default_layers = ['lstm/lstm_0/control_dependency', 'lstm/lstm_1/control_dependency']
 

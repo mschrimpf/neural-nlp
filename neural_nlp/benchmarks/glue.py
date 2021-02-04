@@ -59,10 +59,8 @@ class DecoderHead(torch.nn.Module):
 
         if os.getenv('GLUEMODEL', 'transformer') == 'nontransformer':
             if args.benchmark in ['glue-cola', 'glue-sst-2']:  # single-sentence benchmarks
-                logger.info("***** Parsed environment variable nontransformer, COLA! *****")
                 self.linear = nn.Linear(features_size, num_labels) #like this or concatenate 4 times, i.e., also times 4?
             else:
-                logger.info("***** Parsed environment variable nontransformer! *****")
                 self.linear = nn.Linear(features_size * 4, num_labels)  # *4 due to concatenation
         else:
             self.linear = nn.Linear(features_size, num_labels)
