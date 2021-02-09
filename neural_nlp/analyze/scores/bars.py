@@ -199,7 +199,7 @@ def _plot_predictor(title, data, benchmark_labels, color='#ababab', ylim=None):
     x, y, yerr, p = data.index / 1.5, data['r'], data['err'], data['p']
     ax.bar(x, height=y, yerr=yerr, align='center', width=width, color=color, alpha=0.5, edgecolor='none',
            ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
-    for i, (xpos, ypos, pvalue) in enumerate(zip(x, y, p)):
+    for i, (xpos, pvalue) in enumerate(zip(x, p)):
         ax.text(x=xpos + .15 * width / 2, y=.01, s=benchmark_labels[i],
                 rotation=90, rotation_mode='anchor',
                 fontdict=dict(fontsize=20), color='black')  # 16
