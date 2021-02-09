@@ -14,6 +14,7 @@ from tqdm import tqdm
 from brainscore.benchmarks import Benchmark
 from brainscore.metrics import Score
 from brainscore.metrics.rdm import RDM, RDMSimilarity, RDMCrossValidated
+from brainscore.metrics.cka import CKACrossValidated
 from brainscore.metrics.regression import linear_regression, pearsonr_correlation, CrossRegressedCorrelation
 from brainscore.metrics.transformations import CartesianProduct, CrossValidation, apply_aggregate
 from brainscore.utils import LazyLoad
@@ -287,7 +288,8 @@ class Blank2014fROIRDM(Blank2014fROIEncoding):
     def apply_metric(self, source_assembly, target_assembly):
         # transformation sub-selection would be left with only one coordinate for the neuroid dimension
         # to work around this, we add another coord that will prevent the MultiIndex from collapsing
-        target_assembly['neuroid_id'] = 'neuroid', target_assembly['subject_UID'].values
+        if not hasattr(target_assembly, 'neuroid_id'):
+            target_assembly['neuroid_id'] = 'neuroid', target_assembly['subject_UID'].values
         target_assembly = target_assembly.__class__(target_assembly)  # reconstruct to ensure proper indexing
         cross_scores = self._cross(target_assembly, apply=
         lambda cross_assembly: super(Blank2014fROIRDM, self).apply_metric(source_assembly, cross_assembly))
@@ -306,6 +308,25 @@ class Blank2014fROIRDM(Blank2014fROIEncoding):
 
     def post_process_ceilings(self, scores):
         return scores
+
+
+class Blank2014fROICKA(Blank2014fROIRDM):
+    """
+    data source:
+        Blank et al., Journal of Neurophysiology 2014
+        https://journals.physiology.org/doi/full/10.1152/jn.00884.2013
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(Blank2014fROICKA, self).__init__(*args, **kwargs)
+        self._metric = CKACrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
+                                        kfold=True, test_size=None))
+
+    @property
+    def ceiling(self):
+        return super(Blank2014VoxelEncoding, self).ceiling
 
 
 class _PereiraBenchmark(Benchmark):
@@ -328,6 +349,7 @@ class _PereiraBenchmark(Benchmark):
         return self._identifier
 
     def _metric(self, source_assembly, target_assembly):
+        """ for ceiling compute """
         cross_scores = self._cross(target_assembly, apply=
         lambda cross_assembly: self._apply_cross(source_assembly, cross_assembly))
         score = self._average_cross_scores(cross_scores)
@@ -351,8 +373,8 @@ class _PereiraBenchmark(Benchmark):
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
         _logger.info('Scoring across experiments & atlases')
-        cross_scores = self._cross(self._target_assembly, apply=
-        lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
+        cross_scores = self._cross(self._target_assembly,
+                                   apply=lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
         raw_scores = cross_scores.raw
         raw_neuroids = apply_aggregate(lambda values: values.mean('split').mean('experiment'), raw_scores)
 
@@ -573,6 +595,25 @@ class PereiraRDM(_PereiraSubjectWise):
         return super(PereiraRDM, self).ceiling
 
 
+class PereiraCKA(_PereiraSubjectWise):
+    """
+    data source:
+        Pereira et al., nature communications 2018
+        https://www.nature.com/articles/s41467-018-03068-4?fbclid=IwAR0W7EZrnIFFO1kvANgeOEICaoDG5fhmdHipazy6n-APUJ6lMY98PkvuTyU
+    """
+
+    def __init__(self, **kwargs):
+        metric = CKACrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord=None, splits=5,
+                                        kfold=True, test_size=None))
+        super(PereiraCKA, self).__init__(metric=metric, **kwargs)
+
+    @property
+    def ceiling(self):
+        return super(_PereiraSubjectWise, self).ceiling
+
+
 class _Fedorenko2016:
     """
     data source:
@@ -728,7 +769,35 @@ class Fedorenko2016V3NonLangEncoding(Fedorenko2016Encoding):
         return super(Fedorenko2016V3NonLangEncoding, self).ceiling
 
 
-class Fedorenko2016V3RDM(_Fedorenko2016):
+class _Fedorenko2016V3SubjectWise(_Fedorenko2016):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
+
+    def __init__(self, identifier, metric):
+        super(_Fedorenko2016V3SubjectWise, self).__init__(identifier=identifier, metric=metric)
+        self._ceiler.extrapolation_dimension = 'subject_UID'
+        self._cross = CartesianProduct(dividers=['subject_UID'])
+
+    @load_s3(key='Fedorenko2016v3')
+    def load_assembly(self):
+        return LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+
+    def apply_metric(self, source_assembly, target_assembly):
+        cross_scores = self._cross(target_assembly, apply=
+        lambda cross_assembly: super(_Fedorenko2016V3SubjectWise, self).apply_metric(source_assembly, cross_assembly))
+        score = cross_scores.median(['subject_UID'])
+        score.attrs['raw'] = cross_scores
+        return score
+
+    def ceiling_normalize(self, score):
+        score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
+        return score
+
+
+class Fedorenko2016V3RDM(_Fedorenko2016V3SubjectWise):
     """
     data source:
         Fedorenko et al., PNAS 2016
@@ -743,28 +812,28 @@ class Fedorenko2016V3RDM(_Fedorenko2016):
                                         # even though `train` is not needed, CrossValidation still splits it that way
                                         splits=5, kfold=True, test_size=None))
         super(Fedorenko2016V3RDM, self).__init__(identifier=identifier, metric=metric)
-        self._ceiler.extrapolation_dimension = 'subject_UID'
-        self._cross = CartesianProduct(dividers=['subject_UID'])
 
-    @load_s3(key='Fedorenko2016v3')
-    def load_assembly(self):
-        return LazyLoad(lambda: load_Fedorenko2016(electrodes='language', version=3))
+    # @property
+    # @load_s3(key='Fedorenko2016v3-rdm-ceiling')
+    # def ceiling(self):
+    #     return super(Fedorenko2016V3RDM, self).ceiling
 
-    @property
-    @load_s3(key='Fedorenko2016v3-rdm-ceiling')
-    def ceiling(self):
-        return super(Fedorenko2016V3RDM, self).ceiling
 
-    def apply_metric(self, source_assembly, target_assembly):
-        cross_scores = self._cross(target_assembly, apply=
-        lambda cross_assembly: super(Fedorenko2016V3RDM, self).apply_metric(source_assembly, cross_assembly))
-        score = cross_scores.median(['subject_UID'])
-        score.attrs['raw'] = cross_scores
-        return score
+class Fedorenko2016V3CKA(_Fedorenko2016V3SubjectWise):
+    """
+    data source:
+        Fedorenko et al., PNAS 2016
+        https://www.pnas.org/content/113/41/E6256
+    """
 
-    def ceiling_normalize(self, score):
-        score = aggregate_ceiling(score.raw, ceiling=self.ceiling, subject_column='subject_UID')
-        return score
+    def __init__(self, identifier):
+        metric = CKACrossValidated(
+            comparison_coord='stimulus_id',
+            crossvalidation_kwargs=dict(split_coord='stimulus_id', stratification_coord='sentence_id',
+                                        # doesn't work because train_size is deemed too small.
+                                        # even though `train` is not needed, CrossValidation still splits it that way
+                                        splits=5, kfold=True, test_size=None))
+        super(Fedorenko2016V3CKA, self).__init__(identifier=identifier, metric=metric)
 
 
 def aggregate(score, combine_layers=True):
@@ -834,9 +903,12 @@ benchmark_pool = [
     ('Blank2014fROI-encoding', Blank2014fROIEncoding),
     # secondary benchmarks
     ('Pereira2018-rdm', PereiraRDM),
+    ('Pereira2018-cka', PereiraCKA),
     ('Fedorenko2016v3-rdm', Fedorenko2016V3RDM),
+    ('Fedorenko2016v3-cka', Fedorenko2016V3CKA),
     ('Fedorenko2016v3nonlang-encoding', Fedorenko2016V3NonLangEncoding),
     ('Blank2014fROI-rdm', Blank2014fROIRDM),
+    ('Blank2014fROI-cka', Blank2014fROICKA),
 ]
 for sentence_num in range(1, 10, 2):
     benchmark_pool.append((f'Blank2014sentence{sentence_num}fROI-encoding',
