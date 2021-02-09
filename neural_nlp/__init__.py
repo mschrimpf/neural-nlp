@@ -32,7 +32,10 @@ def score(benchmark, model, layers=None, model_impl=None, subsample=None):
 
     layer_scores = []
     for i, layer in enumerate(tqdm(layers, desc='layers')):
-        candidate = FixedLayer(model_impl, layer, prerun=layers if i == 0 else None)  # prerun everything for 1st layer
+        if any(benchmark.startswith(performance_prefix) for performance_prefix in ['wikitext', 'glue']):
+            candidate = StripLayersAfter(model_impl, layer=layer)
+        else:  # prerun everything for 1st layer
+            candidate = FixedLayer(model_impl, layer, prerun=layers if i == 0 else None)
         layer_score = benchmark_impl(candidate)
         layer_score = layer_score.expand_dims('layer')
         layer_score['layer'] = [layer]
@@ -61,4 +64,27 @@ class FixedLayer:
     def __setattr__(self, item, value):
         if item in ['_model', '_layer', '_prerun']:
             return super(FixedLayer, self).__setattr__(item, value)
+        return self._model.__setattr__(item, value)
+
+
+class StripLayersAfter:
+    def __init__(self, model, layer):
+        self._model = model
+        self._layer = layer
+
+    def __call__(self, *args, **kwargs):
+        return self._model(*args, **kwargs, layer=self._layer)
+
+    @property
+    def identifier(self):
+        return f"{self._model.identifier}-{self._layer}"
+
+    def __getattr__(self, item):
+        if item in ['_model', '_layer', '_strip_after', 'identifier']:
+            return super(StripLayersAfter, self).__getattr__(item)
+        return self._model.__getattr__(item)
+
+    def __setattr__(self, item, value):
+        if item in ['_model', '_layer', '_strip_after']:
+            return super(StripLayersAfter, self).__setattr__(item, value)
         return self._model.__setattr__(item, value)
