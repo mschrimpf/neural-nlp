@@ -32,14 +32,11 @@ def _permutation_test(pooled, size1, size2):
 
 
 def model_training_diff(model='glove', benchmark='Pereira2018-encoding'):
-    trained = score(benchmark=benchmark, model=model)
-    untrained = score(benchmark=benchmark, model=f'{model}-untrained')
-    # get per-subject scores. do not need to worry about ceiling because it is identical due to same benchmark
-    trained, untrained = trained.raw.raw, untrained.raw.raw
-    trained, untrained = trained.groupby('subject').median(), untrained.groupby('subject').median()
-    # test difference
-    t, p = ttest_ind(trained, untrained)
-    logger.info(f"{model} difference on {benchmark}: t={t}, p={p}")
+    from neural_nlp.analyze.scores.bars import retrieve_scores
+    scores = retrieve_scores(benchmark, models=[model, f"{model}-untrained"])
+    untrained_rows = np.array([model.endswith('-untrained') for model in scores['model']])
+    trained, untrained = scores[~untrained_rows], scores[untrained_rows]
+    logger.info(f"{model} trained score: {trained['score'].squeeze()}, untrained score: {untrained['score'].squeeze()}")
 
 
 def interaction_test(data, category_column='category', compare_only=None, num_bootstraps=1000, bootstrap_size=.9):
