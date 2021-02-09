@@ -13,7 +13,7 @@ from scipy.signal import savgol_filter
 from neural_nlp import model_layers
 from neural_nlp.analyze import savefig
 from neural_nlp.analyze.scores import collect_scores, models as all_models, model_colors, \
-    fmri_atlases, shaded_errorbar, average_adjacent
+    fmri_atlases, shaded_errorbar, average_adjacent, benchmark_label_replace
 
 _logger = logging.getLogger(__name__)
 
@@ -115,25 +115,22 @@ def layer_preference_single(model='gpt2-xl',
     data = [average_adjacent(d) for d in data]
 
     fig, axes = pyplot.subplots(figsize=(15, 6), nrows=1, ncols=len(benchmarks), sharey=True)
-    for benchmark_iter, (ax, benchmark_name, benchmark_data) in enumerate(zip(axes.flatten(), benchmarks, data)):
-        ax.set_title(benchmark_name)
+    axes = axes.flatten() if len(benchmarks) > 1 else [axes]
+    for benchmark_iter, (ax, benchmark_name, benchmark_data) in enumerate(zip(axes, benchmarks, data)):
+        ax.set_title(benchmark_label_replace[benchmark_name])
         num_layers = len(benchmark_data['layer'])  # assume layers are correctly ordered
         relative_position = np.arange(num_layers) / (num_layers - 1)
         y, error = benchmark_data['score'], benchmark_data['error']
         if smoothing:
-            window_size = int(len(y) * 2 / 3)
-            if window_size % 2 == 0:  # if even
-                window_size += 1  # make odd (required for filter)
+            window_size = 11
             y = savgol_filter(y, window_size, 3)
         shaded_errorbar(x=relative_position, y=y, error=error, label=model, ax=ax,
                         alpha=0.4, color=model_colors[model],
                         linewidth=7.0 if model == 'gpt2-xl' else 1.0,
                         shaded_kwargs=dict(alpha=0.2, color=model_colors[model]))
-        if benchmark_iter > 0:
-            ax.set_yticklabels([])
-        else:
-            ax.set_ylabel('score')
-        ax.set_ylim([0, 1.2])
+        if benchmark_iter == 0:
+            ax.set_ylabel('Normalized Predictivity')
+        ax.set_ylim([0, 1.1])
     # xlabel
     fig.text(0.5, 0.01, 'relative layer position', ha='center')
     # save
