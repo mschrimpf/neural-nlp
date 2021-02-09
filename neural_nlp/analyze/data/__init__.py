@@ -96,12 +96,13 @@ def train_test_overlap(benchmark_identifier, unique=False, do_print=False):
                 test_ngrams = np.unique(test_ngrams)
             overlap = [test_ngram for test_ngram in test_ngrams if test_ngram in train_ngrams]
             overlaps.append({'split': split_index, 'ngram': ngram,
-                             'overlap': len(overlap) / len(test_words)})
+                             'overlap': 100 * len(overlap) / len(test_words)})
     overlaps = pd.DataFrame(overlaps)
     # plot
-    fig, ax = pyplot.subplots()
+    fig, ax = pyplot.subplots(figsize=[4, 4.8])
     seaborn.barplot(data=overlaps, x='ngram', y='overlap', facecolor='gray', ax=ax)
     ax.set_title(benchmark_identifier)
+    ax.set_ylabel('train/test overlap [%]')
     savefig(fig, f'train_test_overlap-{benchmark_identifier}' + ('-unique' if unique else ''))
 
     # print
