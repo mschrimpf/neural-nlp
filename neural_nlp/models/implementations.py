@@ -358,10 +358,9 @@ class LM1B(BrainModel, TaskModel):
 
     identifier = 'lm_1b'
 
-    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b'), reset_weights=False, glue_batch_size=64):
+    def __init__(self, weights=os.path.join(_ressources_dir, 'lm_1b'), reset_weights=False):
         super().__init__()
         self._logger = logging.getLogger(self.__class__.__name__)
-        self._glue_batch_size = glue_batch_size
         from lm_1b.lm_1b_eval import Encoder
         self._encoder = Encoder(vocab_file=os.path.join(weights, 'vocab-2016-09-10.txt'),
                                 pbtxt=os.path.join(weights, 'graph-2016-09-10.pbtxt'),
@@ -463,35 +462,27 @@ class LM1B(BrainModel, TaskModel):
         label_map = {label: i for i, label in enumerate(label_list)}
         features = []
 
-        readout_layer = [self.default_layers[-1]]
-
-        def last_word_encoding_glue(readout_activations):
-            # shape of activations here `words * hidden_dim` e.g. (13, 1024) > (1024,)
-            activations = readout_activations[-1, :]
-            return activations
-
         if examples[0].text_b is not None:
-            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
-                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
-                text_a = [batch_example.text_a for batch_example in batch_examples]
-                text_b = [batch_example.text_b for batch_example in batch_examples]
-                sents1 = [last_word_encoding_glue(self._encode_sentence(elm, readout_layer)[readout_layer[0]]) for elm in tqdm(text_a)]  # sentences x features encoding
-                sents2 = [last_word_encoding_glue(self._encode_sentence(elm, readout_layer)[readout_layer[0]]) for elm in tqdm(text_b)]
-                for sent1, sent2 in zip(sents1, sents2):
-                    sent1 = torch.tensor(sent1)
-                    sent2 = torch.tensor(sent2)
-                    f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
-                    features.append(PytorchWrapper._tensor_to_numpy(f))
+            text_a = [example.text_a for example in examples]
+            text_b = [example.text_b for example in examples]
+            sents1 = self._encoder(text_a)[0]
+            sents2 = self._encoder(text_b)[0]
+            for sent1, sent2 in zip(sents1, sents2):
+                sent1 = torch.tensor(sent1[-1].squeeze())
+                sent2 = torch.tensor(sent2[-1].squeeze())
+                f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features)
 
         else:
-            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
-                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
-                text_a = [batch_example.text_a for batch_example in batch_examples]
-                sents = [last_word_encoding_glue(self._encode_sentence(elm, readout_layer)[readout_layer[0]]) for elm in tqdm(text_a)]
-                for sent in sents:
-                    sent = torch.tensor(sent)
-                    features.append(PytorchWrapper._tensor_to_numpy(sent))
+            text_a = [example.text_a for example in examples]
+            # encoder returns a tuple (sentences_embeddings, sentences_word_ids).
+            # the sentences_embeddings encode every single word with a 1x1024 embedding,
+            # so we use the last word's embedding and squeeze the singular dimension.
+            sents = self._encoder(text_a)[0]
+            for sent in sents:
+                sent = torch.tensor(sent[-1].squeeze())
+                features.append(PytorchWrapper._tensor_to_numpy(sent))
             all_features = torch.tensor(features)
 
         if output_mode == "classification":
