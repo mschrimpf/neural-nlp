@@ -465,8 +465,8 @@ class LM1B(BrainModel, TaskModel):
         if examples[0].text_b is not None:
             text_a = [example.text_a for example in examples]
             text_b = [example.text_b for example in examples]
-            sents1 = self._encoder(text_a)[0]
-            sents2 = self._encoder(text_b)[0]
+            sents1 = self._encoder(text_a, progress_bar=True)[0]
+            sents2 = self._encoder(text_b, progress_bar=True)[0]
             for sent1, sent2 in zip(sents1, sents2):
                 sent1 = torch.tensor(sent1[-1].squeeze())
                 sent2 = torch.tensor(sent2[-1].squeeze())
@@ -479,7 +479,7 @@ class LM1B(BrainModel, TaskModel):
             # encoder returns a tuple (sentences_embeddings, sentences_word_ids).
             # the sentences_embeddings encode every single word with a 1x1024 embedding,
             # so we use the last word's embedding and squeeze the singular dimension.
-            sents = self._encoder(text_a)[0]
+            sents = self._encoder(text_a, progress_bar=True)[0]
             for sent in sents:
                 sent = torch.tensor(sent[-1].squeeze())
                 features.append(PytorchWrapper._tensor_to_numpy(sent))
