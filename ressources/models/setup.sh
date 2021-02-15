@@ -16,10 +16,6 @@ cd lm_1b
 ./setup.sh
 cd ..
 
-cd transformer
-./setup.sh
-cd ..
-
 cd fasttext
 ./setup.sh
 cd ..
