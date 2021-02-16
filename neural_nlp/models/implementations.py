@@ -917,23 +917,45 @@ class KeyedVectorModel(BrainModel, TaskModel):
                   and self._vocab[word].index < vocab_size]  # only top-k vocab words
         return np.array(tokens)
 
-    def glue_dataset(self, task, examples, label_list, output_mode, max_seq_length):
+    def _sent_mean(self, sentence_features):
+        sent_mean = np.mean(sentence_features, axis=0)  # average across words within a sentence
+        return sent_mean
+
+    def glue_dataset(self, examples, label_list, output_mode):
         import torch
         from torch.utils.data import TensorDataset
-        tokens = [np.concatenate((self.tokenize(example.text_a),) +
-                                 ((self.tokenize(example.text_b),) if example.text_b is not None else ()))
-                  for example in examples]
         label_map = {label: i for i, label in enumerate(label_list)}
-        labels = [label_map[label] for label in label_list]
+        features = []
 
-        # Convert to Tensors and build dataset   - 3688 * 128
-        # TODO: pad -- but how?
-        token_tensors = torch.tensor(tokens, dtype=torch.long)
+        if examples[0].text_b is not None:
+            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
+                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
+                text_a = [batch_example.text_a for batch_example in batch_examples]
+                text_b = [batch_example.text_b for batch_example in batch_examples]
+                sents1 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
+                sents2 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_b)]
+                for sent1, sent2 in zip(sents1, sents2):
+                    sent1 = torch.tensor(sent1)
+                    sent2 = torch.tensor(sent2)
+                    f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                    features.append(PytorchWrapper._tensor_to_numpy(f))
+            all_features = torch.tensor(features).float()
+        else:
+            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
+                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
+                text_a = [batch_example.text_a for batch_example in batch_examples]
+                sents = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
+                for sent in sents:
+                    sent = torch.tensor(sent)
+                    features.append(PytorchWrapper._tensor_to_numpy(sent))
+            all_features = torch.tensor(features).float()
+
         if output_mode == "classification":
-            all_labels = torch.tensor(labels, dtype=torch.long)
+            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.long)
         elif output_mode == "regression":
-            all_labels = torch.tensor(labels, dtype=torch.float)
-        dataset = TensorDataset(token_tensors, all_labels)
+            all_labels = torch.tensor([float(example.label) for example in examples], dtype=torch.float)
+
+        dataset = TensorDataset(all_features, all_labels)
         return dataset
 
     @property
