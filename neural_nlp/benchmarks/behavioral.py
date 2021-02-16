@@ -1,6 +1,7 @@
 """
 Behavioral benchmarks to probe match of model outputs against human outputs.
 """
+import re
 
 import logging
 import numpy as np
@@ -31,20 +32,21 @@ class Futrell2018Encoding(Benchmark):
         http://www.lrec-conf.org/proceedings/lrec2018/pdf/337.pdf
     """
 
-    def __init__(self, identifier):
+    def __init__(self, identifier, split_coord='word', unique_split_values=False):
         self._logger = logging.getLogger(fullname(self))
         self._identifier = identifier
         assembly = LazyLoad(self._load_assembly)
         self._target_assembly = assembly
         regression = linear_regression(xarray_kwargs=dict(
-            stimulus_coord='word_id', neuroid_coord='subject_id'))
+            stimulus_coord='word_id', neuroid_coord='subject_id'))  # used for sorting -- keep at word_id
         correlation = pearsonr_correlation(xarray_kwargs=dict(
-            correlation_coord='word_id', neuroid_coord='subject_id'))
+            correlation_coord='word_id', neuroid_coord='subject_id'))  # used for sorting -- keep at word_id
         self._metric = CrossRegressedCorrelation(
             regression=regression, correlation=correlation,
             crossvalidation_kwargs=dict(splits=5, kfold=True,
-                                        split_coord='word_id', stratification_coord='sentence_id'))
-        self._cross = CartesianProduct(dividers=['subject_id'])
+                                        split_coord=split_coord, stratification_coord='sentence_id',
+                                        unique_split_values=unique_split_values))
+        self._cross_subject = CartesianProduct(dividers=['subject_id'])
         self._ceiler = self.ManySubjectExtrapolationCeiling(subject_column='subject_id')
 
     @property
@@ -58,12 +60,20 @@ class Futrell2018Encoding(Benchmark):
         assembly = assembly.rename({'subjects': 'neuroid'})
         assembly['neuroid_id'] = 'neuroid', assembly['subject_id']
         assembly = NeuroidAssembly(assembly)
-        # this one subject only has 6 reading times that are above threshold (i.e. not nan). That is not enough for
-        # 5-fold cross-validation where we cannot compute correlation on a single data point.
-        assembly = assembly[{'neuroid': [subject != 'A2VG5S4UL5UGRS' for subject in assembly['subject_id'].values]}]
+        # A2VG5S4UL5UGRS only has 6 reading times that are above threshold (i.e. not nan). That is not enough for
+        #   5-fold cross-validation where we cannot compute correlation on a single data point.
+        # A1I02VZ07MZB7F has too few values for stratified cross-validation
+        #   (n_splits=5 cannot be greater than the number of members in each class.)
+        assembly = assembly[{'neuroid': [subject not in ['A2VG5S4UL5UGRS', 'A1I02VZ07MZB7F']
+                                         for subject in assembly['subject_id'].values]}]
+        # add word_core that treats e.g. "\This" and "This" as the same words (to split over)
+        assembly.stimulus_set['word_core'] = [re.sub(r'[^\w\s]', '', word)
+                                              for word in assembly.stimulus_set['word'].values]
+        assembly['word_core'] = 'presentation', [re.sub(r'[^\w\s]', '', word) for word in assembly['word'].values]
+
         return assembly
 
-    def _apply_cross(self, source_assembly, cross_assembly):
+    def _apply_within_subject(self, source_assembly, cross_assembly):
         # for several subjects there are many nans when their performance was below threshold. We here drop those words
         not_nan = ~xarray.ufuncs.isnan(cross_assembly)
         cross_assembly = cross_assembly[not_nan]
@@ -84,12 +94,13 @@ class Futrell2018Encoding(Benchmark):
                                        copy_columns=('stimulus_id', 'word_id', 'sentence_id'))
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
         self._logger.info('Scoring model')
-        cross_scores = self._cross(self._target_assembly,
-                                   apply=lambda cross_assembly: self._apply_cross(model_activations, cross_assembly))
+        cross_subject_scores = self._cross_subject(
+            self._target_assembly,
+            apply=lambda cross_assembly: self._apply_within_subject(model_activations, cross_assembly))
         # normalize by ceiling
         # Note that we normalize by an overall ceiling, so the scores per subject are not normalized wrt. that subject
         # and should thus not be used by themselves. Only the aggregate makes sense to report
-        normalized_subject_scores = consistency(cross_scores.sel(aggregation='center'),
+        normalized_subject_scores = consistency(cross_subject_scores.sel(aggregation='center'),
                                                 self.ceiling.sel(aggregation='center'))
         score = normalized_subject_scores.median('subject_id')
         std = normalized_subject_scores.std('subject_id')
@@ -97,7 +108,7 @@ class Futrell2018Encoding(Benchmark):
         # the MultiIndex tends to mess things up, so we get rid of it here
         score, std = xr.DataArray(score).expand_dims('aggregation'), xr.DataArray(std).expand_dims('aggregation')
         score = Score(Score.merge(score, std))
-        score.attrs['raw'] = cross_scores
+        score.attrs['raw'] = cross_subject_scores
         score.attrs['ceiling'] = self.ceiling
         return score
 
@@ -320,8 +331,11 @@ class Futrell2018SentencesEncoding(Futrell2018Encoding):
         assembly = assembly[{'neuroid': [subject in keep_subjects for subject in assembly['subject_id'].values]}]
         return assembly
 
+
 benchmark_pool = [
-    ('Futrell2018-encoding', Futrell2018Encoding),
+    ('Futrell2018-encoding', dict()),
+    ('Futrell2018-unique_encoding', dict(unique_split_values=True)),
 ]
-benchmark_pool = {identifier: LazyLoad(lambda identifier=identifier, ctr=ctr: ctr(identifier=identifier))
-                  for identifier, ctr in benchmark_pool}
+benchmark_pool = {identifier: LazyLoad(
+    lambda identifier=identifier, kwargs=kwargs: Futrell2018Encoding(identifier=identifier, **kwargs))
+    for identifier, kwargs in benchmark_pool}
