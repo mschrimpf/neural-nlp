@@ -313,7 +313,6 @@ class SkipThoughts(BrainModel, TaskModel):
         features = []
 
         if examples[0].text_b is not None:
-            self._logger.debug("************** \n\n This benchmark requires two input sentences \n\n **************")
             for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
                 batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
                 text_a = [batch_example.text_a for batch_example in batch_examples]
@@ -327,8 +326,6 @@ class SkipThoughts(BrainModel, TaskModel):
                     features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features)
         else:
-            self._logger.debug(
-                "************** \n\n This benchmark requires only one input sentence \n\n **************")
             for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
                 batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
                 text_a = [batch_example.text_a for batch_example in batch_examples]
@@ -341,7 +338,8 @@ class SkipThoughts(BrainModel, TaskModel):
         if output_mode == "classification":
             all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.long)
         elif output_mode == "regression":
-            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.float)
+            all_labels = torch.tensor([float(example.label) for example in examples], dtype=torch.float)
+            # https://github.com/huggingface/transformers/blob/master/src/transformers/data/processors/glue.py#L138
 
         dataset = TensorDataset(all_features, all_labels)
         return dataset
