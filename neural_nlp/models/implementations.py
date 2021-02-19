@@ -926,26 +926,22 @@ class KeyedVectorModel(BrainModel, TaskModel):
         features = []
 
         if examples[0].text_b is not None:
-            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
-                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
-                text_a = [batch_example.text_a for batch_example in batch_examples]
-                text_b = [batch_example.text_b for batch_example in batch_examples]
-                sents1 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
-                sents2 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_b)]
-                for sent1, sent2 in zip(sents1, sents2):
-                    sent1 = torch.tensor(sent1)
-                    sent2 = torch.tensor(sent2)
-                    f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
-                    features.append(PytorchWrapper._tensor_to_numpy(f))
+            text_a = [example.text_a for example in examples]
+            text_b = [example.text_b for example in examples]
+            sents1 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
+            sents2 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_b)]
+            for sent1, sent2 in zip(sents1, sents2):
+                sent1 = torch.tensor(sent1)
+                sent2 = torch.tensor(sent2)
+                f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features).float()
         else:
-            for example_batch in tqdm(range(0, len(examples), self._glue_batch_size)):
-                batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
-                text_a = [batch_example.text_a for batch_example in batch_examples]
-                sents = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
-                for sent in sents:
-                    sent = torch.tensor(sent)
-                    features.append(PytorchWrapper._tensor_to_numpy(sent))
+            text_a = [example.text_a for example in examples]
+            sents = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
+            for sent in sents:
+                sent = torch.tensor(sent)
+                features.append(PytorchWrapper._tensor_to_numpy(sent))
             all_features = torch.tensor(features).float()
 
         if output_mode == "classification":
