@@ -931,8 +931,8 @@ class KeyedVectorModel(BrainModel, TaskModel):
             sents1 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
             sents2 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_b)]
             for sent1, sent2 in zip(sents1, sents2):
-                sent1 = torch.tensor(sent1)
-                sent2 = torch.tensor(sent2)
+                sent1 = torch.tensor(sent1, dtype=torch.float64)
+                sent2 = torch.tensor(sent2, dtype=torch.float64)
                 f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
                 features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features).float()
