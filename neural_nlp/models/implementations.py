@@ -222,6 +222,43 @@ class ETM(BrainModel, TaskModel):
                   and self.vocab_index[word] < vocab_size]  # only top-k vocab words
         return np.array(tokens)
 
+    def _sent_mean(self, sentence_features):
+        sent_mean = np.mean(sentence_features, axis=0)  # average across words within a sentence
+        return sent_mean
+
+    def glue_dataset(self, examples, label_list, output_mode):
+        import torch
+        from torch.utils.data import TensorDataset
+        label_map = {label: i for i, label in enumerate(label_list)}
+        features = []
+
+        if examples[0].text_b is not None:
+            text_a = [example.text_a for example in examples]
+            text_b = [example.text_b for example in examples]
+            sents1 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
+            sents2 = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_b)]
+            for sent1, sent2 in zip(sents1, sents2):
+                sent1 = torch.tensor(sent1, dtype=torch.float64)
+                sent2 = torch.tensor(sent2, dtype=torch.float64)
+                f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
+                features.append(PytorchWrapper._tensor_to_numpy(f))
+            all_features = torch.tensor(features).float()
+        else:
+            text_a = [example.text_a for example in examples]
+            sents = [self._sent_mean(self._encode_sentence(sent)) for sent in tqdm(text_a)]
+            for sent in sents:
+                sent = torch.tensor(sent)
+                features.append(PytorchWrapper._tensor_to_numpy(sent))
+            all_features = torch.tensor(features).float()
+
+        if output_mode == "classification":
+            all_labels = torch.tensor([label_map[example.label] for example in examples], dtype=torch.long)
+        elif output_mode == "regression":
+            all_labels = torch.tensor([float(example.label) for example in examples], dtype=torch.float)
+
+        dataset = TensorDataset(all_features, all_labels)
+        return dataset
+
     @property
     def features_size(self):
         return self.emb_size
