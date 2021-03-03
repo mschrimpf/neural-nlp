@@ -240,6 +240,10 @@ class ETM(BrainModel, TaskModel):
             for sent1, sent2 in zip(sents1, sents2):
                 sent1 = torch.tensor(sent1, dtype=torch.float64)
                 sent2 = torch.tensor(sent2, dtype=torch.float64)
+                if np.isnan(sent1).all():
+                    sent1 = torch.ones(self.emb_size, dtype=sent1.dtype)
+                if np.isnan(sent2).all():
+                    sent2 = torch.ones(self.emb_size, dtype=sent2.dtype)
                 f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
                 features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features).float()
@@ -476,7 +480,7 @@ class LM1B(BrainModel, TaskModel):
                                                          self._encoder.t['target_weights_in']: weights})
             if i > 0:  # 0 is <S>
                 embeddings.append(lstm_emb)
-            #`embeddings` shape is now: words x layers x *layer_shapes
+            # `embeddings` shape is now: words x layers x *layer_shapes
         layer_activations = {}
         for i, layer in enumerate(layers):
             # embeddings is `words x layers x (1 x 1024)`
