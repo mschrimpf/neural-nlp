@@ -128,6 +128,7 @@ def train(train_dataset, features_model, decoder_head, run_evaluation,
                 train_batch_size * gradient_accumulation_steps)
     logger.info("  Gradient Accumulation steps = %d", gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", t_total)
+    logger.info("  Device = %s", device)
 
     global_step = 0
     epochs_trained = 0
@@ -280,6 +281,8 @@ class GLUEBenchmark:
         set_seed(self.seed)
         max_seq_length = 128
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device == 'cpu':
+            logger.warning("Running on cpu (cuda not available)")
 
         # Prepare GLUE task
         if self.task_name not in processors:
