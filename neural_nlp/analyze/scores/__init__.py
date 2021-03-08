@@ -618,6 +618,8 @@ def Pereira_language_vs_other(best_layer=True):
 
 
 def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=False):
+    if all(b.startswith('glue') for b in data['benchmark']):
+        return data  # do not attempt to average for GLUE (layers sometimes nan)
     data = data.groupby(list(keep_columns)).agg(lambda g: g.mean(skipna=skipna))  # mean across non-keep columns
     return data.reset_index()
 
