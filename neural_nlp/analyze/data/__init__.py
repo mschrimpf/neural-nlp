@@ -59,7 +59,7 @@ def train_test_overlap(benchmark_identifier, unique=False, do_print=False):
                 presentation_values = {key: str(value) for key, value in presentation_values.items()}
 
             result.append(presentation_values)
-        return Score([np.nan],
+        return Score([0],
                      coords={**{"neuroid_id": ("neuroid", [0])},
                              **{subject_column: ("neuroid", [0]) for subject_column in set(subject_columns.values())}},
                      dims=["neuroid"])
@@ -76,7 +76,8 @@ def train_test_overlap(benchmark_identifier, unique=False, do_print=False):
     result = pd.DataFrame(result)
 
     # plot -- we're relying on the implicit ordering of train followed by test
-    stimuli_key = 'sentence' if not benchmark_identifier.startswith('Fedorenko2016') else 'word'
+    stimuli_key = 'sentence' if not any(benchmark_identifier.startswith(word_benchmark)
+                                        for word_benchmark in ['Fedorenko2016', 'Futrell2018']) else 'word'
     train_stimuli = result[stimuli_key][result['type'] == 'source_train'].values
     test_stimuli = result[stimuli_key][result['type'] == 'source_test'].values
     assert len(train_stimuli) == len(test_stimuli)
