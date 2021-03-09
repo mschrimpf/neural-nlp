@@ -346,4 +346,4 @@ class GLUEBenchmark:
 
 
 benchmark_pool = {f'glue-{task}': LazyLoad(lambda _task=task: GLUEBenchmark(_task))
-                  for task in ['cola', 'mnli', 'mrpc', 'sst-2', 'sts-b', 'qqp', 'qnli', 'rte', 'wnli']}
+                  for task in ['cola', 'mnli', 'mrpc', 'sst-2', 'sts-b', 'qqp', 'qnli', 'rte']}
