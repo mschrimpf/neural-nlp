@@ -358,11 +358,18 @@ class SkipThoughts(BrainModel, TaskModel):
                 batch_examples = examples[example_batch:example_batch + self._glue_batch_size]
                 text_a = [batch_example.text_a for batch_example in batch_examples]
                 text_b = [batch_example.text_b for batch_example in batch_examples]
-                sents1 = self._encoder.encode(text_a)  # sentences x features encoding
-                sents2 = self._encoder.encode(text_b)
+                try:
+                    sents1 = self._encoder.encode(text_a)  # sentences x features encoding
+                    sents2 = self._encoder.encode(text_b)
+                except ValueError:  # QQP seems to have an empty line which we'll just ignore
+                    self._logger.warning(f"Ignoring ValueError at batch {example_batch}", exc_info=True)
                 for sent1, sent2 in zip(sents1, sents2):
                     sent1 = torch.tensor(sent1)
                     sent2 = torch.tensor(sent2)
+                    if np.isnan(sent1).all():
+                        sent1 = torch.ones(sent2.shape, dtype=sent1.dtype)
+                    if np.isnan(sent2).all():
+                        sent2 = torch.ones(sent1.shape, dtype=sent2.dtype)
                     f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
                     features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features)
@@ -509,6 +516,10 @@ class LM1B(BrainModel, TaskModel):
             for sent1, sent2 in zip(sents1, sents2):
                 sent1 = torch.tensor(sent1[-1].squeeze())
                 sent2 = torch.tensor(sent2[-1].squeeze())
+                if np.isnan(sent1).all():
+                    sent1 = torch.ones(sent2.shape, dtype=sent1.dtype)
+                if np.isnan(sent2).all():
+                    sent2 = torch.ones(sent1.shape, dtype=sent2.dtype)
                 f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
                 features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features)
@@ -712,12 +723,17 @@ class _PytorchTransformerWrapper(BrainModel, TaskModel):
         inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
         if not any(self.identifier.startswith(prefix) for prefix in ['distilbert', 't5']):
             inputs["token_type_ids"] = (
-                batch[2] if not any(self.identifier.startswith(prefix) for prefix in ["bert", "xlnet", "albert"])
+                batch[2] if not any(self.identifier.startswith(prefix) for prefix in
+                                    ["bert", "xlnet", "albert", "roberta", "distilroberta", "xlm-roberta"])
                 else None)  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
         if self.identifier.startswith('t5'):
             # we already have a T5Wrapper in place that will convert input_ids to {encoder,decoder}_input_ids
             inputs['encoder_attention_mask'] = inputs['attention_mask']
             del inputs['attention_mask']
+        if self.identifier.startswith('transfo-xl-wt103'):
+            # transfo-xl does not accept arguments for attention_mask or token_type_ids
+            del inputs['attention_mask']
+            del inputs['token_type_ids']
         with torch.no_grad():
             features_outputs = self._model(**inputs)
         # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L811-L812
@@ -727,12 +743,21 @@ class _PytorchTransformerWrapper(BrainModel, TaskModel):
             # https://github.com/huggingface/transformers/blob/520e7f211926e07b2059bc8e21b668db4372e4db/src/transformers/modeling_bert.py#L454
             return sequence_output[:, 0]  # sentence features from first token (usually CLS)
         elif any(self.identifier.startswith(last_token_model) for last_token_model in
-                 ['distilgpt2', 'openaigpt', 'gpt', 'xlnet', 'ctrl']):
+                 ['distilgpt2', 'openaigpt', 'gpt', 'xlnet', 'ctrl', 'transfo-xl-wt103', 't5']):
             # use the last "real" token, ignoring padding by checking attention
             last_attended_token = []
             for batch in range(sequence_output.shape[0]):  # padding can be different per batch element
-                attention = inputs['attention_mask'][batch]
-                last_attention = torch.where(attention)[0].max()  # last index where attention is non-zero
+                if 'attention_mask' in inputs:  # only use features of last attended input
+                    attention = inputs['attention_mask'][batch]
+                    last_attention = torch.where(attention)[0].max()  # last index where attention is non-zero
+                else:  # no attention mask given, rely on last non-padding token instead
+                    pad_id = self._tokenizer.convert_tokens_to_ids(
+                        [self._tokenizer.pad_token if self._tokenizer.pad_token else ''])[0]
+                    first_pad_index = torch.where(inputs['input_ids'][batch] == pad_id)[0]
+                    if len(first_pad_index) > 0:  # padding found
+                        last_attention = first_pad_index[0] - 1  # use last token before padding started
+                    else: # no padding in input
+                        last_attention = sequence_output.shape[1] - 1  # use last token (no padding)
                 batch_token = sequence_output[batch, last_attention, :]
                 last_attended_token.append(batch_token)
             last_attended_token = torch.stack(last_attended_token)
@@ -974,6 +999,10 @@ class KeyedVectorModel(BrainModel, TaskModel):
             for sent1, sent2 in zip(sents1, sents2):
                 sent1 = torch.tensor(sent1, dtype=torch.float64)
                 sent2 = torch.tensor(sent2, dtype=torch.float64)
+                if np.isnan(sent1).all():
+                    sent1 = torch.ones(sent2.shape, dtype=sent1.dtype)
+                if np.isnan(sent2).all():
+                    sent2 = torch.ones(sent1.shape, dtype=sent2.dtype)
                 f = torch.cat([sent1, sent2, torch.abs(sent1 - sent2), sent1 * sent2], -1)
                 features.append(PytorchWrapper._tensor_to_numpy(f))
             all_features = torch.tensor(features).float()
