@@ -299,7 +299,7 @@ def task_predictors(target_benchmark='overall_neural-encoding',
     ax.set_ylabel('Correlation')
     ax.set_xticks([])
     ax.yaxis.set_major_formatter(score_formatter)
-    ax.set_ylim([-.5, .6])
+    ax.set_ylim([-.25, .55])
     ax.spines['bottom'].set_position(('data', 0))
     ax.spines['bottom'].set_linewidth(0.75)
     savefig(fig, Path(__file__).parent / "task_predictors")
