@@ -267,8 +267,11 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
                 else overall_benchmarks)]
         data = reduce(lambda left, right: pd.concat([left, right]), data)
         data = average_adjacent(data)
-        data = choose_best_scores(data).dropna()  # need to choose best layer per benchmark here before averaging
+        if benchmark != 'overall_glue': # single layer only
+            data = choose_best_scores(data).dropna()  # need to choose best layer per benchmark here before averaging
         data['score'][data['score'] >= 1] = 1  # more than 100% makes no sense and might skew averaging
+        # Note that the following averaging assumes that all scores are present.
+        # If that is not the case, a model not being scored on an easy/difficult benchmark will skew its average
         data = data.groupby(['model']).mean().reset_index()  # mean across benchmarks per model-layer
         data['layer'] = 'combined'
         data['benchmark'] = benchmark
@@ -286,10 +289,11 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
                 continue
             if not normalize:
                 model_scores = model_scores.raw
-            adjunct_columns = list(set(model_scores.dims) - {'aggregation'})
+            adjunct_columns = list(set(model_scores.dims) - {'aggregation', 'measure'})
             for adjunct_values in itertools.product(*[model_scores[column].values for column in adjunct_columns]):
                 adjunct_values = dict(zip(adjunct_columns, adjunct_values))
                 current_score = model_scores.sel(**adjunct_values)
+                current_score = current_score.squeeze() # squeeze out 1-dimensional 'measure', e.g. for glue-cola
                 center, error = get_score_center_err(current_score)
                 data.append({**adjunct_values,
                              **{'benchmark': benchmark, 'model': model, 'score': center, 'error': error}})
@@ -304,6 +308,8 @@ def collect_scores(benchmark, models, normalize=True, score_hook=None):
             data = data[data['measure'] == 'test_loss']
         if benchmark == 'glue-mnli':  # only consider mnli (not mnli-mm)
             data = data[data['eval_task'] == 'mnli']
+        if benchmark.startswith('glue-'):  # for some reason, several stored model scores for glue had duplicates
+            data = data.drop_duplicates(set(data.columns) - {'layer'})  # layer was different, but identical score
         os.environ['RESULTCACHING_CACHEDONLY'] = previous_resultcaching_cachedonly
     non_overlap = list(set(data['model']).symmetric_difference(set(models)))
     if len(non_overlap) > 0:
@@ -625,8 +631,8 @@ def average_adjacent(data, keep_columns=('benchmark', 'model', 'layer'), skipna=
 
 
 def get_score_center_err(s, combine_layers=True):
-    s = aggregate(s, combine_layers=combine_layers)
     if hasattr(s, 'aggregation'):
+        s = aggregate(s, combine_layers=combine_layers)
         center = s.sel(aggregation='center').values.tolist()
         try:
             error = s.sel(aggregation='error').values.tolist()
@@ -638,9 +644,10 @@ def get_score_center_err(s, combine_layers=True):
             if 'test_loss' in s['measure'].values:  # wikitext
                 s = s.sel(measure='test_loss')
             elif 'acc_and_f1' in s['measure'].values:  # glue with acc,f1,acc_and_f1
-                s = s.sel(measure='acc')
+                s = s.sel(measure='acc_and_f1')
             elif 'pearson' in s['measure'].values:  # glue with pearson,spearman,corr
-                s = s.sel(measure='pearson')
+                s = s.sel(measure='corr')
+        s = aggregate(s, combine_layers=combine_layers)
         s = s.values.tolist()
         return s, np.nan
     if isinstance(s, (int, float)):
