@@ -842,8 +842,13 @@ def aggregate(score, combine_layers=True):
     if hasattr(score, 'atlas') and score['atlas'].ndim > 0:
         score = score.mean('atlas')
     if hasattr(score, 'layer') and score['layer'].ndim > 0 and combine_layers:
-        max_score = score.sel(aggregation='center').max()
-        max_score = score[{'layer': (score.sel(aggregation='center') == max_score).values}].squeeze('layer', drop=True)
+        score_core = score.sel(aggregation='center') if hasattr(score, 'aggregation') else score
+        max_score = score_core.max()
+        max_score = score[{'layer': (score_core == max_score).values}]
+        if len(max_score['layer']) > 1:  # multiple layers achieved exactly the same score
+            layer_index = max_score['layer'].values[0].tolist().index(max_score['layer'].values[0])  # choose first one
+            max_score = max_score.isel(layer=[layer_index])
+        max_score = max_score.squeeze('layer', drop=True)
         max_score.attrs['raw'] = score.copy()
         score = max_score
     return score
