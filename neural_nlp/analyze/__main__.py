@@ -86,9 +86,11 @@ def paper_figures():
     tick_formatting = {benchmark: formatting for benchmark, formatting in zip(brain_benchmarks, [1, 2, 2, 1])}
     for benchmark in brain_benchmarks:
         ceiling.plot_extrapolation_ceiling(benchmark=benchmark, ytick_formatting_frequency=tick_formatting[benchmark])
-    # S2: cross-metrics
+    # S2: a) cross-metrics and bc) cross-layer
     _logger.info("Figures S2")
     scores.metric_generalizations()
+    scores.Pereira2018_experiment_correlations(best_layer=False, plot_correlation=False, plot_significance_stars=False)
+    scores.layer_deviations()
     # S4b: non language signal
     _logger.info("Figures S4a")
     scores.compare(benchmark1='Fedorenko2016v3-encoding', benchmark2='Fedorenko2016v3nonlang-encoding',

@@ -1,5 +1,3 @@
-import re
-
 import fire
 import itertools
 import logging
@@ -7,6 +5,7 @@ import matplotlib
 import numpy as np
 import os
 import pandas as pd
+import re
 import seaborn as sns
 import sys
 from functools import reduce
@@ -184,8 +183,9 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
                     plot_correlation=False, plot_significance_p=False, plot_significance_stars=True,
                     xlabel=None, ylabel=None, loss_xaxis=False, color=None,
                     tick_locator_base=0.2, xtick_locator_base=None, ytick_locator_base=None,
-                    scatter_size=20, errorbar_error_alpha=0.2,
-                    prettify_xticks=True, correlation_pos=(0.05, 0.8), ax=None, return_info=False, **kwargs):
+                    scatter_size=20, errorbar_error_alpha=0.2, scatter_alpha=None,
+                    prettify_xticks=True, prettify_yticks=True, correlation_pos=(0.05, 0.8), ax=None, return_info=False,
+                    **kwargs):
     assert len(scores1) == len(scores2)
     xtick_locator_base = xtick_locator_base or tick_locator_base
     ytick_locator_base = ytick_locator_base or tick_locator_base
@@ -195,7 +195,7 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
     markers, caps, bars = ax.errorbar(x=x, xerr=xerr, y=y, yerr=yerr, fmt='none', marker=None, ecolor=color, **kwargs)
     [bar.set_alpha(errorbar_error_alpha) for bar in bars]
     [cap.set_alpha(errorbar_error_alpha) for cap in caps]
-    ax.scatter(x=x, y=y, c=color, s=scatter_size)
+    ax.scatter(x=x, y=y, c=color, s=scatter_size, alpha=scatter_alpha)
     if score_annotations is not None:
         for annotation, _x, _y in zip(score_annotations, x, y):
             if not annotation:
@@ -215,8 +215,9 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
     elif prettify_xticks:
         ax.xaxis.set_major_locator(MultipleLocator(base=xtick_locator_base))
         ax.xaxis.set_major_formatter(score_formatter)
-    ax.yaxis.set_major_locator(MultipleLocator(base=ytick_locator_base))
-    ax.yaxis.set_major_formatter(score_formatter)
+    if prettify_yticks:
+        ax.yaxis.set_major_locator(MultipleLocator(base=ytick_locator_base))
+        ax.yaxis.set_major_formatter(score_formatter)
 
     r, p = pearsonr(x if not loss_xaxis else np.exp(x), y)
     info = {'r': r, 'p': p}
@@ -226,7 +227,7 @@ def _plot_scores1_2(scores1, scores2, score_annotations=None,
         ax.plot(correlation_x, b + m * np.array(correlation_x), color='black', linestyle='solid')
     ax.text(*correlation_pos, ha='left', va='center', transform=ax.transAxes,
             s=("$r=" + f"{(r * (-1 if loss_xaxis else 1)):.2f}$"[1:] + ('' if p < 0.05 else f" (n.s.)")
-               + (significance_p(p) if plot_significance_p else '')
+               + ((', ' + significance_p(p)) if plot_significance_p else '')
                + (significance_stars(p) if plot_significance_stars and p < 0.05 else '')))
     if not plot_significance_stars:
         for label, func in zip(['pearson', 'spearman'], [pearsonr, spearmanr]):
@@ -335,14 +336,15 @@ def Pereira2018_experiment_correlations(best_layer=False, **kwargs):
     colors = [model_colors[model.replace('-untrained', '')] for model in experiment2_scores['model'].values]
     colors = [to_rgba(named_color) for named_color in colors]
     fig, ax = pyplot.subplots(figsize=(6, 6))
-    _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, alpha=None if best_layer else .2,
+    _plot_scores1_2(experiment2_scores, experiment3_scores, color=colors, plot_significance_p=True,
                     score_annotations=None, xlabel='Pereira2018 (Exp. 2)', ylabel='Pereira2018 (Exp. 3)', ax=ax,
+                    errorbar_error_alpha=.1, scatter_alpha=.25,
                     **kwargs)
     ax.set_xlim([0, 1.1])
     ax.set_ylim([0, 1.1])
     scores = np.concatenate((experiment2_scores['score'].values, experiment3_scores['score'].values))
     ax.plot([min(scores), max(scores)], [min(scores), max(scores)], linestyle='dashed', color='gray')
-    savefig(fig, savename=Path(__file__).parent / ('fmri-correlations' + ('-best' if best_layer else '-layers')))
+    savefig(fig, savename=Path(__file__).parent / ('Pereira-correlations' + ('-best' if best_layer else '-layers')))
 
 
 def collect_Pereira_experiment_scores(best_layer=False):
@@ -351,24 +353,29 @@ def collect_Pereira_experiment_scores(best_layer=False):
     from neural_nlp.benchmarks.neural import consistency
 
     def get_experiment_score(score):
+        attrs = score.attrs
+        ceiling = score.ceiling
         raw_score = score.raw.raw.raw
+        raw_score = raw_score.sel(atlas='language')
         raw_score = raw_score.mean('split')
-        # redo what is done in `aggregate_neuroid_scores`, but keeping the experiment dimension
+        # redo what is done in `aggregate_ceiling`, but keeping the experiment dimension
         subject_scores = raw_score.groupby('subject').median('neuroid')
         center = subject_scores.median('subject')
+        center = consistency(center, ceiling.sel(aggregation='center'))  # normalize by ceiling
         subject_values = np.nan_to_num(subject_scores.values, nan=0)
-        error = median_absolute_deviation(subject_values, axis=subject_scores.dims.index('subject'))
+        subject_axis = subject_scores.dims.index(subject_scores['subject'].dims[0])
+        error = median_absolute_deviation(subject_values, axis=subject_axis)
         error = center.__class__(error, coords=center.coords, dims=center.dims)
-        center = consistency(center, score.ceiling.sel(aggregation='center').values)
-        error = consistency(error, score.ceiling.sel(aggregation='center').values)
         center, error = center.expand_dims('aggregation'), error.expand_dims('aggregation')
         center['aggregation'], error['aggregation'] = ['center'], ['error']
         score = Score.merge(center, error)
+        score.attrs = attrs
         return score
 
     # use best layer based on base average
     base_scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
-    base_scores = choose_best_scores(base_scores)
+    if best_layer:
+        base_scores = choose_best_scores(base_scores)
     layers = set((row.model, row.layer) for row in base_scores.itertuples())
     # now collect per-experiment scores and sub-select layer based on base scores
     scores = collect_scores(benchmark='Pereira2018-encoding', models=models, score_hook=get_experiment_score)
@@ -601,10 +608,107 @@ def metric_generalizations():
                         fontdict=dict(fontsize=14, fontweight='normal'))
             ax.set_title(comparison_metric)
         fig.text(x=0.007, y=1 - (.33 * benchmark_index + .15), s=benchmark_prefix,
-                 rotation=90, horizontalalignment='center',verticalalignment='center',
+                 rotation=90, horizontalalignment='center', verticalalignment='center',
                  fontdict=dict(fontsize=20, fontweight='bold'))
 
     savefig(fig, savename=Path(__file__).parent / f"metric_generalizations")
+
+
+def layer_deviations():
+    original_scores = collect_scores(benchmark='Pereira2018-encoding', models=models)
+    experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(best_layer=False)
+    # filter trained only
+    experiment2_scores = experiment2_scores[~experiment2_scores['model'].str.endswith('-untrained')]
+    experiment3_scores = experiment3_scores[~experiment3_scores['model'].str.endswith('-untrained')]
+    # compute deviation between the exp3 score of the layer chosen on exp2 and the max exp3 score (layer chosen on exp3)
+    deviations = []
+    assert (experiment2_scores['model'].values == experiment3_scores['model'].values).all()
+    for model in set(experiment2_scores['model']):
+        model_data2 = experiment2_scores[experiment2_scores['model'] == model]
+        model_data3 = experiment3_scores[experiment3_scores['model'] == model]
+        best_layer2 = model_data2['layer'][model_data2['score'] == max(model_data2['score'])].values[0]
+        best_layer3 = model_data3['layer'][model_data3['score'] == max(model_data3['score'])].values[0]
+        best3 = model_data3[model_data3['layer'] == best_layer3]
+        chosen = model_data3[model_data3['layer'] == best_layer2]
+        deviations.append({'model': model, 'best_layer': best_layer3, 'chosen_layer': best_layer2,
+                           'max_score': best3['score'].values[0], 'error1': best3['error'].values[0],
+                           'chosen_score': chosen['score'].values[0], 'error2': chosen['error'].values[0],
+                           'reference_error': original_scores['error']
+                           })
+    deviations = pd.DataFrame(deviations)
+    deviations['deviation'] = deviations['max_score'] - deviations['chosen_score']
+    deviations['avg_error'] = deviations.loc[:, ["error1", "error2"]].mean(axis=1)
+
+    # plot
+    fig, ax = pyplot.subplots()
+    width = 0.5
+    step = (len(models) + 1) * width
+    offset = len(models) / 2
+    for model_iter, model in enumerate(models):
+        model_score = deviations[deviations['model'] == model]
+        y, yerr = model_score['deviation'], model_score['avg_error']
+        x = np.arange(start=0, stop=len(y) * step, step=step)
+        model_x = x - offset * width + model_iter * width
+        ax.bar(model_x, height=y, yerr=yerr, width=width,
+               edgecolor='none', color=model_colors[model], ecolor='gray', error_kw=dict(elinewidth=1, alpha=.5))
+        for xpos in model_x:
+            ax.text(x=xpos + .6 * width / 2, y=.005, s=model_label_replace[model],
+                    rotation=90, rotation_mode='anchor',
+                    fontdict=dict(fontsize=6.5), color='gray')
+    ax.set_xticks([])
+    ax.set_ylim([-.15, 1])
+    ax.set_ylabel('train/test deviation of layer choice')
+    savefig(fig, savename=Path(__file__).parent / 'layer_deviations')
+
+
+def layer_position_generalizations():
+    experiment2_scores, experiment3_scores = collect_Pereira_experiment_scores(best_layer=False)
+    # filter trained only
+    experiment2_scores = experiment2_scores[~experiment2_scores['model'].str.endswith('-untrained')]
+    experiment3_scores = experiment3_scores[~experiment3_scores['model'].str.endswith('-untrained')]
+
+    # # compute layer positions
+    # define helper functions for human sorting following https://stackoverflow.com/a/5967539/2225200
+    def atoi(text):
+        return int(text) if text.isdigit() else text
+
+    def natural_keys(text):
+        """
+        alist.sort(key=natural_keys) sorts in human order
+        http://nedbatchelder.com/blog/200712/human_sorting.html
+        (See Toothy's implementation in the comments)
+        """
+        return [atoi(c) for c in re.split(r'(\d+)', text)]
+
+    layer_data2, layer_data3 = [], []
+    assert (experiment2_scores['model'].values == experiment3_scores['model'].values).all()
+    for model in set(experiment2_scores['model']):
+        model_data2 = experiment2_scores[experiment2_scores['model'] == model]
+        model_data3 = experiment3_scores[experiment3_scores['model'] == model]
+        best_layer2 = model_data2['layer'][model_data2['score'] == max(model_data2['score'])]
+        best_layer3 = model_data3['layer'][model_data3['score'] == max(model_data3['score'])]
+        all_layers = model_data2['layer'].tolist()
+        all_layers.sort(key=natural_keys)
+        layer_position2 = all_layers.index(best_layer2.values)
+        layer_position3 = all_layers.index(best_layer3.values)
+        layer_position2_relative = layer_position2 / len(all_layers)
+        layer_position3_relative = layer_position3 / len(all_layers)
+        layer_data2.append(
+            {'model': model, 'score': layer_position2_relative, 'position_absolute': layer_position2, 'error': 0})
+        layer_data3.append(
+            {'model': model, 'score': layer_position3_relative, 'position_absolute': layer_position3, 'error': 0})
+    layer_data2, layer_data3 = pd.DataFrame(layer_data2), pd.DataFrame(layer_data3)
+
+    # plot
+    colors = [model_colors[model.replace('-untrained', '')] for model in layer_data2['model'].values]
+    colors = [to_rgba(named_color) for named_color in colors]
+    fig, ax = pyplot.subplots(figsize=(6, 6))
+    _plot_scores1_2(layer_data2, layer_data3, color=colors,
+                    prettify_xticks=False, prettify_yticks=False,
+                    score_annotations=None,
+                    xlabel='Relative position of best layer on Exp. 2',
+                    ylabel='Relative position of best layer on Exp. 3', ax=ax)
+    savefig(fig, savename=Path(__file__).parent / 'layer_generalizations')
 
 
 def Pereira_language_vs_other(best_layer=True):
