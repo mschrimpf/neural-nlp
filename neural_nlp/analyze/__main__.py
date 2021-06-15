@@ -122,6 +122,8 @@ def paper_figures():
     # additional controls
     for benchmark in neural_benchmarks:
         data.train_test_overlap(benchmark)
+    # S12: first/best/last layer scores
+    layers.first_last_layer_scores()
 
 
 if __name__ == '__main__':

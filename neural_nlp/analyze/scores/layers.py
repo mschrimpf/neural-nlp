@@ -3,6 +3,7 @@ from collections import OrderedDict
 
 import fire
 import logging
+import matplotlib
 import numpy as np
 import seaborn
 import sys
@@ -13,7 +14,7 @@ from scipy.signal import savgol_filter
 from neural_nlp import model_layers
 from neural_nlp.analyze import savefig
 from neural_nlp.analyze.scores import collect_scores, models as all_models, model_colors, \
-    fmri_atlases, shaded_errorbar, average_adjacent, benchmark_label_replace
+    fmri_atlases, shaded_errorbar, average_adjacent, benchmark_label_replace, model_label_replace
 
 _logger = logging.getLogger(__name__)
 
@@ -183,6 +184,50 @@ def layer_training_delta(models=None):
     # save
     fig.tight_layout()
     savefig(fig, Path(__file__).parent / 'layer_ordering-deltas')
+
+
+def first_last_layer_scores(benchmarks=('Pereira2018-encoding', 'Fedorenko2016v3-encoding', 'Blank2014fROI-encoding')):
+    models = all_models
+    data = [collect_scores(benchmark=benchmark, models=models) for benchmark in benchmarks]
+    data = [average_adjacent(d) for d in data]
+
+    @matplotlib.ticker.FuncFormatter
+    def score_formatter(score, pos):
+        if score < 0 or score > 1:
+            return ""
+        return f"{score:.2f}"
+
+    fig, axes = pyplot.subplots(figsize=(15, 15), nrows=len(benchmarks), ncols=1, sharey=False)
+    width = 0.5
+    for benchmark_iter, (benchmark, benchmark_data) in enumerate(zip(benchmarks, data)):
+        ax = axes[benchmark_iter]
+        for model_iter, model in enumerate(models):
+            model_data = benchmark_data[benchmark_data['model'] == model]
+            best_score = model_data['score'].max()
+            best_score_error = model_data[model_data['score'] == best_score]['error']
+            ax.errorbar(x=model_iter, y=best_score, yerr=best_score_error,
+                        marker='.', color='black',
+                        label='best layer' if model_iter == len(models) - 1 else None)
+            if len(model_data) > 1:
+                first_score, first_score_error = model_data['score'].values[0], model_data['error'].values[0]
+                ax.errorbar(x=model_iter - 0.2 * width, y=first_score, yerr=first_score_error,
+                            marker='.', color='lightgray',
+                            label='first layer' if model_iter == len(models) - 1 else None)
+                last_score, last_score_error = model_data['score'].values[-1], model_data['error'].values[-1]
+                ax.errorbar(x=model_iter + 0.2 * width, y=last_score, yerr=last_score_error,
+                            marker='.', color='gray',
+                            label='last layer' if model_iter == len(models) - 1 else None)
+        if benchmark_iter < len(benchmarks) - 1:
+            ax.set_xticks([])
+        else:
+            ax.set_xticks(np.arange(len(models)))
+            ax.set_xticklabels([model_label_replace[model] for model in models], rotation=90)
+        if benchmark_iter == 0:
+            ax.legend()
+        ax.set_ylabel('Normalized Predictivity')
+        ax.set_title(benchmark_label_replace[benchmark])
+        ax.yaxis.set_major_formatter(score_formatter)
+    savefig(fig, Path(__file__).parent / 'first_layer_layer_scores')
 
 
 if __name__ == '__main__':
