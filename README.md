@@ -1,8 +1,8 @@
 
-# Language Brain-Score
+# The neural architecture of language: Integrative modeling converges on predictive processing 
 
 Code accompanying the paper 
-[Artificial Neural Networks Accurately Predict Language Processing in the Brain](https://www.biorxiv.org/content/early/2020/06/27/2020.06.26.174482).
+[The neural architecture of language: Integrative modeling converges on predictive processing](https://www.biorxiv.org/content/10.1101/2020.06.26.174482v3) by Schrimpf, Blank, Tuckute, Kauf, Hosseini, Kanwisher, Tenenbaum, and Fedorenko.
 
 Large-scale evaluation of neural network language models 
 as predictive models of human language processing.
