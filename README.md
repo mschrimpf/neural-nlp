@@ -2,7 +2,7 @@
 # The neural architecture of language: Integrative modeling converges on predictive processing 
 
 Code accompanying the paper 
-[The neural architecture of language: Integrative modeling converges on predictive processing](https://www.biorxiv.org/content/10.1101/2020.06.26.174482v3) by Schrimpf, Blank, Tuckute, Kauf, Hosseini, Kanwisher, Tenenbaum, and Fedorenko.
+[The neural architecture of language: Integrative modeling converges on predictive processing](https://www.pnas.org/content/118/45/e2105646118) by Schrimpf, Blank, Tuckute, Kauf, Hosseini, Kanwisher, Tenenbaum, and Fedorenko.
 
 Large-scale evaluation of neural network language models 
 as predictive models of human language processing.
@@ -40,7 +40,8 @@ If you use this work, please cite
 	author = {Schrimpf, Martin and Blank, Idan and Tuckute, Greta and Kauf, Carina and Hosseini, Eghbal A. and Kanwisher, Nancy and Tenenbaum, Joshua and Fedorenko, Evelina},
 	title = {The neural architecture of language: Integrative modeling converges on predictive processing},
 	year = {2021},
-	journal = {Proceedings of the National Academy of Sciences}
+	journal = {Proceedings of the National Academy of Sciences},
+	url = {https://www.pnas.org/content/118/45/e2105646118}
 }
 
 ```
