@@ -2,7 +2,7 @@ import logging
 from collections import OrderedDict
 
 import numpy as np
-from brainio_base.assemblies import walk_coords, array_is_element, BehavioralAssembly
+from brainio.assemblies import walk_coords, array_is_element, BehavioralAssembly
 from numpy.random.mtrand import RandomState
 from tqdm import tqdm
 

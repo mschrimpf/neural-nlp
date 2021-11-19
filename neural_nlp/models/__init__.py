@@ -3,7 +3,7 @@ import sys
 from collections import OrderedDict
 
 import argparse
-from brainio_base.assemblies import merge_data_arrays
+from brainio.assemblies import merge_data_arrays
 from numpy.random.mtrand import RandomState
 
 from neural_nlp.models.implementations import model_pool, load_model, model_layers

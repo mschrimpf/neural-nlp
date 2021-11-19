@@ -5,7 +5,7 @@ import matplotlib
 import numpy as np
 import seaborn
 import sys
-from brainio_base.assemblies import walk_coords
+from brainio.assemblies import walk_coords
 from matplotlib import pyplot
 from matplotlib.ticker import MaxNLocator
 from numpy.random.mtrand import RandomState

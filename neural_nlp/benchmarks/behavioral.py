@@ -7,8 +7,8 @@ import logging
 import numpy as np
 import xarray
 import xarray as xr
-from brainio_base.assemblies import NeuroidAssembly
-from brainio_collection.fetch import fullname
+from brainio.assemblies import NeuroidAssembly
+from brainio.fetch import fullname
 from numpy.random.mtrand import RandomState
 from tqdm import tqdm
 

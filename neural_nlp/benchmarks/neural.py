@@ -6,7 +6,7 @@ import warnings
 import itertools
 import logging
 import numpy as np
-from brainio_base.assemblies import DataAssembly, walk_coords, merge_data_arrays, array_is_element
+from brainio.assemblies import DataAssembly, walk_coords, merge_data_arrays, array_is_element
 from numpy.random.mtrand import RandomState
 from scipy.stats import median_absolute_deviation
 from tqdm import tqdm
