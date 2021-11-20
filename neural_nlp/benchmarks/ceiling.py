@@ -1,8 +1,8 @@
 import itertools
 import logging
 import numpy as np
-from brainio_base.assemblies import DataAssembly, merge_data_arrays, walk_coords, array_is_element
-from brainio_collection.fetch import fullname
+from brainio.assemblies import DataAssembly, merge_data_arrays, walk_coords, array_is_element
+from brainio.fetch import fullname
 from numpy import AxisError
 from numpy.random.mtrand import RandomState
 from scipy.optimize import curve_fit

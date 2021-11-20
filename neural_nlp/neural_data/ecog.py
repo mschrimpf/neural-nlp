@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import scipy.io as sio
 import xarray as xr
-from brainio_base.assemblies import NeuroidAssembly
+from brainio.assemblies import NeuroidAssembly
 from pathlib import Path
 from scipy import stats
 

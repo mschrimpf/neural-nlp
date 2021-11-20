@@ -3,7 +3,7 @@ import re
 import numpy as np
 import pandas as pd
 import seaborn
-from brainio_base.assemblies import walk_coords
+from brainio.assemblies import walk_coords
 from matplotlib import pyplot
 from pathlib import Path
 

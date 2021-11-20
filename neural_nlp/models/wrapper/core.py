@@ -4,7 +4,7 @@ import logging
 
 import functools
 import numpy as np
-from brainio_base.assemblies import NeuroidAssembly, walk_coords
+from brainio.assemblies import NeuroidAssembly, walk_coords
 from tqdm import tqdm
 
 from brainscore.utils import fullname
