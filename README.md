@@ -29,6 +29,10 @@ Other available benchmarks are e.g. Pereira2018-encoding (takes a while to compu
 You can also specify different models to run -- 
 note that some of them require additional download of weights (run `ressources/setup.sh` for automated download).
 
+## Data
+When running a model on a benchmark, the data will automatically be downloaded from S3 (e.g. https://github.com/mschrimpf/neural-nlp/blob/master/neural_nlp/benchmarks/neural.py#L361 for the Pereira2018 benchmark). 
+Costly ceiling estimates have also been precomputed and will be downloaded since they can take days to compute.
+
 ## Precomputed scores
 Scores for models run on the neural, behavioral, and computational-task benchmarks are also available, see the [`precomputed-scores.csv`](precomputed-scores.csv) file.
 You can re-create the figures in the paper using the [`analyze`](neural_nlp/analyze/__main__.py) scripts.
