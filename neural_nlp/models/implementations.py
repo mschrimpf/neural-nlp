@@ -10,7 +10,7 @@ import os
 import pandas as pd
 import pickle
 import tempfile
-from brainio_collection.fetch import fullname
+from brainio.fetch import fullname
 from numpy.random.mtrand import RandomState
 from pathlib import Path
 from tqdm import tqdm

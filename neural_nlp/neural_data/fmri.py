@@ -10,7 +10,7 @@ import pandas as pd
 import re
 import scipy.io
 import xarray as xr
-from brainio_base.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords, array_is_element, \
+from brainio.assemblies import merge_data_arrays, DataAssembly, gather_indexes, walk_coords, array_is_element, \
     NeuroidAssembly
 from nltk_contrib.textgrid import TextGrid
 from pathlib import Path
