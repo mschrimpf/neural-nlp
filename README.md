@@ -4,6 +4,8 @@
 Code accompanying the paper 
 [The neural architecture of language: Integrative modeling converges on predictive processing](https://www.biorxiv.org/content/10.1101/2020.06.26.174482v3) by Schrimpf, Blank, Tuckute, Kauf, Hosseini, Kanwisher, Tenenbaum, and Fedorenko.
 
+![Overview of Results](ressources/results-overview.png)
+
 Large-scale evaluation of neural network language models 
 as predictive models of human language processing.
 This pipeline compares dozens of state-of-the-art models and 4 human datasets (3 neural, 1 behavioral).
