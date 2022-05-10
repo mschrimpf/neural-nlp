@@ -9,7 +9,7 @@ Code accompanying the paper
 Large-scale evaluation of neural network language models 
 as predictive models of human language processing.
 This pipeline compares dozens of state-of-the-art models and 4 human datasets (3 neural, 1 behavioral).
-It builds on the [Brain-Score](www.Brain-Score.org) framework and can easily be extended with new models and datasets.
+It builds on the [Brain-Score](https://www.Brain-Score.org) framework and can easily be extended with new models and datasets.
 
 ## Installation
 ```bash
