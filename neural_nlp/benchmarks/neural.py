@@ -368,8 +368,7 @@ class _PereiraBenchmark(Benchmark):
 
     def __call__(self, candidate):
         stimulus_set = self._target_assembly.attrs['stimulus_set']
-        stimulus_set.loc[:, 'passage_id'] = stimulus_set['experiment'] + stimulus_set['passage_index'].astype(str)
-        model_activations = listen_to(candidate, stimulus_set, reset_column='passage_id')
+        model_activations = listen_to(candidate, stimulus_set)
         assert set(model_activations['stimulus_id'].values) == set(self._target_assembly['stimulus_id'].values)
 
         _logger.info('Scoring across experiments & atlases')
